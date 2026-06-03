@@ -8,6 +8,7 @@ import type {
   CurrentUserResponse,
   FootballGroupMembersResponse,
   FootballGroupsResponse,
+  GenerateTeamVersionResponse,
   HealthResponse,
   InitialPeerRatingReadinessResponse,
   MyInitialPeerRatingsResponse,
@@ -339,6 +340,20 @@ export async function submitMatchAttendance(
       method: "POST",
       token,
       body: JSON.stringify(input),
+    }
+  );
+}
+
+export async function generateTeamVersion(
+  token: string,
+  groupId: string,
+  matchId: string
+): Promise<GenerateTeamVersionResponse> {
+  return apiFetch<GenerateTeamVersionResponse>(
+    `/groups/${groupId}/matches/${matchId}/team-generations`,
+    {
+      method: "POST",
+      token,
     }
   );
 }

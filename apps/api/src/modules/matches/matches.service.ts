@@ -1,7 +1,14 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
-import type {
-  Match as PrismaMatch,
-  MatchAttendance as PrismaMatchAttendance,
+import {
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+} from '@nestjs/common';
+import { generateBalancedTeams } from '@fit-five/algorithm';
+import {
+  type InitialPeerRating as PrismaInitialPeerRating,
+  type Match as PrismaMatch,
+  type MatchAttendance as PrismaMatchAttendance,
+  type TeamGenerationVersion as PrismaTeamGenerationVersion,
 } from '@prisma/client';
 import type {
   CreateFootballMatchInput,
@@ -12,10 +19,16 @@ import type {
   GroupGoalkeeperMode,
   GroupMemberRole,
   SubmitMatchAttendanceInput,
+  TeamGenerationExplanation,
+  TeamGenerationInputSnapshot,
+  TeamGenerationScoreComponents,
+  TeamGenerationTeam,
 } from '@fit-five/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   canUpdateGroupSettings,
+  normalizeGroupGeneratorStyle,
+  normalizeGroupGoalkeeperMode,
   normalizeGroupMemberRole,
 } from '../groups/group-options';
 import {
@@ -25,6 +38,8 @@ import {
   normalizeAttendanceStatus,
   normalizeMatchStatus,
 } from './match-options';
+
+const INITIAL_PEER_RATING_READINESS_THRESHOLD = 3;
 
 export type InternalFootballMatchAttendance = {
   id: string;
@@ -55,6 +70,26 @@ export type InternalFootballMatch = {
   waitlistCount: number;
   attendances: InternalFootballMatchAttendance[];
   myAttendance: InternalFootballMatchAttendance | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type InternalTeamGenerationVersion = {
+  id: string;
+  matchId: string;
+  generatedByUserId: string;
+  versionNumber: number;
+  seed: string;
+  algorithmVersion: string;
+  status: 'draft' | 'locked';
+  teamA: TeamGenerationTeam;
+  teamB: TeamGenerationTeam;
+  teamATotal: number;
+  teamBTotal: number;
+  fairnessPercentage: number;
+  inputSnapshot: TeamGenerationInputSnapshot;
+  scoreComponents: TeamGenerationScoreComponents;
+  explanation: TeamGenerationExplanation;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -188,6 +223,158 @@ export class MatchesService {
     return this.toInternalMatch(match, actor.playerId);
   }
 
+  async generateTeamVersion(
+    clerkUserId: string,
+    groupId: string,
+    matchId: string,
+  ): Promise<InternalTeamGenerationVersion> {
+    const actorMembership = await this.requireGroupMembership(
+      clerkUserId,
+      groupId,
+    );
+    const match = await this.prisma.match.findFirst({
+      where: {
+        id: matchId,
+        groupId,
+        status: 'open',
+      },
+      include: {
+        group: {
+          include: {
+            settings: true,
+          },
+        },
+      },
+    });
+
+    if (!match) {
+      throw new ForbiddenException('Open match required.');
+    }
+
+    if (
+      !canUpdateGroupSettings(actorMembership.role) &&
+      match.organizerUserId !== actorMembership.userId
+    ) {
+      throw new ForbiddenException('Organizer role required.');
+    }
+
+    const confirmedAttendances = await this.prisma.matchAttendance.findMany({
+      where: {
+        matchId: match.id,
+        status: 'confirmed',
+      },
+      include: {
+        player: {
+          select: {
+            id: true,
+            preferredStyle: true,
+          },
+        },
+      },
+      orderBy: {
+        respondedAt: 'asc',
+      },
+    });
+
+    if (confirmedAttendances.length !== match.maxPlayers) {
+      throw new ConflictException(
+        'Confirmed player pool must be full before generation.',
+      );
+    }
+
+    const playerIds = confirmedAttendances.map(
+      (attendance) => attendance.playerId,
+    );
+    const playerRatings = await this.getGenerationPlayerRatings(
+      groupId,
+      playerIds,
+    );
+    const ratingByPlayerId = new Map(
+      playerRatings.map((rating) => [rating.playerId, rating]),
+    );
+    const missingReadyPlayers = playerIds.filter((playerId) => {
+      const rating = ratingByPlayerId.get(playerId);
+
+      return (
+        !rating ||
+        rating.ratingsReceived < INITIAL_PEER_RATING_READINESS_THRESHOLD
+      );
+    });
+
+    if (missingReadyPlayers.length > 0) {
+      throw new ConflictException(
+        'Confirmed players need more ratings before generation.',
+      );
+    }
+
+    const generatorStyle =
+      normalizeGeneratorStyleOverride(match.generatorStyleOverride) ??
+      normalizeGroupGeneratorStyle(match.group.settings?.generatorStyle);
+    const goalkeeperMode =
+      normalizeGoalkeeperModeOverride(match.goalkeeperModeOverride) ??
+      normalizeGroupGoalkeeperMode(match.group.settings?.goalkeeperMode);
+    const versionNumber =
+      (await this.prisma.teamGenerationVersion.count({
+        where: {
+          matchId: match.id,
+        },
+      })) + 1;
+    const seed = `${match.id}:v${versionNumber}`;
+    const algorithmInputPlayers = confirmedAttendances.map((attendance) => {
+      const rating = ratingByPlayerId.get(attendance.playerId);
+
+      if (!rating) {
+        throw new ConflictException('Confirmed player rating is missing.');
+      }
+
+      return {
+        playerId: attendance.playerId,
+        rating: rating.rating,
+        preferredStyle: attendance.player.preferredStyle,
+      };
+    });
+    const inputSnapshot: TeamGenerationInputSnapshot = {
+      matchId: match.id,
+      groupId,
+      playersPerTeam: match.playersPerTeam,
+      generatorStyle,
+      goalkeeperMode,
+      playerRatings: algorithmInputPlayers.map((player) => ({
+        playerId: player.playerId,
+        rating: player.rating,
+        ratingsReceived:
+          ratingByPlayerId.get(player.playerId)?.ratingsReceived ?? 0,
+        preferredStyle: player.preferredStyle,
+      })),
+    };
+    const result = generateBalancedTeams({
+      players: algorithmInputPlayers,
+      playersPerTeam: match.playersPerTeam,
+      seed,
+      style: generatorStyle,
+      goalkeeperMode,
+    });
+    const generation = await this.prisma.teamGenerationVersion.create({
+      data: {
+        matchId: match.id,
+        generatedByUserId: actorMembership.userId,
+        versionNumber,
+        seed,
+        algorithmVersion: result.algorithmVersion,
+        teamA: result.teamA,
+        teamB: result.teamB,
+        teamATotal: result.teamA.totalRating,
+        teamBTotal: result.teamB.totalRating,
+        fairnessPercentage: result.fairnessPercentage,
+        inputSnapshot,
+        scoreComponents: result.scoreComponents,
+        explanation: result.explanation,
+      },
+    });
+
+    return this.toInternalTeamGenerationVersion(generation);
+  }
+
   private async requireGroupMembership(
     clerkUserId: string,
     groupId: string,
@@ -307,6 +494,43 @@ export class MatchesService {
     });
 
     return waitlistCount + 1;
+  }
+
+  private async getGenerationPlayerRatings(
+    groupId: string,
+    playerIds: string[],
+  ) {
+    const ratings = await this.prisma.initialPeerRating.findMany({
+      where: {
+        groupId,
+        ratedPlayerId: {
+          in: playerIds,
+        },
+      },
+    });
+    const ratingsByPlayerId = new Map<string, PrismaInitialPeerRating[]>();
+
+    for (const rating of ratings) {
+      const playerRatings = ratingsByPlayerId.get(rating.ratedPlayerId) ?? [];
+      playerRatings.push(rating);
+      ratingsByPlayerId.set(rating.ratedPlayerId, playerRatings);
+    }
+
+    return playerIds.map((playerId) => {
+      const playerRatings = ratingsByPlayerId.get(playerId) ?? [];
+      const ratingsReceived = playerRatings.length;
+      const averageOverall =
+        ratingsReceived === 0
+          ? 0
+          : playerRatings.reduce((total, rating) => total + rating.overall, 0) /
+            ratingsReceived;
+
+      return {
+        playerId,
+        rating: Math.round(averageOverall * 10) / 10,
+        ratingsReceived,
+      };
+    });
   }
 
   private async reconcileWaitlist(match: PrismaMatch) {
@@ -480,6 +704,33 @@ export class MatchesService {
       respondedAt: attendance.respondedAt,
       createdAt: attendance.createdAt,
       updatedAt: attendance.updatedAt,
+    };
+  }
+
+  private toInternalTeamGenerationVersion(
+    generation: PrismaTeamGenerationVersion,
+  ): InternalTeamGenerationVersion {
+    return {
+      id: generation.id,
+      matchId: generation.matchId,
+      generatedByUserId: generation.generatedByUserId,
+      versionNumber: generation.versionNumber,
+      seed: generation.seed,
+      algorithmVersion: generation.algorithmVersion,
+      status: generation.status === 'locked' ? 'locked' : 'draft',
+      teamA: generation.teamA as unknown as TeamGenerationTeam,
+      teamB: generation.teamB as unknown as TeamGenerationTeam,
+      teamATotal: generation.teamATotal,
+      teamBTotal: generation.teamBTotal,
+      fairnessPercentage: generation.fairnessPercentage,
+      inputSnapshot:
+        generation.inputSnapshot as unknown as TeamGenerationInputSnapshot,
+      scoreComponents:
+        generation.scoreComponents as unknown as TeamGenerationScoreComponents,
+      explanation:
+        generation.explanation as unknown as TeamGenerationExplanation,
+      createdAt: generation.createdAt,
+      updatedAt: generation.updatedAt,
     };
   }
 }

@@ -338,7 +338,16 @@ export const en = {
     temporaryPoolNote:
       "Until real matches exist, this block uses the group roster as the baseline pool.",
     generateTeams: "Generate teams",
+    generatingTeams: "Generating...",
     generateLocked: "Generation locked",
+    generatedTitle: "Generated teams",
+    fairnessLabel: "fairness",
+    teamLabel: "Team",
+    noMatchForGeneration: "Create a match before generating teams.",
+    confirmedPoolBlocked:
+      "Generation needs the confirmed player pool to be full",
+    generateError:
+      "Unable to generate teams. Check confirmed players and ratings.",
     blockedExplanation:
       "Each player needs at least 3 initial ratings before a credible generation can start.",
     missingTitle: "Players to complete",

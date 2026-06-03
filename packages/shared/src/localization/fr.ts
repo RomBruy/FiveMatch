@@ -340,7 +340,16 @@ export const fr = {
     temporaryPoolNote:
       "En attendant les vrais matchs, ce bloc utilise le roster du groupe comme pool de base.",
     generateTeams: "Generer les equipes",
+    generatingTeams: "Generation...",
     generateLocked: "Generation verrouillee",
+    generatedTitle: "Equipes generees",
+    fairnessLabel: "equite",
+    teamLabel: "Equipe",
+    noMatchForGeneration: "Cree un match avant de generer les equipes.",
+    confirmedPoolBlocked:
+      "La generation demande une liste de joueurs confirmes complete",
+    generateError:
+      "Impossible de generer les equipes. Verifie les confirmes et les notes.",
     blockedExplanation:
       "Chaque joueur doit recevoir au moins 3 notes initiales avant de lancer une generation credible.",
     missingTitle: "Joueurs a completer",

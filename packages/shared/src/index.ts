@@ -41,9 +41,16 @@ export {
   type FootballMatchAttendanceResponse,
   type FootballMatchAttendanceStatus,
   type FootballMatchStatus,
+  type GenerateTeamVersionResponse,
   type NextFootballMatchResponse,
   type SubmitMatchAttendanceInput,
   type SubmitMatchAttendanceResponse,
+  type TeamGenerationExplanation,
+  type TeamGenerationInputSnapshot,
+  type TeamGenerationPlayer,
+  type TeamGenerationScoreComponents,
+  type TeamGenerationTeam,
+  type TeamGenerationVersion,
 } from "./api/matches.js";
 export {
   playerDominantFeet,

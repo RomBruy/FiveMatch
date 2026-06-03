@@ -12,6 +12,7 @@ import {
 import type {
   CreateFootballMatchInput,
   CreateFootballMatchResponse,
+  GenerateTeamVersionResponse,
   NextFootballMatchResponse,
   SubmitMatchAttendanceInput,
   SubmitMatchAttendanceResponse,
@@ -23,7 +24,10 @@ import {
   isSupportedGroupGoalkeeperMode,
 } from '../groups/group-options';
 import { isSupportedAttendanceResponse } from './match-options';
-import { serializeFootballMatch } from './match.presenter';
+import {
+  serializeFootballMatch,
+  serializeTeamGenerationVersion,
+} from './match.presenter';
 import { MatchesService } from './matches.service';
 
 @Controller('groups/:groupId/matches')
@@ -104,6 +108,30 @@ export class MatchesController {
     return {
       data: {
         match: serializeFootballMatch(match),
+      },
+    };
+  }
+
+  @Post(':matchId/team-generations')
+  @UseGuards(ClerkAuthGuard)
+  async generateTeamVersion(
+    @Req() request: AuthenticatedRequest,
+    @Param('groupId') groupId: string,
+    @Param('matchId') matchId: string,
+  ): Promise<GenerateTeamVersionResponse> {
+    if (!request.auth) {
+      throw new InternalServerErrorException('Authenticated user missing.');
+    }
+
+    const generation = await this.matchesService.generateTeamVersion(
+      request.auth.clerkUserId,
+      groupId,
+      matchId,
+    );
+
+    return {
+      data: {
+        generation: serializeTeamGenerationVersion(generation),
       },
     };
   }

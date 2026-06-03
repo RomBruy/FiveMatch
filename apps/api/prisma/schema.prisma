@@ -8,20 +8,21 @@ datasource db {
 }
 
 model User {
-  id                 String        @id @default(cuid())
-  clerkUserId        String        @unique @map("clerk_user_id")
-  emailAddress       String?       @map("email_address")
-  firstName          String?       @map("first_name")
-  lastName           String?       @map("last_name")
-  imageUrl           String?       @map("image_url")
-  preferredLocale    String        @default("fr") @map("preferred_locale")
-  ownedGroups        Group[]       @relation("GroupOwner")
+  id                 String                  @id @default(cuid())
+  clerkUserId        String                  @unique @map("clerk_user_id")
+  emailAddress       String?                 @map("email_address")
+  firstName          String?                 @map("first_name")
+  lastName           String?                 @map("last_name")
+  imageUrl           String?                 @map("image_url")
+  preferredLocale    String                  @default("fr") @map("preferred_locale")
+  ownedGroups        Group[]                 @relation("GroupOwner")
   groupMemberships   GroupMember[]
   playerProfiles     Player[]
-  createdInvitations Invitation[]  @relation("InvitationCreator")
-  organizedMatches   Match[]       @relation("MatchOrganizer")
-  createdAt          DateTime      @default(now()) @map("created_at")
-  updatedAt          DateTime      @updatedAt @map("updated_at")
+  createdInvitations Invitation[]            @relation("InvitationCreator")
+  organizedMatches   Match[]                 @relation("MatchOrganizer")
+  teamGenerations    TeamGenerationVersion[] @relation("TeamGenerationCreator")
+  createdAt          DateTime                @default(now()) @map("created_at")
+  updatedAt          DateTime                @updatedAt @map("updated_at")
 
   @@map("users")
 }
@@ -162,23 +163,24 @@ model InitialPeerRating {
 }
 
 model Match {
-  id                     String            @id @default(cuid())
-  groupId                String            @map("group_id")
-  group                  Group             @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  organizerUserId        String            @map("organizer_user_id")
-  organizer              User              @relation("MatchOrganizer", fields: [organizerUserId], references: [id], onDelete: Restrict)
+  id                     String                  @id @default(cuid())
+  groupId                String                  @map("group_id")
+  group                  Group                   @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  organizerUserId        String                  @map("organizer_user_id")
+  organizer              User                    @relation("MatchOrganizer", fields: [organizerUserId], references: [id], onDelete: Restrict)
   title                  String
-  startsAt               DateTime          @map("starts_at")
+  startsAt               DateTime                @map("starts_at")
   location               String
-  playersPerTeam         Int               @map("players_per_team")
-  maxPlayers             Int               @map("max_players")
-  attendanceDeadlineAt   DateTime          @map("attendance_deadline_at")
-  generatorStyleOverride String?           @map("generator_style_override")
-  goalkeeperModeOverride String?           @map("goalkeeper_mode_override")
-  status                 String            @default("open")
+  playersPerTeam         Int                     @map("players_per_team")
+  maxPlayers             Int                     @map("max_players")
+  attendanceDeadlineAt   DateTime                @map("attendance_deadline_at")
+  generatorStyleOverride String?                 @map("generator_style_override")
+  goalkeeperModeOverride String?                 @map("goalkeeper_mode_override")
+  status                 String                  @default("open")
   attendances            MatchAttendance[]
-  createdAt              DateTime          @default(now()) @map("created_at")
-  updatedAt              DateTime          @updatedAt @map("updated_at")
+  teamGenerations        TeamGenerationVersion[]
+  createdAt              DateTime                @default(now()) @map("created_at")
+  updatedAt              DateTime                @updatedAt @map("updated_at")
 
   @@index([groupId, startsAt], map: "idx_matches_group_id_starts_at")
   @@index([organizerUserId], map: "idx_matches_organizer_user_id")
@@ -202,4 +204,31 @@ model MatchAttendance {
   @@index([matchId, status], map: "idx_match_attendances_match_id_status")
   @@index([playerId], map: "idx_match_attendances_player_id")
   @@map("match_attendances")
+}
+
+model TeamGenerationVersion {
+  id                 String   @id @default(cuid())
+  matchId            String   @map("match_id")
+  match              Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  generatedByUserId  String   @map("generated_by_user_id")
+  generatedBy        User     @relation("TeamGenerationCreator", fields: [generatedByUserId], references: [id], onDelete: Restrict)
+  versionNumber      Int      @map("version_number")
+  seed               String
+  algorithmVersion   String   @map("algorithm_version")
+  status             String   @default("draft")
+  teamA              Json     @map("team_a")
+  teamB              Json     @map("team_b")
+  teamATotal         Float    @map("team_a_total")
+  teamBTotal         Float    @map("team_b_total")
+  fairnessPercentage Int      @map("fairness_percentage")
+  inputSnapshot      Json     @map("input_snapshot")
+  scoreComponents    Json     @map("score_components")
+  explanation        Json
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  @@unique([matchId, versionNumber], map: "uq_team_generation_versions_match_version")
+  @@index([matchId], map: "idx_team_generation_versions_match_id")
+  @@index([generatedByUserId], map: "idx_team_generation_versions_generated_by_user_id")
+  @@map("team_generation_versions")
 }

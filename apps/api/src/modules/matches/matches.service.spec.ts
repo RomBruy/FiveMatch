@@ -1,4 +1,4 @@
-import { ForbiddenException } from '@nestjs/common';
+import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MatchesService } from './matches.service';
 
@@ -348,6 +348,142 @@ describe('MatchesService', () => {
       },
     });
   });
+
+  it('generates and saves a team version from a ready confirmed pool', async () => {
+    const attendanceFindMany = jest.fn().mockResolvedValue(
+      createConfirmedAttendances([
+        ['ply_1', 'attacker'],
+        ['ply_2', 'goalkeeper'],
+        ['ply_3', 'defender'],
+        ['ply_4', 'midfielder'],
+        ['ply_5', 'attacker'],
+        ['ply_6', 'goalkeeper'],
+        ['ply_7', 'defender'],
+        ['ply_8', 'midfielder'],
+        ['ply_9', 'all_rounder'],
+        ['ply_10', 'attacker'],
+      ]),
+    );
+    const ratingFindMany = jest
+      .fn()
+      .mockResolvedValue(createInitialRatingRows());
+    const generationCreate = jest
+      .fn()
+      .mockImplementation(({ data }: { data: TeamGenerationRowOverrides }) =>
+        Promise.resolve(
+          createTeamGenerationRow({
+            ...data,
+            id: 'generation_123',
+            createdAt: new Date('2026-06-03T03:00:00.000Z'),
+            updatedAt: new Date('2026-06-03T03:00:00.000Z'),
+          }),
+        ),
+      );
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'admin',
+        findFirst: jest.fn().mockResolvedValue(
+          createMatchRow({
+            group: {
+              settings: {
+                generatorStyle: 'max_fairness',
+                goalkeeperMode: 'fixed_goalkeeper',
+              },
+            },
+          }),
+        ),
+        attendanceFindMany,
+        ratingFindMany,
+        generationCount: jest.fn().mockResolvedValue(0),
+        generationCreate,
+      }),
+    );
+
+    await expect(
+      service.generateTeamVersion('user_123', 'grp_123', 'match_123'),
+    ).resolves.toMatchObject({
+      id: 'generation_123',
+      matchId: 'match_123',
+      versionNumber: 1,
+      seed: 'match_123:v1',
+      teamA: {
+        players: expect.any(Array) as unknown[],
+      },
+      teamB: {
+        players: expect.any(Array) as unknown[],
+      },
+      fairnessPercentage: expect.any(Number) as number,
+      inputSnapshot: {
+        generatorStyle: 'max_fairness',
+        goalkeeperMode: 'fixed_goalkeeper',
+        playerRatings: expect.arrayContaining([
+          expect.objectContaining({
+            playerId: 'ply_1',
+            ratingsReceived: 3,
+          }) as object,
+        ]) as unknown[],
+      },
+    });
+
+    expect(generationCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        matchId: 'match_123',
+        generatedByUserId: 'usr_123',
+        versionNumber: 1,
+        seed: 'match_123:v1',
+        fairnessPercentage: expect.any(Number) as number,
+        inputSnapshot: expect.objectContaining({
+          playersPerTeam: 5,
+        }) as object,
+        scoreComponents: expect.objectContaining({
+          ratingGap: expect.any(Number) as number,
+        }) as object,
+      }) as object,
+    });
+  });
+
+  it('blocks generation when confirmed players are below the rating threshold', async () => {
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'admin',
+        findFirst: jest.fn().mockResolvedValue(
+          createMatchRow({
+            group: {
+              settings: {
+                generatorStyle: 'fair_fresh',
+                goalkeeperMode: 'rotating_goalkeeper',
+              },
+            },
+          }),
+        ),
+        attendanceFindMany: jest.fn().mockResolvedValue(
+          createConfirmedAttendances([
+            ['ply_1', 'attacker'],
+            ['ply_2', 'goalkeeper'],
+            ['ply_3', 'defender'],
+            ['ply_4', 'midfielder'],
+            ['ply_5', 'attacker'],
+            ['ply_6', 'goalkeeper'],
+            ['ply_7', 'defender'],
+            ['ply_8', 'midfielder'],
+            ['ply_9', 'all_rounder'],
+            ['ply_10', 'attacker'],
+          ]),
+        ),
+        ratingFindMany: jest
+          .fn()
+          .mockResolvedValue(
+            createInitialRatingRows().filter(
+              (rating) => rating.ratedPlayerId !== 'ply_10',
+            ),
+          ),
+      }),
+    );
+
+    await expect(
+      service.generateTeamVersion('user_123', 'grp_123', 'match_123'),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
 });
 
 function createPrismaMock({
@@ -360,6 +496,9 @@ function createPrismaMock({
   attendanceFindUnique = jest.fn().mockResolvedValue(null),
   attendanceUpdate = jest.fn().mockResolvedValue(createAttendanceRow()),
   attendanceUpsert = jest.fn(),
+  ratingFindMany = jest.fn().mockResolvedValue([]),
+  generationCount = jest.fn().mockResolvedValue(0),
+  generationCreate = jest.fn(),
 }: {
   role: string;
   create?: jest.Mock;
@@ -370,6 +509,9 @@ function createPrismaMock({
   attendanceFindUnique?: jest.Mock;
   attendanceUpdate?: jest.Mock;
   attendanceUpsert?: jest.Mock;
+  ratingFindMany?: jest.Mock;
+  generationCount?: jest.Mock;
+  generationCreate?: jest.Mock;
 }) {
   return {
     user: {
@@ -400,10 +542,26 @@ function createPrismaMock({
       update: attendanceUpdate,
       upsert: attendanceUpsert,
     },
+    initialPeerRating: {
+      findMany: ratingFindMany,
+    },
+    teamGenerationVersion: {
+      count: generationCount,
+      create: generationCreate,
+    },
   } as unknown as PrismaService;
 }
 
-function createMatchRow() {
+function createMatchRow(
+  overrides: Partial<{
+    group: {
+      settings: {
+        generatorStyle: string;
+        goalkeeperMode: string;
+      };
+    };
+  }> = {},
+) {
   return {
     id: 'match_123',
     groupId: 'grp_123',
@@ -417,6 +575,7 @@ function createMatchRow() {
     generatorStyleOverride: 'max_fairness',
     goalkeeperModeOverride: 'fixed_goalkeeper',
     status: 'open',
+    group: overrides.group,
     createdAt: new Date('2026-06-03T00:00:00.000Z'),
     updatedAt: new Date('2026-06-03T01:00:00.000Z'),
   };
@@ -442,5 +601,133 @@ function createAttendanceRow(
     respondedAt: new Date('2026-06-03T02:00:00.000Z'),
     createdAt: new Date('2026-06-03T02:00:00.000Z'),
     updatedAt: new Date('2026-06-03T02:00:00.000Z'),
+  };
+}
+
+function createConfirmedAttendances(
+  players: Array<[playerId: string, preferredStyle: string]>,
+) {
+  return players.map(([playerId, preferredStyle], index) => ({
+    ...createAttendanceRow({
+      id: `attendance_${playerId}`,
+      playerId,
+      status: 'confirmed',
+    }),
+    respondedAt: new Date(
+      `2026-06-03T02:${String(index).padStart(2, '0')}:00.000Z`,
+    ),
+    player: {
+      id: playerId,
+      preferredStyle,
+    },
+  }));
+}
+
+function createInitialRatingRows() {
+  const ratings = [
+    ['ply_1', 88],
+    ['ply_2', 83],
+    ['ply_3', 81],
+    ['ply_4', 79],
+    ['ply_5', 76],
+    ['ply_6', 74],
+    ['ply_7', 71],
+    ['ply_8', 69],
+    ['ply_9', 66],
+    ['ply_10', 62],
+  ] as const;
+
+  return ratings.flatMap(([ratedPlayerId, overall]) =>
+    [1, 2, 3].map((index) => ({
+      id: `rating_${ratedPlayerId}_${index}`,
+      groupId: 'grp_123',
+      raterPlayerId: `rater_${index}`,
+      ratedPlayerId,
+      attributeSet: 'standard',
+      overall,
+      speed: overall,
+      attack: overall,
+      technique: overall,
+      defense: overall,
+      reflexes: null,
+      positioning: null,
+      handling: null,
+      distribution: null,
+      communication: null,
+      physical: overall,
+      stamina: overall,
+      fun: overall,
+      lockedAt: null,
+      createdAt: new Date('2026-06-03T01:00:00.000Z'),
+      updatedAt: new Date('2026-06-03T01:00:00.000Z'),
+    })),
+  );
+}
+
+type TeamGenerationRowOverrides = Partial<{
+  id: string;
+  matchId: string;
+  generatedByUserId: string;
+  versionNumber: number;
+  seed: string;
+  algorithmVersion: string;
+  status: string;
+  teamA: unknown;
+  teamB: unknown;
+  teamATotal: number;
+  teamBTotal: number;
+  fairnessPercentage: number;
+  inputSnapshot: unknown;
+  scoreComponents: unknown;
+  explanation: unknown;
+  createdAt: Date;
+  updatedAt: Date;
+}>;
+
+function createTeamGenerationRow(overrides: TeamGenerationRowOverrides = {}) {
+  return {
+    id: overrides.id ?? 'generation_123',
+    matchId: overrides.matchId ?? 'match_123',
+    generatedByUserId: overrides.generatedByUserId ?? 'usr_123',
+    versionNumber: overrides.versionNumber ?? 1,
+    seed: overrides.seed ?? 'match_123:v1',
+    algorithmVersion: overrides.algorithmVersion ?? 'team-generator-v1',
+    status: overrides.status ?? 'draft',
+    teamA: overrides.teamA ?? {
+      label: 'A',
+      totalRating: 0,
+      averageRating: 0,
+      players: [],
+    },
+    teamB: overrides.teamB ?? {
+      label: 'B',
+      totalRating: 0,
+      averageRating: 0,
+      players: [],
+    },
+    teamATotal: overrides.teamATotal ?? 0,
+    teamBTotal: overrides.teamBTotal ?? 0,
+    fairnessPercentage: overrides.fairnessPercentage ?? 100,
+    inputSnapshot: overrides.inputSnapshot ?? {
+      matchId: 'match_123',
+      groupId: 'grp_123',
+      playersPerTeam: 5,
+      generatorStyle: 'fair_fresh',
+      goalkeeperMode: 'rotating_goalkeeper',
+      playerRatings: [],
+    },
+    scoreComponents: overrides.scoreComponents ?? {
+      ratingGap: 0,
+      positionImbalance: 0,
+      goalkeeperImbalance: 0,
+      randomness: 0,
+      candidateScore: 0,
+    },
+    explanation: overrides.explanation ?? {
+      summary: 'Balanced teams generated.',
+      bullets: [],
+    },
+    createdAt: overrides.createdAt ?? new Date('2026-06-03T03:00:00.000Z'),
+    updatedAt: overrides.updatedAt ?? new Date('2026-06-03T03:00:00.000Z'),
   };
 }

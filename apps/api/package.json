@@ -26,6 +26,7 @@
   },
   "dependencies": {
     "@clerk/backend": "^3.4.14",
+    "@fit-five/algorithm": "workspace:*",
     "@fit-five/shared": "workspace:*",
     "@nestjs/common": "^11.0.1",
     "@nestjs/core": "^11.0.1",

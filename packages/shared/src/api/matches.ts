@@ -54,6 +54,67 @@ export type FootballMatch = {
   updatedAt: string;
 };
 
+export type TeamGenerationPlayer = {
+  playerId: string;
+  rating: number;
+  preferredStyle: string | null;
+  slot: number;
+};
+
+export type TeamGenerationTeam = {
+  label: "A" | "B";
+  totalRating: number;
+  averageRating: number;
+  players: TeamGenerationPlayer[];
+};
+
+export type TeamGenerationScoreComponents = {
+  ratingGap: number;
+  positionImbalance: number;
+  goalkeeperImbalance: number;
+  randomness: number;
+  candidateScore: number;
+};
+
+export type TeamGenerationExplanation = {
+  summary: string;
+  bullets: string[];
+};
+
+export type TeamGenerationInputSnapshot = {
+  matchId: string;
+  groupId: string;
+  playersPerTeam: number;
+  generatorStyle: GroupGeneratorStyle;
+  goalkeeperMode: GroupGoalkeeperMode;
+  playerRatings: Array<{
+    playerId: string;
+    rating: number;
+    ratingsReceived: number;
+    preferredStyle: string | null;
+  }>;
+};
+
+export type TeamGenerationVersion = {
+  id: string;
+  matchId: string;
+  generatedByUserId: string;
+  versionNumber: number;
+  seed: string;
+  algorithmVersion: string;
+  status: "draft" | "locked";
+  teamA: TeamGenerationTeam;
+  teamB: TeamGenerationTeam;
+  teamATotal: number;
+  teamBTotal: number;
+  fairnessPercentage: number;
+  inputSnapshot: TeamGenerationInputSnapshot;
+  scoreComponents: TeamGenerationScoreComponents;
+  explanation: TeamGenerationExplanation;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type CreateFootballMatchInput = {
   title: string;
   startsAt: string;
@@ -78,4 +139,8 @@ export type SubmitMatchAttendanceInput = {
 
 export type SubmitMatchAttendanceResponse = ApiSuccessResponse<{
   match: FootballMatch;
+}>;
+
+export type GenerateTeamVersionResponse = ApiSuccessResponse<{
+  generation: TeamGenerationVersion;
 }>;

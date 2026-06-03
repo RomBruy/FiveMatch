@@ -1,7 +1,12 @@
-import type { FootballMatch, FootballMatchAttendance } from '@fit-five/shared';
+import type {
+  FootballMatch,
+  FootballMatchAttendance,
+  TeamGenerationVersion,
+} from '@fit-five/shared';
 import type {
   InternalFootballMatch,
   InternalFootballMatchAttendance,
+  InternalTeamGenerationVersion,
 } from './matches.service';
 
 export function serializeFootballMatch(
@@ -46,5 +51,29 @@ export function serializeFootballMatchAttendance(
     respondedAt: attendance.respondedAt.toISOString(),
     createdAt: attendance.createdAt.toISOString(),
     updatedAt: attendance.updatedAt.toISOString(),
+  };
+}
+
+export function serializeTeamGenerationVersion(
+  generation: InternalTeamGenerationVersion,
+): TeamGenerationVersion {
+  return {
+    id: generation.id,
+    matchId: generation.matchId,
+    generatedByUserId: generation.generatedByUserId,
+    versionNumber: generation.versionNumber,
+    seed: generation.seed,
+    algorithmVersion: generation.algorithmVersion,
+    status: generation.status,
+    teamA: generation.teamA,
+    teamB: generation.teamB,
+    teamATotal: generation.teamATotal,
+    teamBTotal: generation.teamBTotal,
+    fairnessPercentage: generation.fairnessPercentage,
+    inputSnapshot: generation.inputSnapshot,
+    scoreComponents: generation.scoreComponents,
+    explanation: generation.explanation,
+    createdAt: generation.createdAt.toISOString(),
+    updatedAt: generation.updatedAt.toISOString(),
   };
 }
