@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FiveMatch Mockup - Team Generator</title>
+    <link rel="stylesheet" href="./fivematch-mockups.css" />
+  </head>
+  <body>
+    <main class="stage">
+      <section class="phone" aria-label="Generateur d'equipes FiveMatch">
+        <div class="screen">
+          <div class="statusbar">
+            <span>16:51</span>
+            <span class="signal">5G 70%</span>
+          </div>
+
+          <header class="topline">
+            <div>
+              <h1 class="screen-title">Generer</h1>
+              <p class="screen-kicker">10 joueurs confirmes</p>
+            </div>
+            <span class="pill">Ready</span>
+          </header>
+
+          <section class="fairness-hero" aria-label="Fairness score">
+            <div class="fairness-ring">
+              <strong>96%</strong>
+            </div>
+            <div>
+              <p class="uppercase">Fair + Fresh</p>
+              <h2 class="section-title">Equipes quasi parfaites.</h2>
+              <p class="muted" style="margin: 8px 0 0">
+                Skill gap tiny, rotations balanced, teammate repeats avoided.
+              </p>
+            </div>
+          </section>
+
+          <div class="version-row">
+            <span>Version 3 / 5</span>
+            <span>Manual edit unused</span>
+          </div>
+
+          <section class="team-grid" aria-label="Generated teams">
+            <article class="team-card">
+              <h3>Equipe A</h3>
+              <div class="team-total">412.8</div>
+              <div class="player-list">
+                <div class="player-row"><span class="avatar">EM</span><span>Emile</span></div>
+                <div class="player-row"><span class="avatar">NY</span><span>Nyko</span></div>
+                <div class="player-row"><span class="avatar">LO</span><span>Lolo</span></div>
+                <div class="player-row"><span class="avatar">GG</span><span>Guigui</span></div>
+                <div class="player-row"><span class="avatar">CA</span><span>Carlito</span></div>
+              </div>
+            </article>
+
+            <article class="team-card">
+              <h3 class="yellow">Equipe B</h3>
+              <div class="team-total">410.9</div>
+              <div class="player-list">
+                <div class="player-row"><span class="avatar">CB</span><span>CB7</span></div>
+                <div class="player-row"><span class="avatar">NP</span><span>NikusPokus</span></div>
+                <div class="player-row"><span class="avatar">CE</span><span>Ced</span></div>
+                <div class="player-row"><span class="avatar">CH</span><span>Chichi</span></div>
+                <div class="player-row"><span class="avatar">AD</span><span>Adri</span></div>
+              </div>
+            </article>
+          </section>
+
+          <section class="explain" aria-label="Algorithm explanation">
+            <h3>Why this split?</h3>
+            <ul>
+              <li>Total rating difference is only 1.9 points.</li>
+              <li>Both sides have one defensive anchor and two high-speed players.</li>
+              <li>Nyko and Ced were separated after playing together twice.</li>
+            </ul>
+            <details>
+              <summary>Show algorithm details</summary>
+              <p>
+                Checked 252 possible combinations, applied group style rotations libres, then added controlled
+                randomness inside the top 3% fair options.
+              </p>
+            </details>
+          </section>
+
+          <div class="sticky-actions">
+            <a class="button secondary" href="#">Regenerate</a>
+            <a class="button primary" href="#">Lock teams</a>
+          </div>
+        </div>
+
+        <nav class="tabbar" aria-label="Bottom navigation">
+          <div class="tab"><span>H</span>Accueil</div>
+          <div class="tab"><span>J</span>Joueurs</div>
+          <div class="tab active"><span>M</span>Match</div>
+          <div class="tab"><span>V</span>Vestiaire</div>
+          <div class="tab"><span>P</span>Profil</div>
+        </nav>
+      </section>
+    </main>
+  </body>
+</html>

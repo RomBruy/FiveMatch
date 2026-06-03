@@ -1,0 +1,106 @@
+# generated: 2026-05-31T16:16:37+0200
+# last_updated: 2026-06-03T09:17:02+0200
+# project: fit_five
+# project_key: NOKEY
+# tracking_system: file-system
+# story_location: y/_bmad-output/implementation-artifacts
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Epic Status Transitions:
+#   - backlog -> in-progress: Automatically when first story is created
+#   - in-progress -> done: Manually when all stories reach 'done' status
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created in stories folder
+#   - in-progress: Developer actively working on implementation
+#   - review: Ready for code review
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' when first story is created.
+# - Stories can be worked in parallel if dependencies allow.
+# - Developer typically creates next story after previous one is done to incorporate learnings.
+# - Dev moves story to 'review', then runs code-review with fresh context.
+
+generated: 2026-05-31T16:16:37+0200
+last_updated: 2026-06-03T09:17:02+0200
+project: fit_five
+project_key: NOKEY
+tracking_system: file-system
+story_location: y/_bmad-output/implementation-artifacts
+
+development_status:
+  epic-1: in-progress
+  1-1-initialize-native-app-and-api-workspace: review
+  1-2-authenticate-with-native-sign-in: review
+  1-3-manage-account-language-and-preferences: review
+  1-4-create-a-private-football-group: review
+  1-5-invite-and-join-group: review
+  1-6-manage-group-roles-and-settings: review
+  1-7-complete-player-identity-and-football-profile: review
+  1-8-complete-vestiaire-personality: review
+  epic-1-retrospective: optional
+
+  epic-2: backlog
+  2-1-submit-one-time-initial-peer-rating: backlog
+  2-2-edit-initial-rating-until-used: backlog
+  2-3-show-rating-progress-and-readiness: backlog
+  2-4-block-team-generation-until-baseline-threshold: backlog
+  epic-2-retrospective: optional
+
+  epic-3: backlog
+  3-1-create-a-match: backlog
+  3-2-submit-attendance-response: backlog
+  3-3-manage-full-match-waitlist: backlog
+  3-4-display-attendance-lists: backlog
+  epic-3-retrospective: optional
+
+  epic-4: backlog
+  4-1-generate-saved-team-version: backlog
+  4-2-show-team-generator-detail: backlog
+  4-3-regenerate-up-to-five-versions: backlog
+  4-4-perform-one-manual-adjustment: backlog
+  4-5-confirm-and-lock-teams: backlog
+  epic-4-retrospective: optional
+
+  epic-5: backlog
+  5-1-submit-and-edit-final-score: backlog
+  5-2-record-goals-and-assists: backlog
+  5-3-vote-for-mvp: backlog
+  5-4-submit-quick-opponent-rating: backlog
+  5-5-finalize-match-and-evolve-ratings: backlog
+  5-6-void-finalized-match: backlog
+  epic-5-retrospective: optional
+
+  epic-6: backlog
+  6-1-view-period-based-leaderboards: backlog
+  6-2-view-player-statistics: backlog
+  6-3-view-match-history-and-summary: backlog
+  epic-6-retrospective: optional
+
+  epic-7: backlog
+  7-1-unlock-live-player-card-after-ovr: backlog
+  7-2-configure-card-prompt-and-upload-photo: backlog
+  7-3-generate-panini-style-card-image: backlog
+  7-4-generate-mvp-card-and-match-poster: backlog
+  7-5-export-share-assets: backlog
+  epic-7-retrospective: optional
+
+  epic-8: backlog
+  8-1-request-and-store-push-permission: backlog
+  8-2-send-operational-notifications: backlog
+  8-3-complete-localization-coverage: backlog
+  8-4-enforce-accessibility-and-store-ready-guardrails: backlog
+  epic-8-retrospective: optional

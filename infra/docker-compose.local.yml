@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: fit-five-postgres
+    environment:
+      POSTGRES_DB: fit_five
+      POSTGRES_PASSWORD: fit_five
+      POSTGRES_USER: fit_five
+    ports:
+      - "5432:5432"
+    volumes:
+      - fit-five-postgres:/var/lib/postgresql/data
+
+  redis:
+    image: redis:8-alpine
+    container_name: fit-five-redis
+    ports:
+      - "6379:6379"
+
+volumes:
+  fit-five-postgres:

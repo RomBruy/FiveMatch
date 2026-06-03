@@ -1,0 +1,124 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                 String        @id @default(cuid())
+  clerkUserId        String        @unique @map("clerk_user_id")
+  emailAddress       String?       @map("email_address")
+  firstName          String?       @map("first_name")
+  lastName           String?       @map("last_name")
+  imageUrl           String?       @map("image_url")
+  preferredLocale    String        @default("fr") @map("preferred_locale")
+  ownedGroups        Group[]       @relation("GroupOwner")
+  groupMemberships   GroupMember[]
+  playerProfiles     Player[]
+  createdInvitations Invitation[]  @relation("InvitationCreator")
+  createdAt          DateTime      @default(now()) @map("created_at")
+  updatedAt          DateTime      @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+model Group {
+  id          String         @id @default(cuid())
+  name        String
+  ownerUserId String         @map("owner_user_id")
+  owner       User           @relation("GroupOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  settings    GroupSettings?
+  members     GroupMember[]
+  invitations Invitation[]
+  players     Player[]
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+
+  @@index([ownerUserId], map: "idx_groups_owner_user_id")
+  @@map("groups")
+}
+
+model GroupSettings {
+  id              String   @id @default(cuid())
+  groupId         String   @unique @map("group_id")
+  group           Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  defaultLanguage String   @map("default_language")
+  playStyle       String   @map("play_style")
+  intensity       String
+  goalkeeperMode  String   @map("goalkeeper_mode")
+  generatorStyle  String   @map("generator_style")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("group_settings")
+}
+
+model GroupMember {
+  id        String   @id @default(cuid())
+  groupId   String   @map("group_id")
+  group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      String
+  joinedAt  DateTime @default(now()) @map("joined_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([groupId, userId], map: "uq_group_members_group_id_user_id")
+  @@index([userId], map: "idx_group_members_user_id")
+  @@map("group_members")
+}
+
+model Invitation {
+  id              String    @id @default(cuid())
+  groupId         String    @map("group_id")
+  group           Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  createdByUserId String    @map("created_by_user_id")
+  createdBy       User      @relation("InvitationCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  token           String    @unique
+  status          String    @default("active")
+  usageCount      Int       @default(0) @map("usage_count")
+  expiresAt       DateTime? @map("expires_at")
+  lastAcceptedAt  DateTime? @map("last_accepted_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  @@index([groupId], map: "idx_invitations_group_id")
+  @@index([createdByUserId], map: "idx_invitations_created_by_user_id")
+  @@map("invitations")
+}
+
+model Player {
+  id                   String   @id @default(cuid())
+  groupId              String   @map("group_id")
+  group                Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId               String   @map("user_id")
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  firstName            String?  @map("first_name")
+  lastName             String?  @map("last_name")
+  nickname             String?
+  photoUrl             String?  @map("photo_url")
+  bio                  String?
+  dominantFoot         String?  @map("dominant_foot")
+  jerseyNumber         Int?     @map("jersey_number")
+  preferredStyle       String?  @map("preferred_style")
+  clubDeFormation      String?  @map("club_de_formation")
+  specialty            String?
+  favoriteExcuse       String?  @map("favorite_excuse")
+  badFaithLevel        Int?     @map("bad_faith_level")
+  lockerRoomStyle      String?  @map("locker_room_style")
+  thirdHalfProfile     String?  @map("third_half_profile")
+  warCry               String?  @map("war_cry")
+  signatureCelebration String?  @map("signature_celebration")
+  worstOnPitchHabit    String?  @map("worst_on_pitch_habit")
+  legendaryPhrase      String?  @map("legendary_phrase")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  @@unique([groupId, userId], map: "uq_players_group_id_user_id")
+  @@index([userId], map: "idx_players_user_id")
+  @@map("players")
+}
