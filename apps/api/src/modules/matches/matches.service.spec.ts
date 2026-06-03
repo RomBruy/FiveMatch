@@ -92,6 +92,7 @@ describe('MatchesService', () => {
       .fn()
       .mockResolvedValueOnce(4)
       .mockResolvedValueOnce(5)
+      .mockResolvedValueOnce(5)
       .mockResolvedValueOnce(0);
     const findUnique = jest
       .fn()
@@ -148,6 +149,174 @@ describe('MatchesService', () => {
       }) as object,
     });
   });
+
+  it('adds an In response to the ordered waitlist when the match is full', async () => {
+    const count = jest
+      .fn()
+      .mockResolvedValueOnce(10)
+      .mockResolvedValueOnce(1)
+      .mockResolvedValueOnce(10)
+      .mockResolvedValueOnce(10)
+      .mockResolvedValueOnce(2);
+    const findUnique = jest
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(
+        createAttendanceRow({
+          response: 'in',
+          status: 'waitlisted',
+          waitlistPosition: 2,
+        }),
+      );
+    const upsert = jest.fn().mockResolvedValue(
+      createAttendanceRow({
+        response: 'in',
+        status: 'waitlisted',
+        waitlistPosition: 2,
+      }),
+    );
+    const findMany = jest.fn().mockResolvedValue([
+      createAttendanceRow({
+        id: 'attendance_wait_1',
+        playerId: 'ply_wait_1',
+        status: 'waitlisted',
+        waitlistPosition: 1,
+      }),
+      createAttendanceRow({
+        id: 'attendance_123',
+        status: 'waitlisted',
+        waitlistPosition: 2,
+      }),
+    ]);
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'member',
+        findFirst: jest.fn().mockResolvedValue(createMatchRow()),
+        attendanceCount: count,
+        attendanceFindUnique: findUnique,
+        attendanceFindMany: findMany,
+        attendanceUpsert: upsert,
+      }),
+    );
+
+    await expect(
+      service.submitAttendance('user_123', 'grp_123', 'match_123', {
+        response: 'in',
+      }),
+    ).resolves.toMatchObject({
+      confirmedCount: 10,
+      waitlistCount: 2,
+      myAttendance: {
+        response: 'in',
+        status: 'waitlisted',
+        waitlistPosition: 2,
+      },
+    });
+
+    expect(upsert).toHaveBeenCalledWith({
+      where: {
+        matchId_playerId: {
+          matchId: 'match_123',
+          playerId: 'ply_123',
+        },
+      },
+      create: expect.objectContaining({
+        response: 'in',
+        status: 'waitlisted',
+        waitlistPosition: 2,
+      }) as object,
+      update: expect.objectContaining({
+        response: 'in',
+        status: 'waitlisted',
+        waitlistPosition: 2,
+      }) as object,
+    });
+  });
+
+  it('promotes the next waitlisted player when a confirmed player cancels', async () => {
+    const count = jest
+      .fn()
+      .mockResolvedValueOnce(9)
+      .mockResolvedValueOnce(10)
+      .mockResolvedValueOnce(1);
+    const findUnique = jest
+      .fn()
+      .mockResolvedValueOnce(
+        createAttendanceRow({
+          response: 'in',
+          status: 'confirmed',
+        }),
+      )
+      .mockResolvedValueOnce(
+        createAttendanceRow({
+          response: 'out',
+          status: 'out',
+        }),
+      );
+    const matchFindFirst = jest.fn().mockResolvedValue(createMatchRow());
+    const attendanceFindFirst = jest.fn().mockResolvedValue(
+      createAttendanceRow({
+        id: 'attendance_wait_1',
+        playerId: 'ply_wait_1',
+        status: 'waitlisted',
+        waitlistPosition: 1,
+      }),
+    );
+    const findMany = jest.fn().mockResolvedValue([
+      createAttendanceRow({
+        id: 'attendance_wait_2',
+        playerId: 'ply_wait_2',
+        status: 'waitlisted',
+        waitlistPosition: 2,
+      }),
+    ]);
+    const update = jest.fn().mockResolvedValue(createAttendanceRow());
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'member',
+        findFirst: matchFindFirst,
+        attendanceCount: count,
+        attendanceFindFirst,
+        attendanceFindUnique: findUnique,
+        attendanceFindMany: findMany,
+        attendanceUpdate: update,
+      }),
+    );
+
+    await expect(
+      service.submitAttendance('user_123', 'grp_123', 'match_123', {
+        response: 'out',
+      }),
+    ).resolves.toMatchObject({
+      confirmedCount: 10,
+      waitlistCount: 1,
+      myAttendance: {
+        response: 'out',
+        status: 'out',
+      },
+    });
+
+    expect(update).toHaveBeenNthCalledWith(1, {
+      where: {
+        id: 'attendance_wait_1',
+      },
+      data: {
+        response: 'in',
+        status: 'confirmed',
+        waitlistPosition: null,
+        respondedAt: expect.any(Date) as Date,
+      },
+    });
+    expect(update).toHaveBeenNthCalledWith(2, {
+      where: {
+        id: 'attendance_wait_2',
+      },
+      data: {
+        waitlistPosition: 1,
+      },
+    });
+  });
 });
 
 function createPrismaMock({
@@ -155,14 +324,20 @@ function createPrismaMock({
   create = jest.fn(),
   findFirst = jest.fn(),
   attendanceCount = jest.fn().mockResolvedValue(0),
+  attendanceFindFirst = jest.fn().mockResolvedValue(null),
+  attendanceFindMany = jest.fn().mockResolvedValue([]),
   attendanceFindUnique = jest.fn().mockResolvedValue(null),
+  attendanceUpdate = jest.fn().mockResolvedValue(createAttendanceRow()),
   attendanceUpsert = jest.fn(),
 }: {
   role: string;
   create?: jest.Mock;
   findFirst?: jest.Mock;
   attendanceCount?: jest.Mock;
+  attendanceFindFirst?: jest.Mock;
+  attendanceFindMany?: jest.Mock;
   attendanceFindUnique?: jest.Mock;
+  attendanceUpdate?: jest.Mock;
   attendanceUpsert?: jest.Mock;
 }) {
   return {
@@ -188,7 +363,10 @@ function createPrismaMock({
     },
     matchAttendance: {
       count: attendanceCount,
+      findFirst: attendanceFindFirst,
+      findMany: attendanceFindMany,
       findUnique: attendanceFindUnique,
+      update: attendanceUpdate,
       upsert: attendanceUpsert,
     },
   } as unknown as PrismaService;
@@ -215,15 +393,18 @@ function createMatchRow() {
 
 function createAttendanceRow(
   overrides: Partial<{
+    id: string;
+    matchId: string;
+    playerId: string;
     response: string;
     status: string;
     waitlistPosition: number | null;
   }> = {},
 ) {
   return {
-    id: 'attendance_123',
-    matchId: 'match_123',
-    playerId: 'ply_123',
+    id: overrides.id ?? 'attendance_123',
+    matchId: overrides.matchId ?? 'match_123',
+    playerId: overrides.playerId ?? 'ply_123',
     response: overrides.response ?? 'in',
     status: overrides.status ?? 'confirmed',
     waitlistPosition: overrides.waitlistPosition ?? null,

@@ -384,6 +384,7 @@ export const en = {
     attendanceMaybe: "Maybe",
     attendanceConfirmed: "You are confirmed",
     attendanceWaitlisted: "You are waitlisted",
+    attendanceWaitlistPosition: "position",
     attendanceOutState: "You are out",
     attendanceMaybeState: "You are maybe",
     attendanceSubmitting: "Saving...",

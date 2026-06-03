@@ -387,6 +387,7 @@ export const fr = {
     attendanceMaybe: "Peut-etre",
     attendanceConfirmed: "Tu es confirme",
     attendanceWaitlisted: "Tu es en attente",
+    attendanceWaitlistPosition: "position",
     attendanceOutState: "Tu ne joues pas",
     attendanceMaybeState: "Tu es peut-etre",
     attendanceSubmitting: "Enregistrement...",

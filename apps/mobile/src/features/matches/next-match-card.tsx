@@ -123,6 +123,12 @@ function getAttendanceStateLabel(
   }
 
   if (match.myAttendance?.status === "waitlisted") {
+    const position = match.myAttendance.waitlistPosition;
+
+    if (position) {
+      return `${strings.matches.attendanceWaitlisted} · ${strings.matches.attendanceWaitlistPosition} #${position}`;
+    }
+
     return strings.matches.attendanceWaitlisted;
   }
 

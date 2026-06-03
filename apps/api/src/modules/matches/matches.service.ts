@@ -182,6 +182,7 @@ export class MatchesService {
         respondedAt: new Date(),
       },
     });
+    await this.reconcileWaitlist(match);
 
     return this.toInternalMatch(match, actor.playerId);
   }
@@ -305,6 +306,92 @@ export class MatchesService {
     });
 
     return waitlistCount + 1;
+  }
+
+  private async reconcileWaitlist(match: PrismaMatch) {
+    const confirmedCount = await this.prisma.matchAttendance.count({
+      where: {
+        matchId: match.id,
+        status: 'confirmed',
+      },
+    });
+    let availableSpots = Math.max(match.maxPlayers - confirmedCount, 0);
+
+    while (availableSpots > 0) {
+      const nextWaitlistedPlayer = await this.prisma.matchAttendance.findFirst({
+        where: {
+          matchId: match.id,
+          status: 'waitlisted',
+        },
+        orderBy: [
+          {
+            waitlistPosition: 'asc',
+          },
+          {
+            respondedAt: 'asc',
+          },
+          {
+            createdAt: 'asc',
+          },
+        ],
+      });
+
+      if (!nextWaitlistedPlayer) {
+        break;
+      }
+
+      await this.prisma.matchAttendance.update({
+        where: {
+          id: nextWaitlistedPlayer.id,
+        },
+        data: {
+          response: 'in',
+          status: 'confirmed',
+          waitlistPosition: null,
+          respondedAt: new Date(),
+        },
+      });
+      availableSpots -= 1;
+    }
+
+    await this.normalizeWaitlistPositions(match.id);
+  }
+
+  private async normalizeWaitlistPositions(matchId: string) {
+    const waitlistedPlayers = await this.prisma.matchAttendance.findMany({
+      where: {
+        matchId,
+        status: 'waitlisted',
+      },
+      orderBy: [
+        {
+          waitlistPosition: 'asc',
+        },
+        {
+          respondedAt: 'asc',
+        },
+        {
+          createdAt: 'asc',
+        },
+      ],
+    });
+
+    for (const [index, attendance] of waitlistedPlayers.entries()) {
+      const nextPosition = index + 1;
+
+      if (attendance.waitlistPosition === nextPosition) {
+        continue;
+      }
+
+      await this.prisma.matchAttendance.update({
+        where: {
+          id: attendance.id,
+        },
+        data: {
+          waitlistPosition: nextPosition,
+        },
+      });
+    }
   }
 
   private async toInternalMatch(
