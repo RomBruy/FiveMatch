@@ -7,6 +7,7 @@ import {
 import type { InitialPeerRating as PrismaInitialPeerRating } from '@prisma/client';
 import type {
   InitialPeerRatingAttributeSet,
+  InitialPeerRatingReadiness,
   SubmitInitialPeerRatingInput,
   UpdateInitialPeerRatingInput,
 } from '@fit-five/shared';
@@ -40,6 +41,8 @@ export type InternalInitialPeerRating = {
   createdAt: Date;
   updatedAt: Date;
 };
+
+const INITIAL_PEER_RATING_READINESS_THRESHOLD = 3;
 
 @Injectable()
 export class RatingsService {
@@ -157,6 +160,89 @@ export class RatingsService {
     });
 
     return this.toInternalRating(rating);
+  }
+
+  async getInitialPeerRatingReadiness(
+    clerkUserId: string,
+    groupId: string,
+  ): Promise<InitialPeerRatingReadiness> {
+    const currentPlayer = await this.requireGroupPlayer(clerkUserId, groupId);
+    const [players, ratingCounts, currentUserRatings] = await Promise.all([
+      this.prisma.player.findMany({
+        where: {
+          groupId,
+        },
+        select: {
+          id: true,
+        },
+        orderBy: {
+          createdAt: 'asc',
+        },
+      }),
+      this.prisma.initialPeerRating.groupBy({
+        by: ['ratedPlayerId'],
+        where: {
+          groupId,
+        },
+        _count: {
+          _all: true,
+        },
+      }),
+      this.prisma.initialPeerRating.findMany({
+        where: {
+          groupId,
+          raterPlayerId: currentPlayer.id,
+        },
+        select: {
+          ratedPlayerId: true,
+        },
+      }),
+    ]);
+    const receivedCountByPlayerId = new Map(
+      ratingCounts.map((ratingCount) => [
+        ratingCount.ratedPlayerId,
+        ratingCount._count._all,
+      ]),
+    );
+    const currentUserRatedPlayerIds = new Set(
+      currentUserRatings.map((rating) => rating.ratedPlayerId),
+    );
+    const threshold = INITIAL_PEER_RATING_READINESS_THRESHOLD;
+    const progressPlayers = players.map((player) => {
+      const ratingsReceived = receivedCountByPlayerId.get(player.id) ?? 0;
+      const ratingsNeeded = Math.max(0, threshold - ratingsReceived);
+
+      return {
+        playerId: player.id,
+        ratingsReceived,
+        ratingsNeeded,
+        ready: ratingsNeeded === 0,
+        currentUserHasRated: currentUserRatedPlayerIds.has(player.id),
+        isCurrentUser: player.id === currentPlayer.id,
+      };
+    });
+    const totalPlayers = progressPlayers.length;
+    const readyPlayers = progressPlayers.filter(
+      (player) => player.ready,
+    ).length;
+    const incompletePlayers = totalPlayers - readyPlayers;
+    const progressPercent =
+      totalPlayers === 0 ? 0 : Math.round((readyPlayers / totalPlayers) * 100);
+    const currentUserPendingRatings = progressPlayers.filter(
+      (player) => !player.isCurrentUser && !player.currentUserHasRated,
+    ).length;
+
+    return {
+      groupId,
+      threshold,
+      totalPlayers,
+      readyPlayers,
+      incompletePlayers,
+      progressPercent,
+      ready: totalPlayers > 0 && incompletePlayers === 0,
+      currentUserPendingRatings,
+      players: progressPlayers,
+    };
   }
 
   private async requireGroupPlayer(

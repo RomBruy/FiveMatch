@@ -7,6 +7,7 @@ import type {
   FootballGroupMembersResponse,
   FootballGroupsResponse,
   HealthResponse,
+  InitialPeerRatingReadinessResponse,
   MyInitialPeerRatingsResponse,
   PlayerProfileResponse,
   PlayerRosterResponse,
@@ -248,6 +249,18 @@ export async function listMyInitialPeerRatings(
 ): Promise<MyInitialPeerRatingsResponse> {
   return apiFetch<MyInitialPeerRatingsResponse>(
     `/groups/${groupId}/initial-peer-ratings/me`,
+    {
+      token,
+    }
+  );
+}
+
+export async function getInitialPeerRatingReadiness(
+  token: string,
+  groupId: string
+): Promise<InitialPeerRatingReadinessResponse> {
+  return apiFetch<InitialPeerRatingReadinessResponse>(
+    `/groups/${groupId}/initial-peer-ratings/readiness`,
     {
       token,
     }

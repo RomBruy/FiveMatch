@@ -10,6 +10,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type {
+  InitialPeerRatingReadinessResponse,
   MyInitialPeerRatingsResponse,
   SubmitInitialPeerRatingInput,
   SubmitInitialPeerRatingResponse,
@@ -24,6 +25,28 @@ import { RatingsService } from './ratings.service';
 @Controller('groups/:groupId/initial-peer-ratings')
 export class RatingsController {
   constructor(private readonly ratingsService: RatingsService) {}
+
+  @Get('readiness')
+  @UseGuards(ClerkAuthGuard)
+  async getInitialPeerRatingReadiness(
+    @Req() request: AuthenticatedRequest,
+    @Param('groupId') groupId: string,
+  ): Promise<InitialPeerRatingReadinessResponse> {
+    if (!request.auth) {
+      throw new InternalServerErrorException('Authenticated user missing.');
+    }
+
+    const readiness = await this.ratingsService.getInitialPeerRatingReadiness(
+      request.auth.clerkUserId,
+      groupId,
+    );
+
+    return {
+      data: {
+        readiness,
+      },
+    };
+  }
 
   @Get('me')
   @UseGuards(ClerkAuthGuard)

@@ -301,6 +301,17 @@ export const en = {
     selfRatingError: "You cannot rate yourself.",
     lockedError:
       "This rating can no longer be edited because it affected official teams.",
+    progressTitle: "Rating progress",
+    progressReadyTitle: "Generation ready",
+    progressBlockedTitle: "A few ratings missing",
+    progressSubtitle:
+      "Each player needs 3 received ratings to unlock a credible baseline.",
+    progressPlayersReady: "players ready",
+    progressPendingForYou: "Left for you to rate",
+    progressAnonymous: "Scores stay anonymous: only counters are shown.",
+    ratingsReceivedLabel: "ratings received",
+    ratingsNeededLabel: "ratings missing",
+    playerReady: "Ready",
     valueSuffix: "/100",
     attributes: {
       overall: "Overall",

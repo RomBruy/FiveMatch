@@ -3,6 +3,65 @@ import { RatingsController } from './ratings.controller';
 import { RatingsService } from './ratings.service';
 
 describe('RatingsController', () => {
+  it('serializes initial rating readiness without score values', async () => {
+    const getInitialPeerRatingReadiness = jest.fn().mockResolvedValue({
+      groupId: 'grp_123',
+      threshold: 3,
+      totalPlayers: 2,
+      readyPlayers: 1,
+      incompletePlayers: 1,
+      progressPercent: 50,
+      ready: false,
+      currentUserPendingRatings: 1,
+      players: [
+        {
+          playerId: 'ply_rater',
+          ratingsReceived: 3,
+          ratingsNeeded: 0,
+          ready: true,
+          currentUserHasRated: false,
+          isCurrentUser: true,
+        },
+        {
+          playerId: 'ply_target',
+          ratingsReceived: 1,
+          ratingsNeeded: 2,
+          ready: false,
+          currentUserHasRated: false,
+          isCurrentUser: false,
+        },
+      ],
+    });
+    const controller = new RatingsController({
+      getInitialPeerRatingReadiness,
+    } as unknown as RatingsService);
+
+    await expect(
+      controller.getInitialPeerRatingReadiness(
+        {
+          auth: {
+            clerkUserId: 'user_123',
+          },
+        } as AuthenticatedRequest,
+        'grp_123',
+      ),
+    ).resolves.toEqual({
+      data: {
+        readiness: expect.objectContaining({
+          groupId: 'grp_123',
+          threshold: 3,
+          progressPercent: 50,
+          currentUserPendingRatings: 1,
+        }) as object,
+      },
+    });
+
+    expect(getInitialPeerRatingReadiness).toHaveBeenCalledWith(
+      'user_123',
+      'grp_123',
+    );
+  });
+
   it('serializes current-user initial peer ratings', async () => {
     const listMyInitialPeerRatings = jest.fn().mockResolvedValue([
       createInternalRating({

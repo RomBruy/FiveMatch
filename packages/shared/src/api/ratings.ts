@@ -25,6 +25,8 @@ export const goalkeeperInitialPeerRatingAttributes = [
   "fun",
 ] as const;
 
+export const initialPeerRatingReadinessThreshold = 3;
+
 export type InitialPeerRatingAttributeSet =
   (typeof initialPeerRatingAttributeSets)[number];
 export type StandardInitialPeerRatingAttribute =
@@ -82,4 +84,29 @@ export type UpdateInitialPeerRatingResponse = ApiSuccessResponse<{
 
 export type MyInitialPeerRatingsResponse = ApiSuccessResponse<{
   ratings: InitialPeerRating[];
+}>;
+
+export type InitialPeerRatingPlayerProgress = {
+  playerId: string;
+  ratingsReceived: number;
+  ratingsNeeded: number;
+  ready: boolean;
+  currentUserHasRated: boolean;
+  isCurrentUser: boolean;
+};
+
+export type InitialPeerRatingReadiness = {
+  groupId: string;
+  threshold: number;
+  totalPlayers: number;
+  readyPlayers: number;
+  incompletePlayers: number;
+  progressPercent: number;
+  ready: boolean;
+  currentUserPendingRatings: number;
+  players: InitialPeerRatingPlayerProgress[];
+};
+
+export type InitialPeerRatingReadinessResponse = ApiSuccessResponse<{
+  readiness: InitialPeerRatingReadiness;
 }>;

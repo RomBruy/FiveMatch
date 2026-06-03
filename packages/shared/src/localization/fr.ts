@@ -302,6 +302,18 @@ export const fr = {
     selfRatingError: "Tu ne peux pas te noter toi-meme.",
     lockedError:
       "Cette note ne peut plus etre modifiee car elle a affecte des equipes officielles.",
+    progressTitle: "Progression des notes",
+    progressReadyTitle: "Generation prete",
+    progressBlockedTitle: "Encore quelques notes",
+    progressSubtitle:
+      "Il faut 3 notes recues par joueur pour debloquer une base credible.",
+    progressPlayersReady: "joueurs prets",
+    progressPendingForYou: "A toi de noter",
+    progressAnonymous:
+      "Les scores restent anonymes: on affiche seulement les compteurs.",
+    ratingsReceivedLabel: "notes recues",
+    ratingsNeededLabel: "notes manquantes",
+    playerReady: "Pret",
     valueSuffix: "/100",
     attributes: {
       overall: "Overall",

@@ -240,6 +240,89 @@ describe('RatingsService', () => {
       }),
     ).rejects.toBeInstanceOf(ConflictException);
   });
+
+  it('returns anonymous rating readiness counts for the group', async () => {
+    const service = new RatingsService(
+      createPrismaMock({
+        targetPreferredStyle: 'attacker',
+        existingRating: null,
+        players: [
+          {
+            id: 'ply_rater',
+          },
+          {
+            id: 'ply_target',
+          },
+          {
+            id: 'ply_missing',
+          },
+        ],
+        ratingCounts: [
+          {
+            ratedPlayerId: 'ply_rater',
+            _count: {
+              _all: 3,
+            },
+          },
+          {
+            ratedPlayerId: 'ply_target',
+            _count: {
+              _all: 2,
+            },
+          },
+        ],
+        currentUserRatings: [
+          {
+            ratedPlayerId: 'ply_target',
+          },
+        ],
+      }),
+    );
+
+    const readiness = await service.getInitialPeerRatingReadiness(
+      'user_123',
+      'grp_123',
+    );
+
+    expect(readiness).toEqual({
+      groupId: 'grp_123',
+      threshold: 3,
+      totalPlayers: 3,
+      readyPlayers: 1,
+      incompletePlayers: 2,
+      progressPercent: 33,
+      ready: false,
+      currentUserPendingRatings: 1,
+      players: [
+        {
+          playerId: 'ply_rater',
+          ratingsReceived: 3,
+          ratingsNeeded: 0,
+          ready: true,
+          currentUserHasRated: false,
+          isCurrentUser: true,
+        },
+        {
+          playerId: 'ply_target',
+          ratingsReceived: 2,
+          ratingsNeeded: 1,
+          ready: false,
+          currentUserHasRated: true,
+          isCurrentUser: false,
+        },
+        {
+          playerId: 'ply_missing',
+          ratingsReceived: 0,
+          ratingsNeeded: 3,
+          ready: false,
+          currentUserHasRated: false,
+          isCurrentUser: false,
+        },
+      ],
+    });
+    expect(readiness.players[0]).not.toHaveProperty('overall');
+    expect(readiness.players[0]).not.toHaveProperty('raterPlayerId');
+  });
 });
 
 type CreatePrismaMockOptions = {
@@ -247,6 +330,14 @@ type CreatePrismaMockOptions = {
   targetPreferredStyle: string;
   existingRating: { id: string } | null;
   existingRatingById?: ReturnType<typeof createRatingRow> | null;
+  players?: Array<{ id: string }>;
+  ratingCounts?: Array<{
+    ratedPlayerId: string;
+    _count: {
+      _all: number;
+    };
+  }>;
+  currentUserRatings?: Array<{ ratedPlayerId: string }>;
   create?: jest.Mock;
   update?: jest.Mock;
 };
@@ -256,6 +347,9 @@ function createPrismaMock({
   targetPreferredStyle,
   existingRating,
   existingRatingById = null,
+  players = [],
+  ratingCounts = [],
+  currentUserRatings = [],
   create = jest.fn(),
   update = jest.fn(),
 }: CreatePrismaMockOptions) {
@@ -279,10 +373,13 @@ function createPrismaMock({
         id: targetPlayerId,
         preferredStyle: targetPreferredStyle,
       }),
+      findMany: jest.fn().mockResolvedValue(players),
     },
     initialPeerRating: {
       findUnique: jest.fn().mockResolvedValue(existingRating),
       findFirst: jest.fn().mockResolvedValue(existingRatingById),
+      findMany: jest.fn().mockResolvedValue(currentUserRatings),
+      groupBy: jest.fn().mockResolvedValue(ratingCounts),
       create,
       update,
     },

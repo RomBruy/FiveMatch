@@ -6,6 +6,8 @@ import {
   type InitialPeerRating,
   type InitialPeerRatingAttribute,
   type InitialPeerRatingAttributeSet,
+  type InitialPeerRatingPlayerProgress,
+  type InitialPeerRatingReadiness,
   type InitialPeerRatingValues,
   type PlayerProfile,
 } from "@fit-five/shared";
@@ -21,6 +23,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import {
+  getInitialPeerRatingReadiness,
   getMyPlayerProfile,
   listCurrentUserGroups,
   listGroupPlayers,
@@ -44,6 +47,9 @@ export default function JoueursScreen() {
   const [myPlayer, setMyPlayer] = useState<PlayerProfile | null>(null);
   const [submittedRatings, setSubmittedRatings] = useState<InitialPeerRating[]>(
     []
+  );
+  const [readiness, setReadiness] = useState<InitialPeerRatingReadiness | null>(
+    null
   );
   const [activeRatingPlayer, setActiveRatingPlayer] =
     useState<PlayerProfile | null>(null);
@@ -74,6 +80,7 @@ export default function JoueursScreen() {
         setPlayers([]);
         setMyPlayer(null);
         setSubmittedRatings([]);
+        setReadiness(null);
         setLoadState("noGroup");
         return;
       }
@@ -83,14 +90,18 @@ export default function JoueursScreen() {
         listGroupPlayers(token, firstGroup.id),
       ]);
       const currentPlayer = profileResponse.data.player;
-      const ratingsResponse = currentPlayer
-        ? await listMyInitialPeerRatings(token, firstGroup.id)
-        : null;
+      const [ratingsResponse, readinessResponse] = currentPlayer
+        ? await Promise.all([
+            listMyInitialPeerRatings(token, firstGroup.id),
+            getInitialPeerRatingReadiness(token, firstGroup.id),
+          ])
+        : [null, null];
 
       setActiveGroup(firstGroup);
       setMyPlayer(currentPlayer);
       setPlayers(rosterResponse.data.players);
       setSubmittedRatings(ratingsResponse?.data.ratings ?? []);
+      setReadiness(readinessResponse?.data.readiness ?? null);
       setLoadState("ready");
     } catch (error) {
       console.warn("Unable to load player roster", error);
@@ -162,6 +173,7 @@ export default function JoueursScreen() {
             values: ratingValues,
           });
       const savedRating = response.data.rating;
+      const isNewRating = !activeRating;
 
       setSubmittedRatings((currentRatings) => {
         const existingIndex = currentRatings.findIndex(
@@ -176,6 +188,9 @@ export default function JoueursScreen() {
           rating.id === savedRating.id ? savedRating : rating
         );
       });
+      setReadiness((currentReadiness) =>
+        applyRatingReadinessChange(currentReadiness, savedRating, isNewRating)
+      );
       setLastSaveWasUpdate(Boolean(activeRating));
       setSubmitState("saved");
       setActiveRatingPlayer(null);
@@ -257,6 +272,10 @@ export default function JoueursScreen() {
           </View>
         ) : null}
 
+        {loadState === "ready" && readiness ? (
+          <RatingProgressCard readiness={readiness} />
+        ) : null}
+
         {loadState === "ready" && activeRatingPlayer ? (
           <RatingComposer
             player={activeRatingPlayer}
@@ -304,6 +323,10 @@ export default function JoueursScreen() {
                 submittedRatings.find(
                   (rating) => rating.ratedPlayerId === player.id
                 ) ?? null;
+              const playerProgress =
+                readiness?.players.find(
+                  (progress) => progress.playerId === player.id
+                ) ?? null;
               const isLocked = Boolean(submittedRating?.lockedAt);
 
               return (
@@ -311,6 +334,7 @@ export default function JoueursScreen() {
                   key={player.id}
                   isSelf={isSelf}
                   player={player}
+                  progress={playerProgress}
                   rating={submittedRating}
                   ratingEnabled={Boolean(myPlayer) && !isSelf && !isLocked}
                   onRate={handleOpenRating}
@@ -327,14 +351,71 @@ export default function JoueursScreen() {
 type PlayerRosterCardProps = {
   player: PlayerProfile;
   isSelf: boolean;
+  progress: InitialPeerRatingPlayerProgress | null;
   rating: InitialPeerRating | null;
   ratingEnabled: boolean;
   onRate: (player: PlayerProfile, rating: InitialPeerRating | null) => void;
 };
 
+function RatingProgressCard({
+  readiness,
+}: {
+  readiness: InitialPeerRatingReadiness;
+}) {
+  const { strings } = usePreferences();
+
+  return (
+    <View style={styles.progressCard}>
+      <View style={styles.progressTopRow}>
+        <View style={styles.progressHeaderCopy}>
+          <Text style={styles.progressKicker}>
+            {strings.ratings.progressTitle}
+          </Text>
+          <Text style={styles.progressTitle}>
+            {readiness.ready
+              ? strings.ratings.progressReadyTitle
+              : strings.ratings.progressBlockedTitle}
+          </Text>
+        </View>
+        <Text style={styles.progressPercent}>{readiness.progressPercent}%</Text>
+      </View>
+
+      <View style={styles.progressTrack}>
+        <View
+          style={[
+            styles.progressFill,
+            {
+              width: `${readiness.progressPercent}%` as `${number}%`,
+            },
+          ]}
+        />
+      </View>
+
+      <View style={styles.progressStatsRow}>
+        <Text style={styles.progressStat}>
+          {readiness.readyPlayers}/{readiness.totalPlayers}{" "}
+          {strings.ratings.progressPlayersReady}
+        </Text>
+        <Text style={styles.progressStat}>
+          {readiness.currentUserPendingRatings}{" "}
+          {strings.ratings.progressPendingForYou}
+        </Text>
+      </View>
+
+      <Text style={styles.progressHelp}>
+        {strings.ratings.progressSubtitle}
+      </Text>
+      <Text style={styles.progressAnonymous}>
+        {strings.ratings.progressAnonymous}
+      </Text>
+    </View>
+  );
+}
+
 function PlayerRosterCard({
   player,
   isSelf,
+  progress,
   rating,
   ratingEnabled,
   onRate,
@@ -403,6 +484,24 @@ function PlayerRosterCard({
             </Text>
           )}
         </View>
+
+        {progress ? (
+          <View style={styles.playerProgressRow}>
+            <Text style={styles.playerProgressText}>
+              {progress.ratingsReceived} {strings.ratings.ratingsReceivedLabel}
+            </Text>
+            <Text
+              style={[
+                styles.playerProgressBadge,
+                progress.ready && styles.playerProgressBadgeReady,
+              ]}
+            >
+              {progress.ready
+                ? strings.ratings.playerReady
+                : `${progress.ratingsNeeded} ${strings.ratings.ratingsNeededLabel}`}
+            </Text>
+          </View>
+        ) : null}
 
         <Pressable
           disabled={!ratingEnabled}
@@ -589,6 +688,67 @@ function getValuesFromRating(
   ) as InitialPeerRatingValues;
 }
 
+function applyRatingReadinessChange(
+  readiness: InitialPeerRatingReadiness | null,
+  rating: InitialPeerRating,
+  isNewRating: boolean
+): InitialPeerRatingReadiness | null {
+  if (!readiness) {
+    return readiness;
+  }
+
+  const existingPlayerProgress = readiness.players.find(
+    (player) => player.playerId === rating.ratedPlayerId
+  );
+  const shouldReduceCurrentUserPending =
+    isNewRating &&
+    existingPlayerProgress &&
+    !existingPlayerProgress.isCurrentUser &&
+    !existingPlayerProgress.currentUserHasRated;
+  let readyDelta = 0;
+  const players = readiness.players.map((playerProgress) => {
+    if (playerProgress.playerId !== rating.ratedPlayerId) {
+      return playerProgress;
+    }
+
+    const ratingsReceived = isNewRating
+      ? playerProgress.ratingsReceived + 1
+      : playerProgress.ratingsReceived;
+    const ratingsNeeded = Math.max(0, readiness.threshold - ratingsReceived);
+    const ready = ratingsNeeded === 0;
+
+    if (!playerProgress.ready && ready) {
+      readyDelta = 1;
+    }
+
+    return {
+      ...playerProgress,
+      ratingsReceived,
+      ratingsNeeded,
+      ready,
+      currentUserHasRated: true,
+    };
+  });
+  const readyPlayers = readiness.readyPlayers + readyDelta;
+  const incompletePlayers = readiness.totalPlayers - readyPlayers;
+  const progressPercent =
+    readiness.totalPlayers === 0
+      ? 0
+      : Math.round((readyPlayers / readiness.totalPlayers) * 100);
+
+  return {
+    ...readiness,
+    readyPlayers,
+    incompletePlayers,
+    progressPercent,
+    ready: readiness.totalPlayers > 0 && incompletePlayers === 0,
+    currentUserPendingRatings: shouldReduceCurrentUserPending
+      ? Math.max(0, readiness.currentUserPendingRatings - 1)
+      : readiness.currentUserPendingRatings,
+    players,
+  };
+}
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -702,6 +862,78 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
   },
+  progressCard: {
+    gap: 14,
+    borderWidth: 1,
+    borderColor: "#1F513A",
+    borderRadius: 28,
+    backgroundColor: "#0C2118",
+    padding: 20,
+  },
+  progressTopRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 14,
+  },
+  progressHeaderCopy: {
+    flex: 1,
+    gap: 5,
+  },
+  progressKicker: {
+    color: "#72E6A4",
+    fontSize: 12,
+    fontWeight: "900",
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
+  },
+  progressTitle: {
+    color: "#F4F7F2",
+    fontSize: 22,
+    fontWeight: "900",
+  },
+  progressPercent: {
+    color: "#F9C846",
+    fontSize: 28,
+    fontWeight: "900",
+  },
+  progressTrack: {
+    height: 10,
+    overflow: "hidden",
+    borderRadius: 999,
+    backgroundColor: "#17251F",
+  },
+  progressFill: {
+    height: "100%",
+    borderRadius: 999,
+    backgroundColor: "#35C77B",
+  },
+  progressStatsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  progressStat: {
+    overflow: "hidden",
+    borderRadius: 999,
+    backgroundColor: "#113B2B",
+    color: "#72E6A4",
+    fontSize: 12,
+    fontWeight: "900",
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  progressHelp: {
+    color: "#AEB8C7",
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  progressAnonymous: {
+    color: "#8D96A5",
+    fontSize: 12,
+    fontWeight: "800",
+    lineHeight: 17,
+  },
   rosterList: {
     gap: 12,
   },
@@ -803,6 +1035,31 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     paddingHorizontal: 9,
     paddingVertical: 6,
+  },
+  playerProgressRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 8,
+  },
+  playerProgressText: {
+    color: "#AEB8C7",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  playerProgressBadge: {
+    overflow: "hidden",
+    borderRadius: 999,
+    backgroundColor: "#332711",
+    color: "#F9C846",
+    fontSize: 12,
+    fontWeight: "900",
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  playerProgressBadgeReady: {
+    backgroundColor: "#113B2B",
+    color: "#72E6A4",
   },
   ratingButton: {
     alignSelf: "flex-start",
