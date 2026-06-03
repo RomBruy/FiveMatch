@@ -3,6 +3,7 @@ import {
   goalkeeperInitialPeerRatingAttributes,
   standardInitialPeerRatingAttributes,
   type FootballGroup,
+  type InitialPeerRating,
   type InitialPeerRatingAttribute,
   type InitialPeerRatingAttributeSet,
   type InitialPeerRatingValues,
@@ -25,12 +26,13 @@ import {
   listGroupPlayers,
   listMyInitialPeerRatings,
   submitInitialPeerRating,
+  updateInitialPeerRating,
 } from "@/api/client";
 import { usePreferences } from "@/features/preferences/preferences-context";
 
 type RosterLoadState = "loading" | "ready" | "noGroup" | "error";
 type SubmitState = "idle" | "submitting" | "saved" | "error";
-type SubmitError = "duplicate" | "self" | "generic";
+type SubmitError = "duplicate" | "self" | "locked" | "generic";
 
 const ratingLevels = [0, 25, 50, 75, 100] as const;
 
@@ -40,13 +42,19 @@ export default function JoueursScreen() {
   const [activeGroup, setActiveGroup] = useState<FootballGroup | null>(null);
   const [players, setPlayers] = useState<PlayerProfile[]>([]);
   const [myPlayer, setMyPlayer] = useState<PlayerProfile | null>(null);
-  const [ratedPlayerIds, setRatedPlayerIds] = useState<string[]>([]);
+  const [submittedRatings, setSubmittedRatings] = useState<InitialPeerRating[]>(
+    []
+  );
   const [activeRatingPlayer, setActiveRatingPlayer] =
     useState<PlayerProfile | null>(null);
+  const [activeRating, setActiveRating] = useState<InitialPeerRating | null>(
+    null
+  );
   const [ratingValues, setRatingValues] = useState<InitialPeerRatingValues>({});
   const [loadState, setLoadState] = useState<RosterLoadState>("loading");
   const [submitState, setSubmitState] = useState<SubmitState>("idle");
   const [submitError, setSubmitError] = useState<SubmitError>("generic");
+  const [lastSaveWasUpdate, setLastSaveWasUpdate] = useState(false);
 
   async function loadRoster() {
     setLoadState("loading");
@@ -65,7 +73,7 @@ export default function JoueursScreen() {
         setActiveGroup(null);
         setPlayers([]);
         setMyPlayer(null);
-        setRatedPlayerIds([]);
+        setSubmittedRatings([]);
         setLoadState("noGroup");
         return;
       }
@@ -82,10 +90,7 @@ export default function JoueursScreen() {
       setActiveGroup(firstGroup);
       setMyPlayer(currentPlayer);
       setPlayers(rosterResponse.data.players);
-      setRatedPlayerIds(
-        ratingsResponse?.data.ratings.map((rating) => rating.ratedPlayerId) ??
-          []
-      );
+      setSubmittedRatings(ratingsResponse?.data.ratings ?? []);
       setLoadState("ready");
     } catch (error) {
       console.warn("Unable to load player roster", error);
@@ -97,13 +102,24 @@ export default function JoueursScreen() {
     void loadRoster();
   }, [getToken]);
 
-  function handleOpenRating(player: PlayerProfile) {
-    const attributeSet = getAttributeSetForPlayer(player);
+  function handleOpenRating(
+    player: PlayerProfile,
+    rating: InitialPeerRating | null
+  ) {
+    if (rating?.lockedAt) {
+      return;
+    }
+
+    const attributeSet =
+      rating?.attributeSet ?? getAttributeSetForPlayer(player);
     const attributes = getAttributesForSet(attributeSet);
 
     setActiveRatingPlayer(player);
+    setActiveRating(rating);
     setRatingValues(
-      Object.fromEntries(attributes.map((attribute) => [attribute, 50]))
+      rating
+        ? getValuesFromRating(rating)
+        : Object.fromEntries(attributes.map((attribute) => [attribute, 50]))
     );
     setSubmitState("idle");
   }
@@ -132,24 +148,44 @@ export default function JoueursScreen() {
         throw new Error("Missing auth token.");
       }
 
-      await submitInitialPeerRating(token, activeGroup.id, {
-        ratedPlayerId: activeRatingPlayer.id,
-        values: ratingValues,
-      });
+      const response = activeRating
+        ? await updateInitialPeerRating(
+            token,
+            activeGroup.id,
+            activeRating.id,
+            {
+              values: ratingValues,
+            }
+          )
+        : await submitInitialPeerRating(token, activeGroup.id, {
+            ratedPlayerId: activeRatingPlayer.id,
+            values: ratingValues,
+          });
+      const savedRating = response.data.rating;
 
-      setRatedPlayerIds((currentIds) =>
-        currentIds.includes(activeRatingPlayer.id)
-          ? currentIds
-          : [...currentIds, activeRatingPlayer.id]
-      );
+      setSubmittedRatings((currentRatings) => {
+        const existingIndex = currentRatings.findIndex(
+          (rating) => rating.id === savedRating.id
+        );
+
+        if (existingIndex === -1) {
+          return [...currentRatings, savedRating];
+        }
+
+        return currentRatings.map((rating) =>
+          rating.id === savedRating.id ? savedRating : rating
+        );
+      });
+      setLastSaveWasUpdate(Boolean(activeRating));
       setSubmitState("saved");
       setActiveRatingPlayer(null);
+      setActiveRating(null);
       setRatingValues({});
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
 
       if (message.includes("409")) {
-        setSubmitError("duplicate");
+        setSubmitError(activeRating ? "locked" : "duplicate");
       } else if (message.includes("400")) {
         setSubmitError("self");
       } else {
@@ -224,11 +260,13 @@ export default function JoueursScreen() {
         {loadState === "ready" && activeRatingPlayer ? (
           <RatingComposer
             player={activeRatingPlayer}
+            rating={activeRating}
             values={ratingValues}
             submitState={submitState}
             submitError={submitError}
             onCancel={() => {
               setActiveRatingPlayer(null);
+              setActiveRating(null);
               setSubmitState("idle");
             }}
             onChange={handleRatingValueChange}
@@ -237,7 +275,11 @@ export default function JoueursScreen() {
         ) : null}
 
         {loadState === "ready" && submitState === "saved" ? (
-          <Text style={styles.successText}>{strings.ratings.saved}</Text>
+          <Text style={styles.successText}>
+            {lastSaveWasUpdate
+              ? strings.ratings.updated
+              : strings.ratings.saved}
+          </Text>
         ) : null}
 
         {loadState === "ready" && players.length === 0 ? (
@@ -258,15 +300,19 @@ export default function JoueursScreen() {
             </Text>
             {players.map((player) => {
               const isSelf = player.id === myPlayer?.id;
-              const isRated = ratedPlayerIds.includes(player.id);
+              const submittedRating =
+                submittedRatings.find(
+                  (rating) => rating.ratedPlayerId === player.id
+                ) ?? null;
+              const isLocked = Boolean(submittedRating?.lockedAt);
 
               return (
                 <PlayerRosterCard
                   key={player.id}
-                  isRated={isRated}
                   isSelf={isSelf}
                   player={player}
-                  ratingEnabled={Boolean(myPlayer) && !isSelf && !isRated}
+                  rating={submittedRating}
+                  ratingEnabled={Boolean(myPlayer) && !isSelf && !isLocked}
                   onRate={handleOpenRating}
                 />
               );
@@ -281,19 +327,21 @@ export default function JoueursScreen() {
 type PlayerRosterCardProps = {
   player: PlayerProfile;
   isSelf: boolean;
-  isRated: boolean;
+  rating: InitialPeerRating | null;
   ratingEnabled: boolean;
-  onRate: (player: PlayerProfile) => void;
+  onRate: (player: PlayerProfile, rating: InitialPeerRating | null) => void;
 };
 
 function PlayerRosterCard({
   player,
   isSelf,
-  isRated,
+  rating,
   ratingEnabled,
   onRate,
 }: PlayerRosterCardProps) {
   const { strings } = usePreferences();
+  const isRated = Boolean(rating);
+  const isLocked = Boolean(rating?.lockedAt);
   const displayName = getPlayerDisplayName(
     player,
     strings.profile.fallbackName
@@ -358,7 +406,7 @@ function PlayerRosterCard({
 
         <Pressable
           disabled={!ratingEnabled}
-          onPress={() => onRate(player)}
+          onPress={() => onRate(player, rating)}
           style={[
             styles.ratingButton,
             !ratingEnabled && styles.ratingButtonDisabled,
@@ -372,11 +420,17 @@ function PlayerRosterCard({
           >
             {isSelf
               ? strings.ratings.selfRating
-              : isRated
-                ? strings.ratings.alreadyRated
-                : strings.ratings.ratePlayer}
+              : isLocked
+                ? strings.ratings.lockedRating
+                : isRated
+                  ? strings.ratings.editRating
+                  : strings.ratings.ratePlayer}
           </Text>
         </Pressable>
+
+        {isLocked ? (
+          <Text style={styles.lockedHelp}>{strings.ratings.lockedHelp}</Text>
+        ) : null}
       </View>
     </View>
   );
@@ -384,6 +438,7 @@ function PlayerRosterCard({
 
 type RatingComposerProps = {
   player: PlayerProfile;
+  rating: InitialPeerRating | null;
   values: InitialPeerRatingValues;
   submitState: SubmitState;
   submitError: SubmitError;
@@ -394,6 +449,7 @@ type RatingComposerProps = {
 
 function RatingComposer({
   player,
+  rating,
   values,
   submitState,
   submitError,
@@ -406,7 +462,7 @@ function RatingComposer({
     player,
     strings.profile.fallbackName
   );
-  const attributeSet = getAttributeSetForPlayer(player);
+  const attributeSet = rating?.attributeSet ?? getAttributeSetForPlayer(player);
   const attributes = getAttributesForSet(attributeSet);
 
   return (
@@ -478,7 +534,9 @@ function RatingComposer({
         <Text style={styles.primaryButtonText}>
           {submitState === "submitting"
             ? strings.ratings.submitting
-            : strings.ratings.submitButton}
+            : rating
+              ? strings.ratings.updateButton
+              : strings.ratings.submitButton}
         </Text>
       </Pressable>
 
@@ -488,7 +546,9 @@ function RatingComposer({
             ? strings.ratings.duplicateError
             : submitError === "self"
               ? strings.ratings.selfRatingError
-              : strings.ratings.error}
+              : submitError === "locked"
+                ? strings.ratings.lockedError
+                : strings.ratings.error}
         </Text>
       ) : null}
     </View>
@@ -517,6 +577,16 @@ function getAttributesForSet(attributeSet: InitialPeerRatingAttributeSet) {
   return attributeSet === "goalkeeper"
     ? goalkeeperInitialPeerRatingAttributes
     : standardInitialPeerRatingAttributes;
+}
+
+function getValuesFromRating(
+  rating: InitialPeerRating
+): InitialPeerRatingValues {
+  const attributes = getAttributesForSet(rating.attributeSet);
+
+  return Object.fromEntries(
+    attributes.map((attribute) => [attribute, rating[attribute] ?? 50])
+  ) as InitialPeerRatingValues;
 }
 
 const styles = StyleSheet.create({
@@ -751,6 +821,12 @@ const styles = StyleSheet.create({
   },
   ratingButtonTextDisabled: {
     color: "#8D96A5",
+  },
+  lockedHelp: {
+    color: "#8D96A5",
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 17,
   },
   ratingCard: {
     gap: 16,

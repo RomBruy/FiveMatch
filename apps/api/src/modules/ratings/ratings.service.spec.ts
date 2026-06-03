@@ -161,20 +161,103 @@ describe('RatingsService', () => {
       }),
     ).rejects.toBeInstanceOf(ConflictException);
   });
+
+  it('updates an unlocked initial peer rating in place', async () => {
+    const update = jest.fn().mockResolvedValue(
+      createRatingRow({
+        speed: 95,
+        attack: 90,
+        technique: 85,
+        defense: 70,
+        stamina: 88,
+      }),
+    );
+    const service = new RatingsService(
+      createPrismaMock({
+        targetPreferredStyle: 'attacker',
+        existingRating: null,
+        existingRatingById: createRatingRow(),
+        update,
+      }),
+    );
+
+    await expect(
+      service.updateInitialPeerRating('user_123', 'grp_123', 'ipr_123', {
+        values: {
+          overall: 92,
+          speed: 95,
+          attack: 90,
+          technique: 85,
+          defense: 70,
+          physical: 86,
+          stamina: 88,
+          fun: 91,
+        },
+      }),
+    ).resolves.toMatchObject({
+      id: 'ipr_123',
+      speed: 95,
+      attack: 90,
+      stamina: 88,
+    });
+
+    expect(update).toHaveBeenCalledWith({
+      where: {
+        id: 'ipr_123',
+      },
+      data: expect.objectContaining({
+        overall: 92,
+        speed: 95,
+        attack: 90,
+        stamina: 88,
+      }) as object,
+    });
+  });
+
+  it('blocks updates once the initial peer rating is locked', async () => {
+    const service = new RatingsService(
+      createPrismaMock({
+        targetPreferredStyle: 'attacker',
+        existingRating: null,
+        existingRatingById: createRatingRow({
+          lockedAt: new Date('2026-06-04T00:00:00.000Z'),
+        }),
+      }),
+    );
+
+    await expect(
+      service.updateInitialPeerRating('user_123', 'grp_123', 'ipr_123', {
+        values: {
+          overall: 80,
+          speed: 80,
+          attack: 80,
+          technique: 80,
+          defense: 80,
+          physical: 80,
+          stamina: 80,
+          fun: 80,
+        },
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
 });
 
 type CreatePrismaMockOptions = {
   targetPlayerId?: string;
   targetPreferredStyle: string;
   existingRating: { id: string } | null;
+  existingRatingById?: ReturnType<typeof createRatingRow> | null;
   create?: jest.Mock;
+  update?: jest.Mock;
 };
 
 function createPrismaMock({
   targetPlayerId = 'ply_target',
   targetPreferredStyle,
   existingRating,
+  existingRatingById = null,
   create = jest.fn(),
+  update = jest.fn(),
 }: CreatePrismaMockOptions) {
   return {
     user: {
@@ -199,7 +282,9 @@ function createPrismaMock({
     },
     initialPeerRating: {
       findUnique: jest.fn().mockResolvedValue(existingRating),
+      findFirst: jest.fn().mockResolvedValue(existingRatingById),
       create,
+      update,
     },
   } as unknown as PrismaService;
 }
@@ -217,6 +302,7 @@ function createRatingRow(
     distribution: number | null;
     communication: number | null;
     stamina: number | null;
+    lockedAt: Date | null;
   }> = {},
 ) {
   return {
@@ -238,7 +324,7 @@ function createRatingRow(
     physical: 68,
     stamina: getOverrideValue(overrides, 'stamina', 90),
     fun: 88,
-    lockedAt: null,
+    lockedAt: getOverrideValue(overrides, 'lockedAt', null),
     createdAt: new Date('2026-06-03T00:00:00.000Z'),
     updatedAt: new Date('2026-06-03T01:00:00.000Z'),
   };

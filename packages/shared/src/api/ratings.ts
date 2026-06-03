@@ -44,6 +44,10 @@ export type SubmitInitialPeerRatingInput = {
   values: InitialPeerRatingValues;
 };
 
+export type UpdateInitialPeerRatingInput = {
+  values: InitialPeerRatingValues;
+};
+
 export type InitialPeerRating = {
   id: string;
   groupId: string;
@@ -69,6 +73,10 @@ export type InitialPeerRating = {
 };
 
 export type SubmitInitialPeerRatingResponse = ApiSuccessResponse<{
+  rating: InitialPeerRating;
+}>;
+
+export type UpdateInitialPeerRatingResponse = ApiSuccessResponse<{
   rating: InitialPeerRating;
 }>;
 

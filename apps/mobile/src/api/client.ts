@@ -14,6 +14,8 @@ import type {
   SubmitInitialPeerRatingInput,
   SubmitInitialPeerRatingResponse,
   SyncCurrentUserInput,
+  UpdateInitialPeerRatingInput,
+  UpdateInitialPeerRatingResponse,
   UpdateFootballGroupMemberRoleInput,
   UpdateFootballGroupMemberRoleResponse,
   UpdateCurrentUserPreferencesInput,
@@ -261,6 +263,22 @@ export async function submitInitialPeerRating(
     `/groups/${groupId}/initial-peer-ratings`,
     {
       method: "POST",
+      token,
+      body: JSON.stringify(input),
+    }
+  );
+}
+
+export async function updateInitialPeerRating(
+  token: string,
+  groupId: string,
+  ratingId: string,
+  input: UpdateInitialPeerRatingInput
+): Promise<UpdateInitialPeerRatingResponse> {
+  return apiFetch<UpdateInitialPeerRatingResponse>(
+    `/groups/${groupId}/initial-peer-ratings/${ratingId}`,
+    {
+      method: "PUT",
       token,
       body: JSON.stringify(input),
     }

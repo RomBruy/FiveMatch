@@ -60,6 +60,8 @@ export {
   type StandardInitialPeerRatingAttribute,
   type SubmitInitialPeerRatingInput,
   type SubmitInitialPeerRatingResponse,
+  type UpdateInitialPeerRatingInput,
+  type UpdateInitialPeerRatingResponse,
 } from "./api/ratings.js";
 export type {
   ApiSuccessResponse,

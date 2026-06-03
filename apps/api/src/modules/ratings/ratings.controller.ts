@@ -5,6 +5,7 @@ import {
   InternalServerErrorException,
   Param,
   Post,
+  Put,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -12,6 +13,8 @@ import type {
   MyInitialPeerRatingsResponse,
   SubmitInitialPeerRatingInput,
   SubmitInitialPeerRatingResponse,
+  UpdateInitialPeerRatingInput,
+  UpdateInitialPeerRatingResponse,
 } from '@fit-five/shared';
 import { ClerkAuthGuard } from '../auth/clerk-auth.guard';
 import type { AuthenticatedRequest } from '../auth/auth.types';
@@ -60,6 +63,34 @@ export class RatingsController {
       groupId,
       {
         ratedPlayerId: body.ratedPlayerId,
+        values: body.values ?? {},
+      },
+    );
+
+    return {
+      data: {
+        rating: serializeInitialPeerRating(rating),
+      },
+    };
+  }
+
+  @Put(':ratingId')
+  @UseGuards(ClerkAuthGuard)
+  async updateInitialPeerRating(
+    @Req() request: AuthenticatedRequest,
+    @Param('groupId') groupId: string,
+    @Param('ratingId') ratingId: string,
+    @Body() body: UpdateInitialPeerRatingInput,
+  ): Promise<UpdateInitialPeerRatingResponse> {
+    if (!request.auth) {
+      throw new InternalServerErrorException('Authenticated user missing.');
+    }
+
+    const rating = await this.ratingsService.updateInitialPeerRating(
+      request.auth.clerkUserId,
+      groupId,
+      ratingId,
+      {
         values: body.values ?? {},
       },
     );

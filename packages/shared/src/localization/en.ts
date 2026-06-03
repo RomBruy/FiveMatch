@@ -288,11 +288,19 @@ export const en = {
     standardHint: "Outfield player attributes",
     goalkeeperHint: "Goalkeeper attributes normalized out of 100",
     submitButton: "Submit rating",
+    updateButton: "Update rating",
     submitting: "Submitting...",
     saved: "Initial rating saved",
+    updated: "Initial rating updated",
+    editRating: "Edit",
+    lockedRating: "Locked",
+    lockedHelp:
+      "This rating is locked because it already affected official generated teams.",
     error: "Unable to save this rating.",
     duplicateError: "You already rated this player in this group.",
     selfRatingError: "You cannot rate yourself.",
+    lockedError:
+      "This rating can no longer be edited because it affected official teams.",
     valueSuffix: "/100",
     attributes: {
       overall: "Overall",

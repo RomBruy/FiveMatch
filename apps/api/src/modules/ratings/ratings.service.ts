@@ -8,6 +8,7 @@ import type { InitialPeerRating as PrismaInitialPeerRating } from '@prisma/clien
 import type {
   InitialPeerRatingAttributeSet,
   SubmitInitialPeerRatingInput,
+  UpdateInitialPeerRatingInput,
 } from '@fit-five/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -116,6 +117,43 @@ export class RatingsService {
         attributeSet,
         ...data,
       },
+    });
+
+    return this.toInternalRating(rating);
+  }
+
+  async updateInitialPeerRating(
+    clerkUserId: string,
+    groupId: string,
+    ratingId: string,
+    input: UpdateInitialPeerRatingInput,
+  ): Promise<InternalInitialPeerRating> {
+    const raterPlayer = await this.requireGroupPlayer(clerkUserId, groupId);
+    const existingRating = await this.prisma.initialPeerRating.findFirst({
+      where: {
+        id: ratingId,
+        groupId,
+        raterPlayerId: raterPlayer.id,
+      },
+    });
+
+    if (!existingRating) {
+      throw new ForbiddenException('Initial peer rating not available.');
+    }
+
+    if (existingRating.lockedAt) {
+      throw new ConflictException('Initial peer rating is locked.');
+    }
+
+    const data = this.buildRatingData(
+      this.toInternalRating(existingRating).attributeSet,
+      input.values,
+    );
+    const rating = await this.prisma.initialPeerRating.update({
+      where: {
+        id: existingRating.id,
+      },
+      data,
     });
 
     return this.toInternalRating(rating);

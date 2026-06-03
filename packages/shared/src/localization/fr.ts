@@ -289,11 +289,19 @@ export const fr = {
     standardHint: "Attributs joueur de champ",
     goalkeeperHint: "Attributs gardien normalises sur 100",
     submitButton: "Envoyer la note",
+    updateButton: "Mettre a jour la note",
     submitting: "Envoi...",
     saved: "Note initiale enregistree",
+    updated: "Note initiale mise a jour",
+    editRating: "Modifier",
+    lockedRating: "Verrouillee",
+    lockedHelp:
+      "Cette note est verrouillee car elle a deja servi a generer des equipes officielles.",
     error: "Impossible d'enregistrer cette note.",
     duplicateError: "Tu as deja note ce joueur dans ce groupe.",
     selfRatingError: "Tu ne peux pas te noter toi-meme.",
+    lockedError:
+      "Cette note ne peut plus etre modifiee car elle a affecte des equipes officielles.",
     valueSuffix: "/100",
     attributes: {
       overall: "Overall",

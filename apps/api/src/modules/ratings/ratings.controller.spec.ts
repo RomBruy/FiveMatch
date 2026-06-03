@@ -97,6 +97,66 @@ describe('RatingsController', () => {
       },
     );
   });
+
+  it('updates an initial peer rating', async () => {
+    const updateInitialPeerRating = jest.fn().mockResolvedValue(
+      createInternalRating({
+        id: 'ipr_456',
+      }),
+    );
+    const controller = new RatingsController({
+      updateInitialPeerRating,
+    } as unknown as RatingsService);
+
+    await expect(
+      controller.updateInitialPeerRating(
+        {
+          auth: {
+            clerkUserId: 'user_123',
+          },
+        } as AuthenticatedRequest,
+        'grp_123',
+        'ipr_456',
+        {
+          values: {
+            overall: 90,
+            speed: 90,
+            attack: 90,
+            technique: 90,
+            defense: 90,
+            physical: 90,
+            stamina: 90,
+            fun: 90,
+          },
+        },
+      ),
+    ).resolves.toMatchObject({
+      data: {
+        rating: {
+          id: 'ipr_456',
+          attributeSet: 'standard',
+        },
+      },
+    });
+
+    expect(updateInitialPeerRating).toHaveBeenCalledWith(
+      'user_123',
+      'grp_123',
+      'ipr_456',
+      {
+        values: {
+          overall: 90,
+          speed: 90,
+          attack: 90,
+          technique: 90,
+          defense: 90,
+          physical: 90,
+          stamina: 90,
+          fun: 90,
+        },
+      },
+    );
+  });
 });
 
 function createInternalRating(overrides: Partial<{ id: string }> = {}) {
