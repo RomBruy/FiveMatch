@@ -59,10 +59,29 @@ describe('MatchesService', () => {
 
   it('returns the next open future match for group members', async () => {
     const findFirst = jest.fn().mockResolvedValue(createMatchRow());
+    const attendanceFindMany = jest.fn().mockResolvedValue([
+      createAttendanceRow({
+        id: 'attendance_confirmed',
+        playerId: 'ply_confirmed',
+        response: 'in',
+        status: 'confirmed',
+      }),
+      createAttendanceRow({
+        id: 'attendance_maybe',
+        playerId: 'ply_maybe',
+        response: 'maybe',
+        status: 'maybe',
+      }),
+    ]);
     const service = new MatchesService(
       createPrismaMock({
         role: 'member',
         findFirst,
+        attendanceCount: jest
+          .fn()
+          .mockResolvedValueOnce(1)
+          .mockResolvedValueOnce(0),
+        attendanceFindMany,
       }),
     );
 
@@ -71,6 +90,18 @@ describe('MatchesService', () => {
     ).resolves.toMatchObject({
       id: 'match_123',
       status: 'open',
+      confirmedCount: 1,
+      waitlistCount: 0,
+      attendances: [
+        {
+          response: 'in',
+          status: 'confirmed',
+        },
+        {
+          response: 'maybe',
+          status: 'maybe',
+        },
+      ],
     });
 
     expect(findFirst).toHaveBeenCalledWith({

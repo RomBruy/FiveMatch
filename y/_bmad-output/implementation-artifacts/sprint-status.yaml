@@ -1,5 +1,5 @@
 # generated: 2026-05-31T16:16:37+0200
-# last_updated: 2026-06-03T22:01:39+0200
+# last_updated: 2026-06-03T22:12:58+0200
 # project: fit_five
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review with fresh context.
 
 generated: 2026-05-31T16:16:37+0200
-last_updated: 2026-06-03T22:01:39+0200
+last_updated: 2026-06-03T22:12:58+0200
 project: fit_five
 project_key: NOKEY
 tracking_system: file-system
@@ -64,7 +64,7 @@ development_status:
   3-1-create-a-match: review
   3-2-submit-attendance-response: review
   3-3-manage-full-match-waitlist: review
-  3-4-display-attendance-lists: backlog
+  3-4-display-attendance-lists: review
   epic-3-retrospective: optional
 
   epic-4: backlog

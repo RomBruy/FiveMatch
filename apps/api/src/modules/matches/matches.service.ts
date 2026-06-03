@@ -53,6 +53,7 @@ export type InternalFootballMatch = {
   status: FootballMatchStatus;
   confirmedCount: number;
   waitlistCount: number;
+  attendances: InternalFootballMatchAttendance[];
   myAttendance: InternalFootballMatchAttendance | null;
   createdAt: Date;
   updatedAt: Date;
@@ -422,6 +423,19 @@ export class MatchesService {
           })
         : null,
     ]);
+    const attendances = await this.prisma.matchAttendance.findMany({
+      where: {
+        matchId: match.id,
+      },
+      orderBy: [
+        {
+          respondedAt: 'asc',
+        },
+        {
+          createdAt: 'asc',
+        },
+      ],
+    });
 
     return {
       id: match.id,
@@ -442,6 +456,9 @@ export class MatchesService {
       status: normalizeMatchStatus(match.status),
       confirmedCount,
       waitlistCount,
+      attendances: attendances.map((attendance) =>
+        this.toInternalAttendance(attendance),
+      ),
       myAttendance: myAttendance
         ? this.toInternalAttendance(myAttendance)
         : null,

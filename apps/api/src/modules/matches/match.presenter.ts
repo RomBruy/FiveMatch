@@ -22,6 +22,9 @@ export function serializeFootballMatch(
     status: match.status,
     confirmedCount: match.confirmedCount,
     waitlistCount: match.waitlistCount,
+    attendances: match.attendances.map((attendance) =>
+      serializeFootballMatchAttendance(attendance),
+    ),
     myAttendance: match.myAttendance
       ? serializeFootballMatchAttendance(match.myAttendance)
       : null,

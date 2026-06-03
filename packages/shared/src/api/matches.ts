@@ -48,6 +48,7 @@ export type FootballMatch = {
   status: FootballMatchStatus;
   confirmedCount: number;
   waitlistCount: number;
+  attendances: FootballMatchAttendance[];
   myAttendance: FootballMatchAttendance | null;
   createdAt: string;
   updatedAt: string;

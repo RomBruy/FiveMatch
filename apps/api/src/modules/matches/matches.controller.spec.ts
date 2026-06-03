@@ -34,6 +34,7 @@ describe('MatchesController', () => {
           id: 'match_123',
           startsAt: '2026-06-10T18:00:00.000Z',
           maxPlayers: 10,
+          attendances: [],
         },
       },
     });
@@ -94,6 +95,7 @@ describe('MatchesController', () => {
           id: 'match_123',
           confirmedCount: 0,
           waitlistCount: 0,
+          attendances: [],
         },
       },
     });
@@ -102,6 +104,19 @@ describe('MatchesController', () => {
   it('submits current-player attendance', async () => {
     const submitAttendance = jest.fn().mockResolvedValue(
       createInternalMatch({
+        attendances: [
+          {
+            id: 'attendance_maybe',
+            matchId: 'match_123',
+            playerId: 'ply_maybe',
+            response: 'maybe',
+            status: 'maybe',
+            waitlistPosition: null,
+            respondedAt: new Date('2026-06-03T02:10:00.000Z'),
+            createdAt: new Date('2026-06-03T02:10:00.000Z'),
+            updatedAt: new Date('2026-06-03T02:10:00.000Z'),
+          },
+        ],
         myAttendance: {
           id: 'attendance_123',
           matchId: 'match_123',
@@ -140,6 +155,12 @@ describe('MatchesController', () => {
             response: 'in',
             status: 'confirmed',
           },
+          attendances: [
+            {
+              response: 'maybe',
+              status: 'maybe',
+            },
+          ],
         },
       },
     });
@@ -157,6 +178,17 @@ describe('MatchesController', () => {
 
 function createInternalMatch(
   overrides: Partial<{
+    attendances: {
+      id: string;
+      matchId: string;
+      playerId: string;
+      response: 'in' | 'out' | 'maybe';
+      status: 'confirmed' | 'waitlisted' | 'out' | 'maybe';
+      waitlistPosition: number | null;
+      respondedAt: Date;
+      createdAt: Date;
+      updatedAt: Date;
+    }[];
     myAttendance: {
       id: string;
       matchId: string;
@@ -185,6 +217,7 @@ function createInternalMatch(
     status: 'open',
     confirmedCount: 0,
     waitlistCount: 0,
+    attendances: overrides.attendances ?? [],
     myAttendance: overrides.myAttendance ?? null,
     createdAt: new Date('2026-06-03T00:00:00.000Z'),
     updatedAt: new Date('2026-06-03T01:00:00.000Z'),

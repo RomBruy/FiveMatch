@@ -5,7 +5,9 @@ import {
   groupGoalkeeperModes,
   type FootballGroup,
   type FootballMatch,
+  type FootballMatchAttendance,
   type FootballMatchAttendanceResponse,
+  type FootballMatchAttendanceStatus,
   type GroupGeneratorStyle,
   type GroupGoalkeeperMode,
   type InitialPeerRatingReadiness,
@@ -14,6 +16,7 @@ import {
 import { useEffect, useState } from "react";
 import {
   Pressable,
+  Image,
   ScrollView,
   Share,
   StyleSheet,
@@ -259,11 +262,14 @@ export default function MatchScreen() {
         ) : null}
 
         {loadState === "ready" && nextMatch ? (
-          <NextMatchCard
-            match={nextMatch}
-            responseState={attendanceState}
-            onRespond={handleSubmitAttendance}
-          />
+          <>
+            <NextMatchCard
+              match={nextMatch}
+              responseState={attendanceState}
+              onRespond={handleSubmitAttendance}
+            />
+            <AttendanceListsCard match={nextMatch} players={players} />
+          </>
         ) : null}
 
         {loadState === "ready" && activeGroup && canCreateMatch ? (
@@ -622,6 +628,125 @@ function CreateMatchCard({
   );
 }
 
+function AttendanceListsCard({
+  match,
+  players,
+}: {
+  match: FootballMatch;
+  players: PlayerProfile[];
+}) {
+  const { strings } = usePreferences();
+  const playersById = new Map(players.map((player) => [player.id, player]));
+  const sections = (["confirmed", "waitlisted", "maybe", "out"] as const).map(
+    (status) => {
+      const attendances = getSortedAttendances(match.attendances, status);
+
+      return {
+        status,
+        attendances,
+        title: getAttendanceSectionTitle(status, attendances.length, match),
+      };
+    }
+  );
+
+  return (
+    <View style={styles.attendanceCard}>
+      <View style={styles.attendanceHeader}>
+        <View style={styles.attendanceHeaderCopy}>
+          <Text style={styles.cardTitle}>
+            {strings.matches.attendanceListTitle}
+          </Text>
+          <Text style={styles.helperText}>
+            {strings.matches.attendanceListSubtitle}
+          </Text>
+        </View>
+        <Text style={styles.attendanceTotalBadge}>
+          {match.attendances.length} {strings.matches.attendanceListResponses}
+        </Text>
+      </View>
+
+      {sections.map((section) => (
+        <View key={section.status} style={styles.attendanceSection}>
+          <View style={styles.attendanceSectionHeader}>
+            <Text style={styles.attendanceSectionTitle}>
+              {getAttendanceSectionLabel(section.status, strings)}
+            </Text>
+            <Text style={styles.attendanceSectionCount}>{section.title}</Text>
+          </View>
+
+          {section.attendances.length > 0 ? (
+            <View style={styles.attendanceRows}>
+              {section.attendances.map((attendance) => (
+                <AttendancePlayerRow
+                  key={attendance.id}
+                  attendance={attendance}
+                  player={playersById.get(attendance.playerId) ?? null}
+                />
+              ))}
+            </View>
+          ) : (
+            <Text style={styles.attendanceEmptyText}>
+              {strings.matches.attendanceListEmpty}
+            </Text>
+          )}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function AttendancePlayerRow({
+  attendance,
+  player,
+}: {
+  attendance: FootballMatchAttendance;
+  player: PlayerProfile | null;
+}) {
+  const { strings } = usePreferences();
+  const displayName = getPlayerDisplayName(
+    player,
+    strings.profile.fallbackName
+  );
+  const fullName = player
+    ? [player.firstName, player.lastName].filter(Boolean).join(" ")
+    : "";
+  const subtitle =
+    player?.nickname && fullName.length > 0
+      ? fullName
+      : (player?.clubDeFormation ?? strings.matches.attendanceUnknownPlayer);
+
+  return (
+    <View style={styles.attendanceRow}>
+      <View style={styles.attendanceAvatarWrap}>
+        {player?.photoUrl ? (
+          <Image
+            source={{ uri: player.photoUrl }}
+            style={styles.attendanceAvatar}
+          />
+        ) : (
+          <Text style={styles.attendanceAvatarFallback}>
+            {displayName.slice(0, 1).toUpperCase()}
+          </Text>
+        )}
+      </View>
+
+      <View style={styles.attendancePlayerBody}>
+        <Text style={styles.attendancePlayerName}>{displayName}</Text>
+        <Text style={styles.attendancePlayerMeta}>{subtitle}</Text>
+      </View>
+
+      <Text
+        style={[
+          styles.attendanceStatusBadge,
+          getAttendanceStatusStyle(attendance.status),
+        ]}
+      >
+        {getAttendanceStatusText(attendance, strings)}
+      </Text>
+    </View>
+  );
+}
+
 function OptionPill({
   active,
   label,
@@ -643,6 +768,107 @@ function OptionPill({
       </Text>
     </Pressable>
   );
+}
+
+function getSortedAttendances(
+  attendances: FootballMatchAttendance[],
+  status: FootballMatchAttendanceStatus
+) {
+  return attendances
+    .filter((attendance) => attendance.status === status)
+    .sort((left, right) => {
+      if (status === "waitlisted") {
+        return (
+          (left.waitlistPosition ?? Number.POSITIVE_INFINITY) -
+            (right.waitlistPosition ?? Number.POSITIVE_INFINITY) ||
+          compareAttendanceDates(left, right)
+        );
+      }
+
+      return compareAttendanceDates(left, right);
+    });
+}
+
+function compareAttendanceDates(
+  left: FootballMatchAttendance,
+  right: FootballMatchAttendance
+) {
+  return (
+    new Date(left.respondedAt).getTime() -
+      new Date(right.respondedAt).getTime() || left.id.localeCompare(right.id)
+  );
+}
+
+function getAttendanceSectionTitle(
+  status: FootballMatchAttendanceStatus,
+  count: number,
+  match: FootballMatch
+) {
+  if (status === "confirmed") {
+    return `${match.confirmedCount}/${match.maxPlayers}`;
+  }
+
+  if (status === "waitlisted") {
+    return `${match.waitlistCount}`;
+  }
+
+  return `${count}`;
+}
+
+function getAttendanceSectionLabel(
+  status: FootballMatchAttendanceStatus,
+  strings: ReturnType<typeof usePreferences>["strings"]
+) {
+  if (status === "confirmed") {
+    return strings.matches.attendanceListConfirmed;
+  }
+
+  if (status === "waitlisted") {
+    return strings.matches.attendanceListWaitlisted;
+  }
+
+  if (status === "maybe") {
+    return strings.matches.attendanceListMaybe;
+  }
+
+  return strings.matches.attendanceListOut;
+}
+
+function getAttendanceStatusText(
+  attendance: FootballMatchAttendance,
+  strings: ReturnType<typeof usePreferences>["strings"]
+) {
+  if (attendance.status === "confirmed") {
+    return strings.matches.attendanceStatusConfirmed;
+  }
+
+  if (attendance.status === "waitlisted") {
+    return attendance.waitlistPosition
+      ? `${strings.matches.attendanceStatusWaitlisted} #${attendance.waitlistPosition}`
+      : strings.matches.attendanceStatusWaitlisted;
+  }
+
+  if (attendance.status === "maybe") {
+    return strings.matches.attendanceStatusMaybe;
+  }
+
+  return strings.matches.attendanceStatusOut;
+}
+
+function getAttendanceStatusStyle(status: FootballMatchAttendanceStatus) {
+  if (status === "confirmed") {
+    return styles.attendanceStatusConfirmed;
+  }
+
+  if (status === "waitlisted") {
+    return styles.attendanceStatusWaitlisted;
+  }
+
+  if (status === "maybe") {
+    return styles.attendanceStatusMaybe;
+  }
+
+  return styles.attendanceStatusOut;
 }
 
 function getMissingPlayers(
@@ -812,6 +1038,146 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     backgroundColor: "#10161D",
     padding: 18,
+  },
+  attendanceCard: {
+    gap: 16,
+    borderWidth: 1,
+    borderColor: "#1F513A",
+    borderRadius: 26,
+    backgroundColor: "#0B1B15",
+    padding: 18,
+  },
+  attendanceHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  attendanceHeaderCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  attendanceTotalBadge: {
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#334D3E",
+    borderRadius: 999,
+    backgroundColor: "#113B2B",
+    color: "#72E6A4",
+    fontSize: 12,
+    fontWeight: "900",
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  attendanceSection: {
+    gap: 9,
+  },
+  attendanceSectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  attendanceSectionTitle: {
+    color: "#F4F7F2",
+    fontSize: 14,
+    fontWeight: "900",
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+  },
+  attendanceSectionCount: {
+    overflow: "hidden",
+    borderRadius: 999,
+    backgroundColor: "#17251F",
+    color: "#AEB8C7",
+    fontSize: 12,
+    fontWeight: "900",
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  attendanceRows: {
+    gap: 8,
+  },
+  attendanceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 11,
+    borderWidth: 1,
+    borderColor: "#20342B",
+    borderRadius: 18,
+    backgroundColor: "#101A16",
+    padding: 11,
+  },
+  attendanceAvatarWrap: {
+    width: 42,
+    height: 42,
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 14,
+    backgroundColor: "#163626",
+  },
+  attendanceAvatar: {
+    width: "100%",
+    height: "100%",
+  },
+  attendanceAvatarFallback: {
+    color: "#72E6A4",
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  attendancePlayerBody: {
+    flex: 1,
+    gap: 2,
+  },
+  attendancePlayerName: {
+    color: "#F4F7F2",
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  attendancePlayerMeta: {
+    color: "#8D96A5",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  attendanceStatusBadge: {
+    overflow: "hidden",
+    borderWidth: 1,
+    borderRadius: 999,
+    fontSize: 11,
+    fontWeight: "900",
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+  },
+  attendanceStatusConfirmed: {
+    borderColor: "#1F513A",
+    backgroundColor: "#113B2B",
+    color: "#72E6A4",
+  },
+  attendanceStatusWaitlisted: {
+    borderColor: "#4C3E18",
+    backgroundColor: "#332711",
+    color: "#F9C846",
+  },
+  attendanceStatusMaybe: {
+    borderColor: "#27435D",
+    backgroundColor: "#142638",
+    color: "#8EC9FF",
+  },
+  attendanceStatusOut: {
+    borderColor: "#4E2424",
+    backgroundColor: "#351717",
+    color: "#FF8E8E",
+  },
+  attendanceEmptyText: {
+    borderWidth: 1,
+    borderColor: "#20342B",
+    borderRadius: 16,
+    backgroundColor: "#0D1713",
+    color: "#748076",
+    fontSize: 12,
+    fontWeight: "800",
+    padding: 11,
   },
   cardTitle: {
     color: "#F4F7F2",
