@@ -7,9 +7,12 @@ import type {
   FootballGroupMembersResponse,
   FootballGroupsResponse,
   HealthResponse,
+  MyInitialPeerRatingsResponse,
   PlayerProfileResponse,
   PlayerRosterResponse,
   RemoveFootballGroupMemberResponse,
+  SubmitInitialPeerRatingInput,
+  SubmitInitialPeerRatingResponse,
   SyncCurrentUserInput,
   UpdateFootballGroupMemberRoleInput,
   UpdateFootballGroupMemberRoleResponse,
@@ -231,6 +234,33 @@ export async function upsertMyPlayerVestiaire(
     `/groups/${groupId}/players/me/vestiaire`,
     {
       method: "PUT",
+      token,
+      body: JSON.stringify(input),
+    }
+  );
+}
+
+export async function listMyInitialPeerRatings(
+  token: string,
+  groupId: string
+): Promise<MyInitialPeerRatingsResponse> {
+  return apiFetch<MyInitialPeerRatingsResponse>(
+    `/groups/${groupId}/initial-peer-ratings/me`,
+    {
+      token,
+    }
+  );
+}
+
+export async function submitInitialPeerRating(
+  token: string,
+  groupId: string,
+  input: SubmitInitialPeerRatingInput
+): Promise<SubmitInitialPeerRatingResponse> {
+  return apiFetch<SubmitInitialPeerRatingResponse>(
+    `/groups/${groupId}/initial-peer-ratings`,
+    {
+      method: "POST",
       token,
       body: JSON.stringify(input),
     }

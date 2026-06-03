@@ -47,6 +47,20 @@ export {
   type UpsertPlayerVestiaireInput,
   type UpsertPlayerVestiaireResponse,
 } from "./api/players.js";
+export {
+  goalkeeperInitialPeerRatingAttributes,
+  initialPeerRatingAttributeSets,
+  standardInitialPeerRatingAttributes,
+  type GoalkeeperInitialPeerRatingAttribute,
+  type InitialPeerRating,
+  type InitialPeerRatingAttribute,
+  type InitialPeerRatingAttributeSet,
+  type InitialPeerRatingValues,
+  type MyInitialPeerRatingsResponse,
+  type StandardInitialPeerRatingAttribute,
+  type SubmitInitialPeerRatingInput,
+  type SubmitInitialPeerRatingResponse,
+} from "./api/ratings.js";
 export type {
   ApiSuccessResponse,
   CurrentUser,

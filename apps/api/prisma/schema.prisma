@@ -26,16 +26,17 @@ model User {
 }
 
 model Group {
-  id          String         @id @default(cuid())
-  name        String
-  ownerUserId String         @map("owner_user_id")
-  owner       User           @relation("GroupOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
-  settings    GroupSettings?
-  members     GroupMember[]
-  invitations Invitation[]
-  players     Player[]
-  createdAt   DateTime       @default(now()) @map("created_at")
-  updatedAt   DateTime       @updatedAt @map("updated_at")
+  id                 String              @id @default(cuid())
+  name               String
+  ownerUserId        String              @map("owner_user_id")
+  owner              User                @relation("GroupOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  settings           GroupSettings?
+  members            GroupMember[]
+  invitations        Invitation[]
+  players            Player[]
+  initialPeerRatings InitialPeerRating[]
+  createdAt          DateTime            @default(now()) @map("created_at")
+  updatedAt          DateTime            @updatedAt @map("updated_at")
 
   @@index([ownerUserId], map: "idx_groups_owner_user_id")
   @@map("groups")
@@ -92,33 +93,67 @@ model Invitation {
 }
 
 model Player {
-  id                   String   @id @default(cuid())
-  groupId              String   @map("group_id")
-  group                Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  userId               String   @map("user_id")
-  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  firstName            String?  @map("first_name")
-  lastName             String?  @map("last_name")
-  nickname             String?
-  photoUrl             String?  @map("photo_url")
-  bio                  String?
-  dominantFoot         String?  @map("dominant_foot")
-  jerseyNumber         Int?     @map("jersey_number")
-  preferredStyle       String?  @map("preferred_style")
-  clubDeFormation      String?  @map("club_de_formation")
-  specialty            String?
-  favoriteExcuse       String?  @map("favorite_excuse")
-  badFaithLevel        Int?     @map("bad_faith_level")
-  lockerRoomStyle      String?  @map("locker_room_style")
-  thirdHalfProfile     String?  @map("third_half_profile")
-  warCry               String?  @map("war_cry")
-  signatureCelebration String?  @map("signature_celebration")
-  worstOnPitchHabit    String?  @map("worst_on_pitch_habit")
-  legendaryPhrase      String?  @map("legendary_phrase")
-  createdAt            DateTime @default(now()) @map("created_at")
-  updatedAt            DateTime @updatedAt @map("updated_at")
+  id                     String              @id @default(cuid())
+  groupId                String              @map("group_id")
+  group                  Group               @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId                 String              @map("user_id")
+  user                   User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  initialRatingsGiven    InitialPeerRating[] @relation("InitialPeerRatingsGiven")
+  initialRatingsReceived InitialPeerRating[] @relation("InitialPeerRatingsReceived")
+  firstName              String?             @map("first_name")
+  lastName               String?             @map("last_name")
+  nickname               String?
+  photoUrl               String?             @map("photo_url")
+  bio                    String?
+  dominantFoot           String?             @map("dominant_foot")
+  jerseyNumber           Int?                @map("jersey_number")
+  preferredStyle         String?             @map("preferred_style")
+  clubDeFormation        String?             @map("club_de_formation")
+  specialty              String?
+  favoriteExcuse         String?             @map("favorite_excuse")
+  badFaithLevel          Int?                @map("bad_faith_level")
+  lockerRoomStyle        String?             @map("locker_room_style")
+  thirdHalfProfile       String?             @map("third_half_profile")
+  warCry                 String?             @map("war_cry")
+  signatureCelebration   String?             @map("signature_celebration")
+  worstOnPitchHabit      String?             @map("worst_on_pitch_habit")
+  legendaryPhrase        String?             @map("legendary_phrase")
+  createdAt              DateTime            @default(now()) @map("created_at")
+  updatedAt              DateTime            @updatedAt @map("updated_at")
 
   @@unique([groupId, userId], map: "uq_players_group_id_user_id")
   @@index([userId], map: "idx_players_user_id")
   @@map("players")
+}
+
+model InitialPeerRating {
+  id            String    @id @default(cuid())
+  groupId       String    @map("group_id")
+  group         Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  raterPlayerId String    @map("rater_player_id")
+  raterPlayer   Player    @relation("InitialPeerRatingsGiven", fields: [raterPlayerId], references: [id], onDelete: Cascade)
+  ratedPlayerId String    @map("rated_player_id")
+  ratedPlayer   Player    @relation("InitialPeerRatingsReceived", fields: [ratedPlayerId], references: [id], onDelete: Cascade)
+  attributeSet  String    @map("attribute_set")
+  overall       Int
+  speed         Int?
+  attack        Int?
+  technique     Int?
+  defense       Int?
+  reflexes      Int?
+  positioning   Int?
+  handling      Int?
+  distribution  Int?
+  communication Int?
+  physical      Int
+  stamina       Int?
+  fun           Int
+  lockedAt      DateTime? @map("locked_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@unique([groupId, raterPlayerId, ratedPlayerId], map: "uq_initial_peer_ratings_group_rater_rated")
+  @@index([ratedPlayerId], map: "idx_initial_peer_ratings_rated_player_id")
+  @@index([raterPlayerId], map: "idx_initial_peer_ratings_rater_player_id")
+  @@map("initial_peer_ratings")
 }
