@@ -329,6 +329,31 @@ export const en = {
       fun: "Fun",
     },
   },
+  generation: {
+    gateTitle: "Team generation",
+    gateBlockedTitle: "Generation blocked",
+    gateReadyTitle: "Baseline ready",
+    gateSubtitle:
+      "The algorithm waits for a solid rating baseline before suggesting teams.",
+    temporaryPoolNote:
+      "Until real matches exist, this block uses the group roster as the baseline pool.",
+    generateTeams: "Generate teams",
+    generateLocked: "Generation locked",
+    blockedExplanation:
+      "Each player needs at least 3 initial ratings before a credible generation can start.",
+    missingTitle: "Players to complete",
+    missingRatingsLabel: "ratings missing",
+    ratePlayers: "Rate players",
+    remindGroup: "Remind group",
+    remindMessage:
+      "FiveMatch: ratings are still missing before team generation unlocks. Jump in and rate the players!",
+    readyActionHint:
+      "The button is ready for the future team engine. Next step: connect real generation.",
+    noGroupTitle: "No active group",
+    noGroupSubtitle: "Create or join a group before preparing team generation.",
+    loadError: "Unable to load generation state.",
+    reload: "Reload",
+  },
   health: {
     checking: "Checking API",
     online: "API online",

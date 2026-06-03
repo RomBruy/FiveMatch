@@ -331,6 +331,32 @@ export const fr = {
       fun: "Fun",
     },
   },
+  generation: {
+    gateTitle: "Generation des equipes",
+    gateBlockedTitle: "Generation bloquee",
+    gateReadyTitle: "Base prete",
+    gateSubtitle:
+      "L'algo attend une base de notes solide avant de proposer des equipes.",
+    temporaryPoolNote:
+      "En attendant les vrais matchs, ce bloc utilise le roster du groupe comme pool de base.",
+    generateTeams: "Generer les equipes",
+    generateLocked: "Generation verrouillee",
+    blockedExplanation:
+      "Chaque joueur doit recevoir au moins 3 notes initiales avant de lancer une generation credible.",
+    missingTitle: "Joueurs a completer",
+    missingRatingsLabel: "notes manquantes",
+    ratePlayers: "Noter les joueurs",
+    remindGroup: "Relancer le groupe",
+    remindMessage:
+      "FiveMatch: il manque encore des notes pour debloquer la generation des equipes. Passe noter les joueurs!",
+    readyActionHint:
+      "Le bouton est pret pour le futur moteur d'equipes. Prochaine etape: connecter la generation reelle.",
+    noGroupTitle: "Aucun groupe actif",
+    noGroupSubtitle:
+      "Cree ou rejoins un groupe avant de preparer une generation.",
+    loadError: "Impossible de charger l'etat de generation.",
+    reload: "Recharger",
+  },
   health: {
     checking: "Verification de l'API",
     online: "API en ligne",
