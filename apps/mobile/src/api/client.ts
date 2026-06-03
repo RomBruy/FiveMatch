@@ -3,12 +3,15 @@ import type {
   CreateFootballGroupInvitationResponse,
   CreateFootballGroupInput,
   CreateFootballGroupResponse,
+  CreateFootballMatchInput,
+  CreateFootballMatchResponse,
   CurrentUserResponse,
   FootballGroupMembersResponse,
   FootballGroupsResponse,
   HealthResponse,
   InitialPeerRatingReadinessResponse,
   MyInitialPeerRatingsResponse,
+  NextFootballMatchResponse,
   PlayerProfileResponse,
   PlayerRosterResponse,
   RemoveFootballGroupMemberResponse,
@@ -294,6 +297,30 @@ export async function updateInitialPeerRating(
       method: "PUT",
       token,
       body: JSON.stringify(input),
+    }
+  );
+}
+
+export async function createFootballMatch(
+  token: string,
+  groupId: string,
+  input: CreateFootballMatchInput
+): Promise<CreateFootballMatchResponse> {
+  return apiFetch<CreateFootballMatchResponse>(`/groups/${groupId}/matches`, {
+    method: "POST",
+    token,
+    body: JSON.stringify(input),
+  });
+}
+
+export async function getNextFootballMatch(
+  token: string,
+  groupId: string
+): Promise<NextFootballMatchResponse> {
+  return apiFetch<NextFootballMatchResponse>(
+    `/groups/${groupId}/matches/next`,
+    {
+      token,
     }
   );
 }

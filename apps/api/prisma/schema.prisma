@@ -19,6 +19,7 @@ model User {
   groupMemberships   GroupMember[]
   playerProfiles     Player[]
   createdInvitations Invitation[]  @relation("InvitationCreator")
+  organizedMatches   Match[]       @relation("MatchOrganizer")
   createdAt          DateTime      @default(now()) @map("created_at")
   updatedAt          DateTime      @updatedAt @map("updated_at")
 
@@ -35,6 +36,7 @@ model Group {
   invitations        Invitation[]
   players            Player[]
   initialPeerRatings InitialPeerRating[]
+  matches            Match[]
   createdAt          DateTime            @default(now()) @map("created_at")
   updatedAt          DateTime            @updatedAt @map("updated_at")
 
@@ -156,4 +158,27 @@ model InitialPeerRating {
   @@index([ratedPlayerId], map: "idx_initial_peer_ratings_rated_player_id")
   @@index([raterPlayerId], map: "idx_initial_peer_ratings_rater_player_id")
   @@map("initial_peer_ratings")
+}
+
+model Match {
+  id                     String   @id @default(cuid())
+  groupId                String   @map("group_id")
+  group                  Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  organizerUserId        String   @map("organizer_user_id")
+  organizer              User     @relation("MatchOrganizer", fields: [organizerUserId], references: [id], onDelete: Restrict)
+  title                  String
+  startsAt               DateTime @map("starts_at")
+  location               String
+  playersPerTeam         Int      @map("players_per_team")
+  maxPlayers             Int      @map("max_players")
+  attendanceDeadlineAt   DateTime @map("attendance_deadline_at")
+  generatorStyleOverride String?  @map("generator_style_override")
+  goalkeeperModeOverride String?  @map("goalkeeper_mode_override")
+  status                 String   @default("open")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  @@index([groupId, startsAt], map: "idx_matches_group_id_starts_at")
+  @@index([organizerUserId], map: "idx_matches_organizer_user_id")
+  @@map("matches")
 }

@@ -1,7 +1,12 @@
 import { useAuth } from "@clerk/expo";
 import { useRouter } from "expo-router";
 import {
+  groupGeneratorStyles,
+  groupGoalkeeperModes,
   type FootballGroup,
+  type FootballMatch,
+  type GroupGeneratorStyle,
+  type GroupGoalkeeperMode,
   type InitialPeerRatingReadiness,
   type PlayerProfile,
 } from "@fit-five/shared";
@@ -12,18 +17,34 @@ import {
   Share,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import {
+  createFootballMatch,
   getInitialPeerRatingReadiness,
+  getNextFootballMatch,
   listCurrentUserGroups,
   listGroupPlayers,
 } from "@/api/client";
+import { NextMatchCard } from "@/features/matches/next-match-card";
 import { usePreferences } from "@/features/preferences/preferences-context";
 
 type GateLoadState = "loading" | "ready" | "noGroup" | "error";
+type CreateMatchState = "idle" | "creating" | "created" | "error";
+type MatchDraft = {
+  title: string;
+  date: string;
+  time: string;
+  location: string;
+  deadlineDate: string;
+  deadlineTime: string;
+  playersPerTeam: number;
+  generatorStyleOverride: GroupGeneratorStyle | null;
+  goalkeeperModeOverride: GroupGoalkeeperMode | null;
+};
 
 export default function MatchScreen() {
   const { getToken } = useAuth();
@@ -34,7 +55,12 @@ export default function MatchScreen() {
   const [readiness, setReadiness] = useState<InitialPeerRatingReadiness | null>(
     null
   );
+  const [nextMatch, setNextMatch] = useState<FootballMatch | null>(null);
   const [players, setPlayers] = useState<PlayerProfile[]>([]);
+  const [matchDraft, setMatchDraft] = useState<MatchDraft>(
+    createDefaultMatchDraft
+  );
+  const [createState, setCreateState] = useState<CreateMatchState>("idle");
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   async function loadGate() {
@@ -54,18 +80,22 @@ export default function MatchScreen() {
       if (!firstGroup) {
         setActiveGroup(null);
         setReadiness(null);
+        setNextMatch(null);
         setPlayers([]);
         setLoadState("noGroup");
         return;
       }
 
-      const [readinessResponse, rosterResponse] = await Promise.all([
-        getInitialPeerRatingReadiness(token, firstGroup.id),
-        listGroupPlayers(token, firstGroup.id),
-      ]);
+      const [readinessResponse, rosterResponse, nextMatchResponse] =
+        await Promise.all([
+          getInitialPeerRatingReadiness(token, firstGroup.id),
+          listGroupPlayers(token, firstGroup.id),
+          getNextFootballMatch(token, firstGroup.id),
+        ]);
 
       setActiveGroup(firstGroup);
       setReadiness(readinessResponse.data.readiness);
+      setNextMatch(nextMatchResponse.data.match);
       setPlayers(rosterResponse.data.players);
       setLoadState("ready");
     } catch (error) {
@@ -92,6 +122,52 @@ export default function MatchScreen() {
     setActionMessage(strings.generation.readyActionHint);
   }
 
+  async function handleCreateMatch() {
+    if (!activeGroup) {
+      return;
+    }
+
+    const startsAt = parseLocalDateTime(matchDraft.date, matchDraft.time);
+    const attendanceDeadlineAt = parseLocalDateTime(
+      matchDraft.deadlineDate,
+      matchDraft.deadlineTime
+    );
+
+    if (!startsAt || !attendanceDeadlineAt) {
+      setCreateState("error");
+      return;
+    }
+
+    setCreateState("creating");
+
+    try {
+      const token = await getToken();
+
+      if (!token) {
+        throw new Error("Missing auth token.");
+      }
+
+      const response = await createFootballMatch(token, activeGroup.id, {
+        title: matchDraft.title,
+        startsAt: startsAt.toISOString(),
+        location: matchDraft.location,
+        playersPerTeam: matchDraft.playersPerTeam,
+        attendanceDeadlineAt: attendanceDeadlineAt.toISOString(),
+        generatorStyleOverride: matchDraft.generatorStyleOverride,
+        goalkeeperModeOverride: matchDraft.goalkeeperModeOverride,
+      });
+
+      setNextMatch(response.data.match);
+      setCreateState("created");
+    } catch (error) {
+      console.warn("Unable to create match", error);
+      setCreateState("error");
+    }
+  }
+
+  const canCreateMatch =
+    activeGroup?.currentUserRole === "owner" ||
+    activeGroup?.currentUserRole === "admin";
   const missingPlayers = getMissingPlayers(readiness, players);
 
   return (
@@ -142,6 +218,24 @@ export default function MatchScreen() {
             <Text style={styles.cardTitle}>{strings.generation.gateTitle}</Text>
             <Text style={styles.errorText}>{strings.generation.loadError}</Text>
           </View>
+        ) : null}
+
+        {loadState === "ready" && nextMatch ? (
+          <NextMatchCard match={nextMatch} />
+        ) : null}
+
+        {loadState === "ready" && activeGroup && canCreateMatch ? (
+          <CreateMatchCard
+            createState={createState}
+            draft={matchDraft}
+            group={activeGroup}
+            onChange={setMatchDraft}
+            onSubmit={handleCreateMatch}
+          />
+        ) : null}
+
+        {loadState === "ready" && !nextMatch ? (
+          <Text style={styles.statusText}>{strings.matches.noNextMatch}</Text>
         ) : null}
 
         {loadState === "ready" && readiness ? (
@@ -293,6 +387,222 @@ function GenerationGateCard({
   );
 }
 
+function CreateMatchCard({
+  createState,
+  draft,
+  group,
+  onChange,
+  onSubmit,
+}: {
+  createState: CreateMatchState;
+  draft: MatchDraft;
+  group: FootballGroup;
+  onChange: (draft: MatchDraft) => void;
+  onSubmit: () => void;
+}) {
+  const { strings } = usePreferences();
+  const canSubmit =
+    createState !== "creating" &&
+    draft.title.trim().length >= 2 &&
+    draft.location.trim().length >= 2;
+
+  function updateDraft(partialDraft: Partial<MatchDraft>) {
+    onChange({
+      ...draft,
+      ...partialDraft,
+    });
+  }
+
+  return (
+    <View style={styles.card}>
+      <Text style={styles.cardTitle}>{strings.matches.createTitle}</Text>
+      <Text style={styles.helperText}>{strings.matches.createSubtitle}</Text>
+
+      <View style={styles.formGroup}>
+        <Text style={styles.fieldLabel}>{strings.matches.titleLabel}</Text>
+        <TextInput
+          onChangeText={(title) => updateDraft({ title })}
+          placeholder={strings.matches.titlePlaceholder}
+          placeholderTextColor="#6B7482"
+          style={styles.input}
+          value={draft.title}
+        />
+      </View>
+
+      <View style={styles.formRow}>
+        <View style={styles.formColumn}>
+          <Text style={styles.fieldLabel}>{strings.matches.dateLabel}</Text>
+          <TextInput
+            autoCapitalize="none"
+            onChangeText={(date) => updateDraft({ date })}
+            placeholder="2026-06-10"
+            placeholderTextColor="#6B7482"
+            style={styles.input}
+            value={draft.date}
+          />
+        </View>
+        <View style={styles.formColumn}>
+          <Text style={styles.fieldLabel}>{strings.matches.timeLabel}</Text>
+          <TextInput
+            autoCapitalize="none"
+            onChangeText={(time) => updateDraft({ time })}
+            placeholder="20:00"
+            placeholderTextColor="#6B7482"
+            style={styles.input}
+            value={draft.time}
+          />
+        </View>
+      </View>
+
+      <View style={styles.formGroup}>
+        <Text style={styles.fieldLabel}>{strings.matches.locationLabel}</Text>
+        <TextInput
+          onChangeText={(location) => updateDraft({ location })}
+          placeholder={strings.matches.locationPlaceholder}
+          placeholderTextColor="#6B7482"
+          style={styles.input}
+          value={draft.location}
+        />
+      </View>
+
+      <View style={styles.formRow}>
+        <View style={styles.formColumn}>
+          <Text style={styles.fieldLabel}>
+            {strings.matches.attendanceDeadlineLabel}
+          </Text>
+          <TextInput
+            autoCapitalize="none"
+            onChangeText={(deadlineDate) => updateDraft({ deadlineDate })}
+            placeholder="2026-06-10"
+            placeholderTextColor="#6B7482"
+            style={styles.input}
+            value={draft.deadlineDate}
+          />
+        </View>
+        <View style={styles.formColumn}>
+          <Text style={styles.fieldLabel}>{strings.matches.timeLabel}</Text>
+          <TextInput
+            autoCapitalize="none"
+            onChangeText={(deadlineTime) => updateDraft({ deadlineTime })}
+            placeholder="18:00"
+            placeholderTextColor="#6B7482"
+            style={styles.input}
+            value={draft.deadlineTime}
+          />
+        </View>
+      </View>
+
+      <View style={styles.formGroup}>
+        <Text style={styles.fieldLabel}>
+          {strings.matches.playersPerTeamLabel}
+        </Text>
+        <View style={styles.optionRow}>
+          {[5, 6, 7].map((playersPerTeam) => (
+            <OptionPill
+              key={playersPerTeam}
+              active={draft.playersPerTeam === playersPerTeam}
+              label={`${playersPerTeam}v${playersPerTeam}`}
+              onPress={() => updateDraft({ playersPerTeam })}
+            />
+          ))}
+        </View>
+      </View>
+
+      <View style={styles.formGroup}>
+        <Text style={styles.fieldLabel}>
+          {strings.matches.generatorOverrideLabel}
+        </Text>
+        <View style={styles.optionRow}>
+          <OptionPill
+            active={draft.generatorStyleOverride === null}
+            label={`${strings.matches.groupDefault}: ${
+              strings.groups.options.generatorStyle[
+                group.settings.generatorStyle
+              ]
+            }`}
+            onPress={() => updateDraft({ generatorStyleOverride: null })}
+          />
+          {groupGeneratorStyles.map((style) => (
+            <OptionPill
+              key={style}
+              active={draft.generatorStyleOverride === style}
+              label={strings.groups.options.generatorStyle[style]}
+              onPress={() => updateDraft({ generatorStyleOverride: style })}
+            />
+          ))}
+        </View>
+      </View>
+
+      <View style={styles.formGroup}>
+        <Text style={styles.fieldLabel}>
+          {strings.matches.goalkeeperOverrideLabel}
+        </Text>
+        <View style={styles.optionRow}>
+          <OptionPill
+            active={draft.goalkeeperModeOverride === null}
+            label={`${strings.matches.groupDefault}: ${
+              strings.groups.options.goalkeeperMode[
+                group.settings.goalkeeperMode
+              ]
+            }`}
+            onPress={() => updateDraft({ goalkeeperModeOverride: null })}
+          />
+          {groupGoalkeeperModes.map((mode) => (
+            <OptionPill
+              key={mode}
+              active={draft.goalkeeperModeOverride === mode}
+              label={strings.groups.options.goalkeeperMode[mode]}
+              onPress={() => updateDraft({ goalkeeperModeOverride: mode })}
+            />
+          ))}
+        </View>
+      </View>
+
+      <Pressable
+        disabled={!canSubmit}
+        onPress={() => void onSubmit()}
+        style={[styles.submitButton, !canSubmit && styles.submitButtonDisabled]}
+      >
+        <Text style={styles.submitButtonText}>
+          {createState === "creating"
+            ? strings.matches.creating
+            : strings.matches.createButton}
+        </Text>
+      </Pressable>
+
+      {createState === "created" ? (
+        <Text style={styles.successText}>{strings.matches.created}</Text>
+      ) : null}
+      {createState === "error" ? (
+        <Text style={styles.errorText}>{strings.matches.createError}</Text>
+      ) : null}
+    </View>
+  );
+}
+
+function OptionPill({
+  active,
+  label,
+  onPress,
+}: {
+  active: boolean;
+  label: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[styles.optionPill, active && styles.optionPillActive]}
+    >
+      <Text
+        style={[styles.optionPillText, active && styles.optionPillTextActive]}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 function getMissingPlayers(
   readiness: InitialPeerRatingReadiness | null,
   players: PlayerProfile[]
@@ -326,6 +636,48 @@ function getPlayerDisplayName(
     .join(" ");
 
   return fullName.length > 0 ? fullName : fallbackName;
+}
+
+function createDefaultMatchDraft(): MatchDraft {
+  const startsAt = new Date();
+  startsAt.setDate(startsAt.getDate() + 7);
+  startsAt.setHours(20, 0, 0, 0);
+
+  const attendanceDeadlineAt = new Date(startsAt);
+  attendanceDeadlineAt.setHours(attendanceDeadlineAt.getHours() - 2);
+
+  return {
+    title: "Foot 5",
+    date: formatDateInput(startsAt),
+    time: formatTimeInput(startsAt),
+    location: "",
+    deadlineDate: formatDateInput(attendanceDeadlineAt),
+    deadlineTime: formatTimeInput(attendanceDeadlineAt),
+    playersPerTeam: 5,
+    generatorStyleOverride: null,
+    goalkeeperModeOverride: null,
+  };
+}
+
+function parseLocalDateTime(dateValue: string, timeValue: string): Date | null {
+  const parsedDate = new Date(`${dateValue}T${timeValue}:00`);
+
+  return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
+}
+
+function formatDateInput(date: Date) {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
+function formatTimeInput(date: Date) {
+  return [
+    String(date.getHours()).padStart(2, "0"),
+    String(date.getMinutes()).padStart(2, "0"),
+  ].join(":");
 }
 
 const styles = StyleSheet.create({
@@ -422,6 +774,72 @@ const styles = StyleSheet.create({
   cardTitle: {
     color: "#F4F7F2",
     fontSize: 20,
+    fontWeight: "900",
+  },
+  formGroup: {
+    gap: 8,
+  },
+  formRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  formColumn: {
+    flex: 1,
+    gap: 8,
+  },
+  fieldLabel: {
+    color: "#F4F7F2",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: "#25313D",
+    borderRadius: 18,
+    backgroundColor: "#141A22",
+    color: "#F4F7F2",
+    fontSize: 15,
+    fontWeight: "800",
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  optionRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  optionPill: {
+    borderWidth: 1,
+    borderColor: "#25313D",
+    borderRadius: 999,
+    backgroundColor: "#141A22",
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+  },
+  optionPillActive: {
+    borderColor: "#F9C846",
+    backgroundColor: "#332711",
+  },
+  optionPillText: {
+    color: "#AEB8C7",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  optionPillTextActive: {
+    color: "#F9C846",
+  },
+  submitButton: {
+    alignItems: "center",
+    borderRadius: 18,
+    backgroundColor: "#35C77B",
+    paddingVertical: 15,
+  },
+  submitButtonDisabled: {
+    opacity: 0.55,
+  },
+  submitButtonText: {
+    color: "#06110C",
+    fontSize: 15,
     fontWeight: "900",
   },
   gateCard: {

@@ -7,6 +7,7 @@ import {
   type FootballGroup,
   type FootballGroupInvitation,
   type FootballGroupMember,
+  type FootballMatch,
   type GroupGeneratorStyle,
   type GroupGoalkeeperMode,
   type GroupIntensity,
@@ -32,16 +33,19 @@ import {
   createFootballGroupInvitation,
   listFootballGroupMembers,
   listCurrentUserGroups,
+  getNextFootballMatch,
   removeFootballGroupMember,
   updateFootballGroupMemberRole,
   updateFootballGroupSettings,
 } from "@/api/client";
+import { NextMatchCard } from "@/features/matches/next-match-card";
 import { usePreferences } from "@/features/preferences/preferences-context";
 
 export default function HomeScreen() {
   const { getToken } = useAuth();
   const { locale, strings } = usePreferences();
   const [groups, setGroups] = useState<FootballGroup[]>([]);
+  const [nextMatch, setNextMatch] = useState<FootballMatch | null>(null);
   const [loadState, setLoadState] = useState<"loading" | "ready" | "error">(
     "loading"
   );
@@ -81,7 +85,13 @@ export default function HomeScreen() {
       }
 
       const response = await listCurrentUserGroups(token);
+      const activeGroup = response.data.groups[0];
+      const nextMatchResponse = activeGroup
+        ? await getNextFootballMatch(token, activeGroup.id)
+        : null;
+
       setGroups(response.data.groups);
+      setNextMatch(nextMatchResponse?.data.match ?? null);
       setLoadState("ready");
     } catch {
       setLoadState("error");
@@ -236,6 +246,7 @@ export default function HomeScreen() {
               onShareInvitation={handleShareInvitation}
               showPlayerProfilePrompt={showPlayerProfilePrompt}
             />
+            {nextMatch ? <NextMatchCard match={nextMatch} /> : null}
             <GroupSettingsManagementCard
               group={activeGroup}
               onGroupUpdated={handleGroupUpdated}
