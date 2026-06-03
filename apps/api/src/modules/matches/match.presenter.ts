@@ -1,5 +1,8 @@
-import type { FootballMatch } from '@fit-five/shared';
-import type { InternalFootballMatch } from './matches.service';
+import type { FootballMatch, FootballMatchAttendance } from '@fit-five/shared';
+import type {
+  InternalFootballMatch,
+  InternalFootballMatchAttendance,
+} from './matches.service';
 
 export function serializeFootballMatch(
   match: InternalFootballMatch,
@@ -19,7 +22,26 @@ export function serializeFootballMatch(
     status: match.status,
     confirmedCount: match.confirmedCount,
     waitlistCount: match.waitlistCount,
+    myAttendance: match.myAttendance
+      ? serializeFootballMatchAttendance(match.myAttendance)
+      : null,
     createdAt: match.createdAt.toISOString(),
     updatedAt: match.updatedAt.toISOString(),
+  };
+}
+
+export function serializeFootballMatchAttendance(
+  attendance: InternalFootballMatchAttendance,
+): FootballMatchAttendance {
+  return {
+    id: attendance.id,
+    matchId: attendance.matchId,
+    playerId: attendance.playerId,
+    response: attendance.response,
+    status: attendance.status,
+    waitlistPosition: attendance.waitlistPosition,
+    respondedAt: attendance.respondedAt.toISOString(),
+    createdAt: attendance.createdAt.toISOString(),
+    updatedAt: attendance.updatedAt.toISOString(),
   };
 }

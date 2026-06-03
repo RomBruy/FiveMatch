@@ -5,6 +5,7 @@ import {
   groupGoalkeeperModes,
   type FootballGroup,
   type FootballMatch,
+  type FootballMatchAttendanceResponse,
   type GroupGeneratorStyle,
   type GroupGoalkeeperMode,
   type InitialPeerRatingReadiness,
@@ -28,6 +29,7 @@ import {
   getNextFootballMatch,
   listCurrentUserGroups,
   listGroupPlayers,
+  submitMatchAttendance,
 } from "@/api/client";
 import { NextMatchCard } from "@/features/matches/next-match-card";
 import { usePreferences } from "@/features/preferences/preferences-context";
@@ -61,6 +63,9 @@ export default function MatchScreen() {
     createDefaultMatchDraft
   );
   const [createState, setCreateState] = useState<CreateMatchState>("idle");
+  const [attendanceState, setAttendanceState] = useState<
+    "idle" | "submitting" | "error"
+  >("idle");
   const [actionMessage, setActionMessage] = useState<string | null>(null);
 
   async function loadGate() {
@@ -165,6 +170,39 @@ export default function MatchScreen() {
     }
   }
 
+  async function handleSubmitAttendance(
+    response: FootballMatchAttendanceResponse
+  ) {
+    if (!activeGroup || !nextMatch) {
+      return;
+    }
+
+    setAttendanceState("submitting");
+
+    try {
+      const token = await getToken();
+
+      if (!token) {
+        throw new Error("Missing auth token.");
+      }
+
+      const attendanceResponse = await submitMatchAttendance(
+        token,
+        activeGroup.id,
+        nextMatch.id,
+        {
+          response,
+        }
+      );
+
+      setNextMatch(attendanceResponse.data.match);
+      setAttendanceState("idle");
+    } catch (error) {
+      console.warn("Unable to submit attendance", error);
+      setAttendanceState("error");
+    }
+  }
+
   const canCreateMatch =
     activeGroup?.currentUserRole === "owner" ||
     activeGroup?.currentUserRole === "admin";
@@ -221,7 +259,11 @@ export default function MatchScreen() {
         ) : null}
 
         {loadState === "ready" && nextMatch ? (
-          <NextMatchCard match={nextMatch} />
+          <NextMatchCard
+            match={nextMatch}
+            responseState={attendanceState}
+            onRespond={handleSubmitAttendance}
+          />
         ) : null}
 
         {loadState === "ready" && activeGroup && canCreateMatch ? (

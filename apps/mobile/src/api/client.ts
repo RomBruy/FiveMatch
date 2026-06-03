@@ -17,6 +17,8 @@ import type {
   RemoveFootballGroupMemberResponse,
   SubmitInitialPeerRatingInput,
   SubmitInitialPeerRatingResponse,
+  SubmitMatchAttendanceInput,
+  SubmitMatchAttendanceResponse,
   SyncCurrentUserInput,
   UpdateInitialPeerRatingInput,
   UpdateInitialPeerRatingResponse,
@@ -321,6 +323,22 @@ export async function getNextFootballMatch(
     `/groups/${groupId}/matches/next`,
     {
       token,
+    }
+  );
+}
+
+export async function submitMatchAttendance(
+  token: string,
+  groupId: string,
+  matchId: string,
+  input: SubmitMatchAttendanceInput
+): Promise<SubmitMatchAttendanceResponse> {
+  return apiFetch<SubmitMatchAttendanceResponse>(
+    `/groups/${groupId}/matches/${matchId}/attendance/me`,
+    {
+      method: "POST",
+      token,
+      body: JSON.stringify(input),
     }
   );
 }

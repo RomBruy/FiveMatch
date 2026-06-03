@@ -13,6 +13,8 @@ import type {
   CreateFootballMatchInput,
   CreateFootballMatchResponse,
   NextFootballMatchResponse,
+  SubmitMatchAttendanceInput,
+  SubmitMatchAttendanceResponse,
 } from '@fit-five/shared';
 import { ClerkAuthGuard } from '../auth/clerk-auth.guard';
 import type { AuthenticatedRequest } from '../auth/auth.types';
@@ -20,6 +22,7 @@ import {
   isSupportedGroupGeneratorStyle,
   isSupportedGroupGoalkeeperMode,
 } from '../groups/group-options';
+import { isSupportedAttendanceResponse } from './match-options';
 import { serializeFootballMatch } from './match.presenter';
 import { MatchesService } from './matches.service';
 
@@ -69,6 +72,38 @@ export class MatchesController {
     return {
       data: {
         match: match ? serializeFootballMatch(match) : null,
+      },
+    };
+  }
+
+  @Post(':matchId/attendance/me')
+  @UseGuards(ClerkAuthGuard)
+  async submitAttendance(
+    @Req() request: AuthenticatedRequest,
+    @Param('groupId') groupId: string,
+    @Param('matchId') matchId: string,
+    @Body() body: Partial<SubmitMatchAttendanceInput>,
+  ): Promise<SubmitMatchAttendanceResponse> {
+    if (!request.auth) {
+      throw new InternalServerErrorException('Authenticated user missing.');
+    }
+
+    if (!isSupportedAttendanceResponse(body.response)) {
+      throw new BadRequestException('Attendance response is invalid.');
+    }
+
+    const match = await this.matchesService.submitAttendance(
+      request.auth.clerkUserId,
+      groupId,
+      matchId,
+      {
+        response: body.response,
+      },
+    );
+
+    return {
+      data: {
+        match: serializeFootballMatch(match),
       },
     };
   }

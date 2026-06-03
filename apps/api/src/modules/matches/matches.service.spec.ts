@@ -86,16 +86,84 @@ describe('MatchesService', () => {
       },
     });
   });
+
+  it('saves an In response idempotently as confirmed before capacity', async () => {
+    const count = jest
+      .fn()
+      .mockResolvedValueOnce(4)
+      .mockResolvedValueOnce(5)
+      .mockResolvedValueOnce(0);
+    const findUnique = jest
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(
+        createAttendanceRow({
+          response: 'in',
+          status: 'confirmed',
+        }),
+      );
+    const upsert = jest.fn().mockResolvedValue(
+      createAttendanceRow({
+        response: 'in',
+        status: 'confirmed',
+      }),
+    );
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'member',
+        findFirst: jest.fn().mockResolvedValue(createMatchRow()),
+        attendanceCount: count,
+        attendanceFindUnique: findUnique,
+        attendanceUpsert: upsert,
+      }),
+    );
+
+    await expect(
+      service.submitAttendance('user_123', 'grp_123', 'match_123', {
+        response: 'in',
+      }),
+    ).resolves.toMatchObject({
+      confirmedCount: 5,
+      waitlistCount: 0,
+      myAttendance: {
+        response: 'in',
+        status: 'confirmed',
+      },
+    });
+
+    expect(upsert).toHaveBeenCalledWith({
+      where: {
+        matchId_playerId: {
+          matchId: 'match_123',
+          playerId: 'ply_123',
+        },
+      },
+      create: expect.objectContaining({
+        response: 'in',
+        status: 'confirmed',
+      }) as object,
+      update: expect.objectContaining({
+        response: 'in',
+        status: 'confirmed',
+      }) as object,
+    });
+  });
 });
 
 function createPrismaMock({
   role,
   create = jest.fn(),
   findFirst = jest.fn(),
+  attendanceCount = jest.fn().mockResolvedValue(0),
+  attendanceFindUnique = jest.fn().mockResolvedValue(null),
+  attendanceUpsert = jest.fn(),
 }: {
   role: string;
   create?: jest.Mock;
   findFirst?: jest.Mock;
+  attendanceCount?: jest.Mock;
+  attendanceFindUnique?: jest.Mock;
+  attendanceUpsert?: jest.Mock;
 }) {
   return {
     user: {
@@ -109,9 +177,19 @@ function createPrismaMock({
         role,
       }),
     },
+    player: {
+      findUnique: jest.fn().mockResolvedValue({
+        id: 'ply_123',
+      }),
+    },
     match: {
       create,
       findFirst,
+    },
+    matchAttendance: {
+      count: attendanceCount,
+      findUnique: attendanceFindUnique,
+      upsert: attendanceUpsert,
     },
   } as unknown as PrismaService;
 }
@@ -132,5 +210,25 @@ function createMatchRow() {
     status: 'open',
     createdAt: new Date('2026-06-03T00:00:00.000Z'),
     updatedAt: new Date('2026-06-03T01:00:00.000Z'),
+  };
+}
+
+function createAttendanceRow(
+  overrides: Partial<{
+    response: string;
+    status: string;
+    waitlistPosition: number | null;
+  }> = {},
+) {
+  return {
+    id: 'attendance_123',
+    matchId: 'match_123',
+    playerId: 'ply_123',
+    response: overrides.response ?? 'in',
+    status: overrides.status ?? 'confirmed',
+    waitlistPosition: overrides.waitlistPosition ?? null,
+    respondedAt: new Date('2026-06-03T02:00:00.000Z'),
+    createdAt: new Date('2026-06-03T02:00:00.000Z'),
+    updatedAt: new Date('2026-06-03T02:00:00.000Z'),
   };
 }

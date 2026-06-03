@@ -98,9 +98,78 @@ describe('MatchesController', () => {
       },
     });
   });
+
+  it('submits current-player attendance', async () => {
+    const submitAttendance = jest.fn().mockResolvedValue(
+      createInternalMatch({
+        myAttendance: {
+          id: 'attendance_123',
+          matchId: 'match_123',
+          playerId: 'ply_123',
+          response: 'in',
+          status: 'confirmed',
+          waitlistPosition: null,
+          respondedAt: new Date('2026-06-03T02:00:00.000Z'),
+          createdAt: new Date('2026-06-03T02:00:00.000Z'),
+          updatedAt: new Date('2026-06-03T02:00:00.000Z'),
+        },
+      }),
+    );
+    const controller = new MatchesController({
+      submitAttendance,
+    } as unknown as MatchesService);
+
+    await expect(
+      controller.submitAttendance(
+        {
+          auth: {
+            clerkUserId: 'user_123',
+          },
+        } as AuthenticatedRequest,
+        'grp_123',
+        'match_123',
+        {
+          response: 'in',
+        },
+      ),
+    ).resolves.toMatchObject({
+      data: {
+        match: {
+          id: 'match_123',
+          myAttendance: {
+            response: 'in',
+            status: 'confirmed',
+          },
+        },
+      },
+    });
+
+    expect(submitAttendance).toHaveBeenCalledWith(
+      'user_123',
+      'grp_123',
+      'match_123',
+      {
+        response: 'in',
+      },
+    );
+  });
 });
 
-function createInternalMatch() {
+function createInternalMatch(
+  overrides: Partial<{
+    myAttendance: {
+      id: string;
+      matchId: string;
+      playerId: string;
+      response: 'in' | 'out' | 'maybe';
+      status: 'confirmed' | 'waitlisted' | 'out' | 'maybe';
+      waitlistPosition: number | null;
+      respondedAt: Date;
+      createdAt: Date;
+      updatedAt: Date;
+    } | null;
+  }> = {},
+) {
   return {
     id: 'match_123',
     groupId: 'grp_123',
@@ -116,6 +185,7 @@ function createInternalMatch() {
     status: 'open',
     confirmedCount: 0,
     waitlistCount: 0,
+    myAttendance: overrides.myAttendance ?? null,
     createdAt: new Date('2026-06-03T00:00:00.000Z'),
     updatedAt: new Date('2026-06-03T01:00:00.000Z'),
   };

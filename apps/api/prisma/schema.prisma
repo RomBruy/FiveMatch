@@ -102,6 +102,7 @@ model Player {
   user                   User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   initialRatingsGiven    InitialPeerRating[] @relation("InitialPeerRatingsGiven")
   initialRatingsReceived InitialPeerRating[] @relation("InitialPeerRatingsReceived")
+  matchAttendances       MatchAttendance[]
   firstName              String?             @map("first_name")
   lastName               String?             @map("last_name")
   nickname               String?
@@ -161,24 +162,44 @@ model InitialPeerRating {
 }
 
 model Match {
-  id                     String   @id @default(cuid())
-  groupId                String   @map("group_id")
-  group                  Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  organizerUserId        String   @map("organizer_user_id")
-  organizer              User     @relation("MatchOrganizer", fields: [organizerUserId], references: [id], onDelete: Restrict)
+  id                     String            @id @default(cuid())
+  groupId                String            @map("group_id")
+  group                  Group             @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  organizerUserId        String            @map("organizer_user_id")
+  organizer              User              @relation("MatchOrganizer", fields: [organizerUserId], references: [id], onDelete: Restrict)
   title                  String
-  startsAt               DateTime @map("starts_at")
+  startsAt               DateTime          @map("starts_at")
   location               String
-  playersPerTeam         Int      @map("players_per_team")
-  maxPlayers             Int      @map("max_players")
-  attendanceDeadlineAt   DateTime @map("attendance_deadline_at")
-  generatorStyleOverride String?  @map("generator_style_override")
-  goalkeeperModeOverride String?  @map("goalkeeper_mode_override")
-  status                 String   @default("open")
-  createdAt              DateTime @default(now()) @map("created_at")
-  updatedAt              DateTime @updatedAt @map("updated_at")
+  playersPerTeam         Int               @map("players_per_team")
+  maxPlayers             Int               @map("max_players")
+  attendanceDeadlineAt   DateTime          @map("attendance_deadline_at")
+  generatorStyleOverride String?           @map("generator_style_override")
+  goalkeeperModeOverride String?           @map("goalkeeper_mode_override")
+  status                 String            @default("open")
+  attendances            MatchAttendance[]
+  createdAt              DateTime          @default(now()) @map("created_at")
+  updatedAt              DateTime          @updatedAt @map("updated_at")
 
   @@index([groupId, startsAt], map: "idx_matches_group_id_starts_at")
   @@index([organizerUserId], map: "idx_matches_organizer_user_id")
   @@map("matches")
+}
+
+model MatchAttendance {
+  id               String   @id @default(cuid())
+  matchId          String   @map("match_id")
+  match            Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  playerId         String   @map("player_id")
+  player           Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  response         String
+  status           String
+  waitlistPosition Int?     @map("waitlist_position")
+  respondedAt      DateTime @default(now()) @map("responded_at")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@unique([matchId, playerId], map: "uq_match_attendances_match_id_player_id")
+  @@index([matchId, status], map: "idx_match_attendances_match_id_status")
+  @@index([playerId], map: "idx_match_attendances_player_id")
+  @@map("match_attendances")
 }

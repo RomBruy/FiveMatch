@@ -31,12 +31,19 @@ export {
   type UpdateFootballGroupSettingsResponse,
 } from "./api/groups.js";
 export {
+  footballMatchAttendanceResponses,
+  footballMatchAttendanceStatuses,
   footballMatchStatuses,
   type CreateFootballMatchInput,
   type CreateFootballMatchResponse,
   type FootballMatch,
+  type FootballMatchAttendance,
+  type FootballMatchAttendanceResponse,
+  type FootballMatchAttendanceStatus,
   type FootballMatchStatus,
   type NextFootballMatchResponse,
+  type SubmitMatchAttendanceInput,
+  type SubmitMatchAttendanceResponse,
 } from "./api/matches.js";
 export {
   playerDominantFeet,
