@@ -442,6 +442,51 @@ describe('MatchesService', () => {
     });
   });
 
+  it('returns the latest saved team generation for group members', async () => {
+    const generationFindFirst = jest
+      .fn()
+      .mockResolvedValue(createTeamGenerationRow({ versionNumber: 2 }));
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'member',
+        findFirst: jest.fn().mockResolvedValue(createMatchRow()),
+        generationFindFirst,
+      }),
+    );
+
+    await expect(
+      service.getLatestTeamGeneration('user_123', 'grp_123', 'match_123'),
+    ).resolves.toMatchObject({
+      id: 'generation_123',
+      matchId: 'match_123',
+      versionNumber: 2,
+      fairnessPercentage: 100,
+    });
+
+    expect(generationFindFirst).toHaveBeenCalledWith({
+      where: {
+        matchId: 'match_123',
+      },
+      orderBy: {
+        versionNumber: 'desc',
+      },
+    });
+  });
+
+  it('returns null when no saved team generation exists yet', async () => {
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'member',
+        findFirst: jest.fn().mockResolvedValue(createMatchRow()),
+        generationFindFirst: jest.fn().mockResolvedValue(null),
+      }),
+    );
+
+    await expect(
+      service.getLatestTeamGeneration('user_123', 'grp_123', 'match_123'),
+    ).resolves.toBeNull();
+  });
+
   it('blocks generation when confirmed players are below the rating threshold', async () => {
     const service = new MatchesService(
       createPrismaMock({
@@ -499,6 +544,7 @@ function createPrismaMock({
   ratingFindMany = jest.fn().mockResolvedValue([]),
   generationCount = jest.fn().mockResolvedValue(0),
   generationCreate = jest.fn(),
+  generationFindFirst = jest.fn().mockResolvedValue(null),
 }: {
   role: string;
   create?: jest.Mock;
@@ -512,6 +558,7 @@ function createPrismaMock({
   ratingFindMany?: jest.Mock;
   generationCount?: jest.Mock;
   generationCreate?: jest.Mock;
+  generationFindFirst?: jest.Mock;
 }) {
   return {
     user: {
@@ -548,6 +595,7 @@ function createPrismaMock({
     teamGenerationVersion: {
       count: generationCount,
       create: generationCreate,
+      findFirst: generationFindFirst,
     },
   } as unknown as PrismaService;
 }

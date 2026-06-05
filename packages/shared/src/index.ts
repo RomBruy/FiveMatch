@@ -42,6 +42,7 @@ export {
   type FootballMatchAttendanceStatus,
   type FootballMatchStatus,
   type GenerateTeamVersionResponse,
+  type LatestTeamGenerationResponse,
   type NextFootballMatchResponse,
   type SubmitMatchAttendanceInput,
   type SubmitMatchAttendanceResponse,

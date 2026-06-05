@@ -375,6 +375,39 @@ export class MatchesService {
     return this.toInternalTeamGenerationVersion(generation);
   }
 
+  async getLatestTeamGeneration(
+    clerkUserId: string,
+    groupId: string,
+    matchId: string,
+  ): Promise<InternalTeamGenerationVersion | null> {
+    await this.requireGroupMembership(clerkUserId, groupId);
+
+    const match = await this.prisma.match.findFirst({
+      where: {
+        id: matchId,
+        groupId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!match) {
+      throw new ForbiddenException('Match required.');
+    }
+
+    const generation = await this.prisma.teamGenerationVersion.findFirst({
+      where: {
+        matchId,
+      },
+      orderBy: {
+        versionNumber: 'desc',
+      },
+    });
+
+    return generation ? this.toInternalTeamGenerationVersion(generation) : null;
+  }
+
   private async requireGroupMembership(
     clerkUserId: string,
     groupId: string,

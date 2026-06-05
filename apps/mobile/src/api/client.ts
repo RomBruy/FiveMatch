@@ -11,6 +11,7 @@ import type {
   GenerateTeamVersionResponse,
   HealthResponse,
   InitialPeerRatingReadinessResponse,
+  LatestTeamGenerationResponse,
   MyInitialPeerRatingsResponse,
   NextFootballMatchResponse,
   PlayerProfileResponse,
@@ -353,6 +354,19 @@ export async function generateTeamVersion(
     `/groups/${groupId}/matches/${matchId}/team-generations`,
     {
       method: "POST",
+      token,
+    }
+  );
+}
+
+export async function getLatestTeamGeneration(
+  token: string,
+  groupId: string,
+  matchId: string
+): Promise<LatestTeamGenerationResponse> {
+  return apiFetch<LatestTeamGenerationResponse>(
+    `/groups/${groupId}/matches/${matchId}/team-generations/latest`,
+    {
       token,
     }
   );

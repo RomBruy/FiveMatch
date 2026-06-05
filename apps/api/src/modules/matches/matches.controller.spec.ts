@@ -216,6 +216,64 @@ describe('MatchesController', () => {
       'match_123',
     );
   });
+
+  it('serializes the latest saved team generation', async () => {
+    const getLatestTeamGeneration = jest
+      .fn()
+      .mockResolvedValue(createInternalTeamGenerationVersion());
+    const controller = new MatchesController({
+      getLatestTeamGeneration,
+    } as unknown as MatchesService);
+
+    await expect(
+      controller.getLatestTeamGeneration(
+        {
+          auth: {
+            clerkUserId: 'user_123',
+          },
+        } as AuthenticatedRequest,
+        'grp_123',
+        'match_123',
+      ),
+    ).resolves.toMatchObject({
+      data: {
+        generation: {
+          id: 'generation_123',
+          versionNumber: 1,
+          fairnessPercentage: 96,
+          createdAt: '2026-06-03T03:00:00.000Z',
+        },
+      },
+    });
+
+    expect(getLatestTeamGeneration).toHaveBeenCalledWith(
+      'user_123',
+      'grp_123',
+      'match_123',
+    );
+  });
+
+  it('returns null when no latest generation is available', async () => {
+    const controller = new MatchesController({
+      getLatestTeamGeneration: jest.fn().mockResolvedValue(null),
+    } as unknown as MatchesService);
+
+    await expect(
+      controller.getLatestTeamGeneration(
+        {
+          auth: {
+            clerkUserId: 'user_123',
+          },
+        } as AuthenticatedRequest,
+        'grp_123',
+        'match_123',
+      ),
+    ).resolves.toEqual({
+      data: {
+        generation: null,
+      },
+    });
+  });
 });
 
 function createInternalMatch(

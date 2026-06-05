@@ -13,6 +13,7 @@ import type {
   CreateFootballMatchInput,
   CreateFootballMatchResponse,
   GenerateTeamVersionResponse,
+  LatestTeamGenerationResponse,
   NextFootballMatchResponse,
   SubmitMatchAttendanceInput,
   SubmitMatchAttendanceResponse,
@@ -132,6 +133,32 @@ export class MatchesController {
     return {
       data: {
         generation: serializeTeamGenerationVersion(generation),
+      },
+    };
+  }
+
+  @Get(':matchId/team-generations/latest')
+  @UseGuards(ClerkAuthGuard)
+  async getLatestTeamGeneration(
+    @Req() request: AuthenticatedRequest,
+    @Param('groupId') groupId: string,
+    @Param('matchId') matchId: string,
+  ): Promise<LatestTeamGenerationResponse> {
+    if (!request.auth) {
+      throw new InternalServerErrorException('Authenticated user missing.');
+    }
+
+    const generation = await this.matchesService.getLatestTeamGeneration(
+      request.auth.clerkUserId,
+      groupId,
+      matchId,
+    );
+
+    return {
+      data: {
+        generation: generation
+          ? serializeTeamGenerationVersion(generation)
+          : null,
       },
     };
   }

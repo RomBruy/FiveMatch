@@ -31,6 +31,7 @@ import {
   createFootballMatch,
   generateTeamVersion,
   getInitialPeerRatingReadiness,
+  getLatestTeamGeneration,
   getNextFootballMatch,
   listCurrentUserGroups,
   listGroupPlayers,
@@ -98,6 +99,7 @@ export default function MatchScreen() {
         setNextMatch(null);
         setPlayers([]);
         setTeamGeneration(null);
+        setGenerationState("idle");
         setLoadState("noGroup");
         return;
       }
@@ -108,12 +110,22 @@ export default function MatchScreen() {
           listGroupPlayers(token, firstGroup.id),
           getNextFootballMatch(token, firstGroup.id),
         ]);
+      const latestGeneration = nextMatchResponse.data.match
+        ? (
+            await getLatestTeamGeneration(
+              token,
+              firstGroup.id,
+              nextMatchResponse.data.match.id
+            )
+          ).data.generation
+        : null;
 
       setActiveGroup(firstGroup);
       setReadiness(readinessResponse.data.readiness);
       setNextMatch(nextMatchResponse.data.match);
       setPlayers(rosterResponse.data.players);
-      setTeamGeneration(null);
+      setTeamGeneration(latestGeneration);
+      setGenerationState(latestGeneration ? "generated" : "idle");
       setLoadState("ready");
     } catch (error) {
       console.warn("Unable to load generation gate", error);
@@ -820,6 +832,7 @@ function GeneratedTeamsCard({
   players: PlayerProfile[];
 }) {
   const { strings } = usePreferences();
+  const [detailsExpanded, setDetailsExpanded] = useState(false);
   const playersById = new Map(players.map((player) => [player.id, player]));
 
   return (
@@ -827,13 +840,17 @@ function GeneratedTeamsCard({
       <View style={styles.generatedTopRow}>
         <View style={styles.attendanceHeaderCopy}>
           <Text style={styles.cardTitle}>
-            {strings.generation.generatedTitle} #{generation.versionNumber}
+            {strings.generation.generatedTitle} -{" "}
+            {strings.generation.versionLabel} #{generation.versionNumber}
           </Text>
           <Text style={styles.helperText}>
             {generation.explanation.summary}
           </Text>
         </View>
-        <Text style={styles.fairnessBadge}>
+        <Text
+          accessibilityLabel={`${generation.fairnessPercentage}% ${strings.generation.fairnessLabel}`}
+          style={styles.fairnessBadge}
+        >
           {generation.fairnessPercentage}% {strings.generation.fairnessLabel}
         </Text>
       </View>
@@ -850,12 +867,62 @@ function GeneratedTeamsCard({
       </View>
 
       <View style={styles.explanationList}>
-        {generation.explanation.bullets.map((bullet) => (
-          <Text key={bullet} style={styles.explanationBullet}>
+        {generation.explanation.bullets.map((bullet, index) => (
+          <Text key={`${bullet}-${index}`} style={styles.explanationBullet}>
             {bullet}
           </Text>
         ))}
       </View>
+
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: detailsExpanded }}
+        accessibilityLabel={
+          detailsExpanded
+            ? strings.generation.hideDetails
+            : strings.generation.showDetails
+        }
+        onPress={() => setDetailsExpanded((isExpanded) => !isExpanded)}
+        style={styles.detailToggle}
+      >
+        <Text style={styles.detailToggleText}>
+          {detailsExpanded
+            ? strings.generation.hideDetails
+            : strings.generation.showDetails}
+        </Text>
+      </Pressable>
+
+      {detailsExpanded ? (
+        <View style={styles.detailPanel}>
+          <Text style={styles.detailTitle}>
+            {strings.generation.detailTitle}
+          </Text>
+          <AlgorithmDetailRow
+            label={strings.generation.detailRatingGap}
+            value={`${formatGenerationNumber(
+              generation.scoreComponents.ratingGap
+            )}/100`}
+          />
+          <AlgorithmDetailRow
+            label={strings.generation.detailPositionMix}
+            value={getBalanceSignalLabel(
+              generation.scoreComponents.positionImbalance,
+              strings
+            )}
+          />
+          <AlgorithmDetailRow
+            label={strings.generation.detailGoalkeeperSplit}
+            value={getBalanceSignalLabel(
+              generation.scoreComponents.goalkeeperImbalance,
+              strings
+            )}
+          />
+          <AlgorithmDetailRow
+            label={strings.generation.detailRatingsUsed}
+            value={`${generation.inputSnapshot.playerRatings.length} ${strings.generation.detailPlayers}`}
+          />
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -870,12 +937,25 @@ function GeneratedTeamColumn({
   const { strings } = usePreferences();
 
   return (
-    <View style={styles.generatedTeamColumn}>
+    <View
+      accessible
+      accessibilityLabel={getGeneratedTeamAccessibilityLabel(
+        team,
+        playersById,
+        strings
+      )}
+      style={styles.generatedTeamColumn}
+    >
       <View style={styles.generatedTeamHeader}>
         <Text style={styles.generatedTeamTitle}>
           {strings.generation.teamLabel} {team.label}
         </Text>
-        <Text style={styles.generatedTeamTotal}>{team.averageRating}/100</Text>
+        <Text style={styles.generatedTeamTotal}>
+          {strings.generation.averageLabel}: {team.averageRating}/100
+        </Text>
+        <Text style={styles.generatedTeamTotal}>
+          {strings.generation.totalLabel}: {team.totalRating}
+        </Text>
       </View>
 
       {team.players.map((teamPlayer) => {
@@ -886,7 +966,17 @@ function GeneratedTeamColumn({
         );
 
         return (
-          <View key={teamPlayer.playerId} style={styles.generatedPlayerRow}>
+          <View
+            key={teamPlayer.playerId}
+            accessible
+            accessibilityLabel={getGeneratedPlayerAccessibilityLabel(
+              displayName,
+              teamPlayer.rating,
+              team.label,
+              strings
+            )}
+            style={styles.generatedPlayerRow}
+          >
             <Text style={styles.generatedPlayerName}>{displayName}</Text>
             <Text style={styles.generatedPlayerRating}>
               {teamPlayer.rating}/100
@@ -894,6 +984,21 @@ function GeneratedTeamColumn({
           </View>
         );
       })}
+    </View>
+  );
+}
+
+function AlgorithmDetailRow({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <View style={styles.detailRow}>
+      <Text style={styles.detailLabel}>{label}</Text>
+      <Text style={styles.detailValue}>{value}</Text>
     </View>
   );
 }
@@ -958,6 +1063,56 @@ function getGenerationBlockedReason(
   }
 
   return null;
+}
+
+function getBalanceSignalLabel(
+  value: number,
+  strings: ReturnType<typeof usePreferences>["strings"]
+) {
+  if (value <= 0) {
+    return strings.generation.detailPerfect;
+  }
+
+  if (value <= 2) {
+    return strings.generation.detailGood;
+  }
+
+  return strings.generation.detailWatch;
+}
+
+function getGeneratedTeamAccessibilityLabel(
+  team: TeamGenerationVersion["teamA"],
+  playersById: Map<string, PlayerProfile>,
+  strings: ReturnType<typeof usePreferences>["strings"]
+) {
+  const playerNames = team.players
+    .map((teamPlayer) =>
+      getPlayerDisplayName(
+        playersById.get(teamPlayer.playerId) ?? null,
+        strings.profile.fallbackName
+      )
+    )
+    .join(", ");
+
+  return [
+    `${strings.generation.teamLabel} ${team.label}`,
+    `${strings.generation.averageLabel} ${team.averageRating}/100`,
+    `${strings.generation.totalLabel} ${team.totalRating}`,
+    `${strings.generation.playersLabel}: ${playerNames}`,
+  ].join(". ");
+}
+
+function getGeneratedPlayerAccessibilityLabel(
+  displayName: string,
+  rating: number,
+  teamLabel: "A" | "B",
+  strings: ReturnType<typeof usePreferences>["strings"]
+) {
+  return `${displayName}. ${strings.generation.teamLabel} ${teamLabel}. ${rating}/100`;
+}
+
+function formatGenerationNumber(value: number) {
+  return Number.isInteger(value) ? `${value}` : value.toFixed(1);
 }
 
 function compareAttendanceDates(
@@ -1433,6 +1588,54 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "800",
     lineHeight: 17,
+  },
+  detailToggle: {
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#6B5318",
+    borderRadius: 16,
+    backgroundColor: "#241C0D",
+    paddingVertical: 12,
+  },
+  detailToggleText: {
+    color: "#F9C846",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  detailPanel: {
+    gap: 10,
+    borderWidth: 1,
+    borderColor: "#2D2A1E",
+    borderRadius: 20,
+    backgroundColor: "#10161D",
+    padding: 14,
+  },
+  detailTitle: {
+    color: "#F4F7F2",
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  detailRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    borderRadius: 14,
+    backgroundColor: "#171E27",
+    paddingHorizontal: 11,
+    paddingVertical: 10,
+  },
+  detailLabel: {
+    flex: 1,
+    color: "#AEB8C7",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  detailValue: {
+    color: "#72E6A4",
+    fontSize: 12,
+    fontWeight: "900",
+    textAlign: "right",
   },
   cardTitle: {
     color: "#F4F7F2",

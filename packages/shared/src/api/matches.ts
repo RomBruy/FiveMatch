@@ -144,3 +144,7 @@ export type SubmitMatchAttendanceResponse = ApiSuccessResponse<{
 export type GenerateTeamVersionResponse = ApiSuccessResponse<{
   generation: TeamGenerationVersion;
 }>;
+
+export type LatestTeamGenerationResponse = ApiSuccessResponse<{
+  generation: TeamGenerationVersion | null;
+}>;
