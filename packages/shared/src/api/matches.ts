@@ -54,6 +54,15 @@ export type FootballMatchEvent = {
   updatedAt: string;
 };
 
+export type FootballMatchMvpVote = {
+  id: string;
+  matchId: string;
+  voterPlayerId: string;
+  votedPlayerId: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type FootballMatch = {
   id: string;
   groupId: string;
@@ -71,6 +80,8 @@ export type FootballMatch = {
   waitlistCount: number;
   score: FootballMatchScore | null;
   events: FootballMatchEvent[];
+  mvpVotes: FootballMatchMvpVote[];
+  myMvpVote: FootballMatchMvpVote | null;
   attendances: FootballMatchAttendance[];
   myAttendance: FootballMatchAttendance | null;
   createdAt: string;
@@ -191,6 +202,15 @@ export type UpsertMatchPlayerEventsInput = {
 };
 
 export type UpsertMatchPlayerEventsResponse = ApiSuccessResponse<{
+  match: FootballMatch;
+}>;
+
+export type SubmitMvpVoteInput = {
+  votedPlayerId: string;
+};
+
+export type SubmitMvpVoteResponse = ApiSuccessResponse<{
+  vote: FootballMatchMvpVote;
   match: FootballMatch;
 }>;
 

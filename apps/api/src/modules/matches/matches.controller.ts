@@ -24,6 +24,8 @@ import type {
   SubmitFinalScoreResponse,
   SubmitMatchAttendanceInput,
   SubmitMatchAttendanceResponse,
+  SubmitMvpVoteInput,
+  SubmitMvpVoteResponse,
   TeamGenerationVersionsResponse,
   UpsertMatchPlayerEventsInput,
   UpsertMatchPlayerEventsResponse,
@@ -37,6 +39,7 @@ import {
 import { isSupportedAttendanceResponse } from './match-options';
 import {
   serializeFootballMatch,
+  serializeMvpVote,
   serializeTeamGenerationVersion,
 } from './match.presenter';
 import {
@@ -174,6 +177,33 @@ export class MatchesController {
     return {
       data: {
         match: serializeFootballMatch(match),
+      },
+    };
+  }
+
+  @Post(':matchId/mvp-votes')
+  @UseGuards(ClerkAuthGuard)
+  async submitMvpVote(
+    @Req() request: AuthenticatedRequest,
+    @Param('groupId') groupId: string,
+    @Param('matchId') matchId: string,
+    @Body() body: Partial<SubmitMvpVoteInput>,
+  ): Promise<SubmitMvpVoteResponse> {
+    if (!request.auth) {
+      throw new InternalServerErrorException('Authenticated user missing.');
+    }
+
+    const result = await this.matchesService.submitMvpVote(
+      request.auth.clerkUserId,
+      groupId,
+      matchId,
+      this.parseSubmitMvpVoteInput(body),
+    );
+
+    return {
+      data: {
+        vote: serializeMvpVote(result.vote),
+        match: serializeFootballMatch(result.match),
       },
     };
   }
@@ -458,6 +488,21 @@ export class MatchesController {
           assists,
         };
       }),
+    };
+  }
+
+  private parseSubmitMvpVoteInput(
+    body: Partial<SubmitMvpVoteInput>,
+  ): SubmitMvpVoteInput {
+    const votedPlayerId =
+      typeof body.votedPlayerId === 'string' ? body.votedPlayerId.trim() : '';
+
+    if (!votedPlayerId) {
+      throw new BadRequestException('MVP vote requires a player id.');
+    }
+
+    return {
+      votedPlayerId,
     };
   }
 }

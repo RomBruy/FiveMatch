@@ -468,6 +468,20 @@ export const fr = {
       "Impossible d'enregistrer les stats. Verifie que le score est enregistre et que les equipes sont verrouillees.",
     matchEventsViewerHint:
       "Les stats sont visibles par le groupe et preparent le resume final.",
+    mvpVoteTitle: "Vote MVP",
+    mvpVoteSubtitle:
+      "Choisis le joueur du match parmi les joueurs des equipes verrouillees. Un seul vote, pas pour toi-meme.",
+    mvpVoteSavedBadge: "Vote enregistre",
+    mvpVoteButton: "Voter",
+    mvpVoteSubmitting: "Vote...",
+    mvpVoteSaved: "Vote MVP enregistre.",
+    mvpVoteError:
+      "Impossible d'enregistrer le vote MVP. Verifie que tu etais confirme et que tu ne votes pas pour toi-meme.",
+    mvpVoteNotConfirmed:
+      "Seuls les joueurs confirmes sur la feuille de match peuvent voter.",
+    mvpVoteAlreadyVoted: "Ton MVP",
+    mvpVoteSelfLabel: "toi",
+    mvpVoteCountLabel: "vote(s)",
     confirmedCount: "confirmes",
     waitlistCount: "en attente",
     maxPlayers: "places",

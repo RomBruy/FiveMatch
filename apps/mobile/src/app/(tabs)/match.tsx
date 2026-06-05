@@ -15,6 +15,7 @@ import {
   type ManualTeamAdjustmentInput,
   type PlayerProfile,
   type SubmitFinalScoreInput,
+  type SubmitMvpVoteInput,
   type TeamGenerationVersion,
   type UpsertMatchPlayerEventsInput,
 } from "@fit-five/shared";
@@ -43,6 +44,7 @@ import {
   listGroupPlayers,
   submitFinalScore,
   submitMatchAttendance,
+  submitMvpVote,
   upsertMatchPlayerEvents,
 } from "@/api/client";
 import { NextMatchCard } from "@/features/matches/next-match-card";
@@ -55,6 +57,7 @@ type ManualAdjustmentState = "idle" | "applying" | "error";
 type TeamLockState = "idle" | "locking" | "locked" | "error";
 type ScoreSubmitState = "idle" | "submitting" | "saved" | "error";
 type MatchEventsSubmitState = "idle" | "submitting" | "saved" | "error";
+type MvpVoteSubmitState = "idle" | "submitting" | "saved" | "error";
 type ScoreDraft = {
   teamAScore: string;
   teamBScore: string;
@@ -105,6 +108,8 @@ export default function MatchScreen() {
     useState<ScoreSubmitState>("idle");
   const [matchEventsSubmitState, setMatchEventsSubmitState] =
     useState<MatchEventsSubmitState>("idle");
+  const [mvpVoteSubmitState, setMvpVoteSubmitState] =
+    useState<MvpVoteSubmitState>("idle");
   const [scoreDraft, setScoreDraft] = useState<ScoreDraft>({
     teamAScore: "",
     teamBScore: "",
@@ -142,6 +147,7 @@ export default function MatchScreen() {
         setTeamLockState("idle");
         setScoreSubmitState("idle");
         setMatchEventsSubmitState("idle");
+        setMvpVoteSubmitState("idle");
         setScoreDraft(createScoreDraft(null));
         setLoadState("noGroup");
         return;
@@ -169,6 +175,7 @@ export default function MatchScreen() {
       setScoreDraft(createScoreDraft(nextMatchResponse.data.match));
       setScoreSubmitState("idle");
       setMatchEventsSubmitState("idle");
+      setMvpVoteSubmitState("idle");
       setPlayers(rosterResponse.data.players);
       setTeamGenerations(savedGenerations);
       setTeamGeneration(selectPrimaryTeamGeneration(savedGenerations));
@@ -330,6 +337,7 @@ export default function MatchScreen() {
       setScoreDraft(createScoreDraft(response.data.match));
       setScoreSubmitState("idle");
       setMatchEventsSubmitState("idle");
+      setMvpVoteSubmitState("idle");
       setTeamGenerations((currentGenerations) =>
         currentGenerations.map((generation) =>
           generation.id === updatedGeneration.id ? updatedGeneration : generation
@@ -372,6 +380,7 @@ export default function MatchScreen() {
       setNextMatch(response.data.match);
       setScoreDraft(createScoreDraft(response.data.match));
       setMatchEventsSubmitState("idle");
+      setMvpVoteSubmitState("idle");
       setScoreSubmitState("saved");
       setActionMessage(strings.matches.finalScoreSaved);
     } catch (error) {
@@ -411,6 +420,39 @@ export default function MatchScreen() {
       console.warn("Unable to submit match events", error);
       setMatchEventsSubmitState("error");
       setActionMessage(strings.matches.matchEventsError);
+    }
+  }
+
+  async function handleSubmitMvpVote(input: SubmitMvpVoteInput) {
+    if (!activeGroup || !nextMatch) {
+      setActionMessage(strings.generation.noMatchForGeneration);
+      return;
+    }
+
+    setMvpVoteSubmitState("submitting");
+    setActionMessage(null);
+
+    try {
+      const token = await getToken();
+
+      if (!token) {
+        throw new Error("Missing auth token.");
+      }
+
+      const response = await submitMvpVote(
+        token,
+        activeGroup.id,
+        nextMatch.id,
+        input
+      );
+
+      setNextMatch(response.data.match);
+      setMvpVoteSubmitState("saved");
+      setActionMessage(strings.matches.mvpVoteSaved);
+    } catch (error) {
+      console.warn("Unable to submit MVP vote", error);
+      setMvpVoteSubmitState("error");
+      setActionMessage(strings.matches.mvpVoteError);
     }
   }
 
@@ -456,6 +498,7 @@ export default function MatchScreen() {
       setTeamLockState("idle");
       setScoreSubmitState("idle");
       setMatchEventsSubmitState("idle");
+      setMvpVoteSubmitState("idle");
       setScoreDraft(createScoreDraft(response.data.match));
       setCreateState("created");
     } catch (error) {
@@ -497,6 +540,7 @@ export default function MatchScreen() {
       setTeamLockState("idle");
       setScoreSubmitState("idle");
       setMatchEventsSubmitState("idle");
+      setMvpVoteSubmitState("idle");
       setScoreDraft(createScoreDraft(attendanceResponse.data.match));
       setAttendanceState("idle");
     } catch (error) {
@@ -653,6 +697,17 @@ export default function MatchScreen() {
                 onSubmit={handleSubmitMatchEvents}
                 players={players}
                 submitState={matchEventsSubmitState}
+                teamPlayers={getLockedTeamPlayers(teamGeneration)}
+              />
+            ) : null}
+
+            {nextMatch?.status === "locked" &&
+            teamGeneration?.status === "locked" ? (
+              <MvpVoteCard
+                match={nextMatch}
+                onSubmit={handleSubmitMvpVote}
+                players={players}
+                submitState={mvpVoteSubmitState}
                 teamPlayers={getLockedTeamPlayers(teamGeneration)}
               />
             ) : null}
@@ -1442,6 +1497,106 @@ function MatchEventsCard({
   );
 }
 
+function MvpVoteCard({
+  match,
+  onSubmit,
+  players,
+  submitState,
+  teamPlayers,
+}: {
+  match: FootballMatch;
+  onSubmit: (input: SubmitMvpVoteInput) => void;
+  players: PlayerProfile[];
+  submitState: MvpVoteSubmitState;
+  teamPlayers: ReturnType<typeof getLockedTeamPlayers>;
+}) {
+  const { strings } = usePreferences();
+  const playersById = new Map(players.map((player) => [player.id, player]));
+  const voteCounts = getMvpVoteCounts(match);
+  const voterPlayerId =
+    match.myAttendance?.status === "confirmed"
+      ? match.myAttendance.playerId
+      : null;
+  const votedPlayer = match.myMvpVote
+    ? (playersById.get(match.myMvpVote.votedPlayerId) ?? null)
+    : null;
+  const votedPlayerName = match.myMvpVote
+    ? getPlayerDisplayName(votedPlayer, strings.profile.fallbackName)
+    : null;
+  const isSubmitting = submitState === "submitting";
+  const hasVoted = Boolean(match.myMvpVote);
+  const canVote = Boolean(voterPlayerId) && !hasVoted && !isSubmitting;
+
+  return (
+    <View style={styles.mvpVoteCard}>
+      <View style={styles.attendanceHeader}>
+        <View style={styles.attendanceHeaderCopy}>
+          <Text style={styles.cardTitle}>{strings.matches.mvpVoteTitle}</Text>
+          <Text style={styles.helperText}>{strings.matches.mvpVoteSubtitle}</Text>
+        </View>
+        {hasVoted ? (
+          <Text style={styles.lockBadge}>{strings.matches.mvpVoteSavedBadge}</Text>
+        ) : null}
+      </View>
+
+      {!voterPlayerId ? (
+        <Text style={styles.helperText}>{strings.matches.mvpVoteNotConfirmed}</Text>
+      ) : null}
+
+      {votedPlayerName ? (
+        <Text style={styles.mvpChosenText}>
+          {strings.matches.mvpVoteAlreadyVoted}: {votedPlayerName}
+        </Text>
+      ) : null}
+
+      <View style={styles.mvpRows}>
+        {teamPlayers.map((teamPlayer) => {
+          const player = playersById.get(teamPlayer.playerId) ?? null;
+          const displayName = getPlayerDisplayName(
+            player,
+            strings.profile.fallbackName
+          );
+          const isSelf = teamPlayer.playerId === voterPlayerId;
+          const disabled = !canVote || isSelf;
+          const voteCount = voteCounts.get(teamPlayer.playerId) ?? 0;
+
+          return (
+            <Pressable
+              accessibilityRole="button"
+              disabled={disabled}
+              key={teamPlayer.playerId}
+              onPress={() => onSubmit({ votedPlayerId: teamPlayer.playerId })}
+              style={[styles.mvpRow, disabled && styles.mvpRowDisabled]}
+            >
+              <View style={styles.mvpPlayerCopy}>
+                <Text style={styles.mvpPlayerName}>{displayName}</Text>
+                <Text style={styles.mvpPlayerMeta}>
+                  {strings.generation.teamLabel} {teamPlayer.teamLabel}
+                  {isSelf ? ` - ${strings.matches.mvpVoteSelfLabel}` : ""}
+                </Text>
+              </View>
+              <Text style={styles.mvpCountBadge}>
+                {voteCount} {strings.matches.mvpVoteCountLabel}
+              </Text>
+              {!disabled ? (
+                <Text style={styles.mvpActionText}>
+                  {isSubmitting
+                    ? strings.matches.mvpVoteSubmitting
+                    : strings.matches.mvpVoteButton}
+                </Text>
+              ) : null}
+            </Pressable>
+          );
+        })}
+      </View>
+
+      {submitState === "error" ? (
+        <Text style={styles.errorText}>{strings.matches.mvpVoteError}</Text>
+      ) : null}
+    </View>
+  );
+}
+
 function GeneratedTeamsCard({
   generation,
   generations,
@@ -2097,6 +2252,14 @@ function parseMatchEventsDraft(
   return { players };
 }
 
+function getMvpVoteCounts(match: FootballMatch) {
+  return match.mvpVotes.reduce((counts, vote) => {
+    counts.set(vote.votedPlayerId, (counts.get(vote.votedPlayerId) ?? 0) + 1);
+
+    return counts;
+  }, new Map<string, number>());
+}
+
 function parseScoreDraft(draft: ScoreDraft): SubmitFinalScoreInput | null {
   const validIntegerPattern = /^\d{1,2}$/;
 
@@ -2639,6 +2802,73 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 10,
     textAlign: "center",
+  },
+  mvpVoteCard: {
+    gap: 15,
+    borderWidth: 1,
+    borderColor: "#6B5318",
+    borderRadius: 26,
+    backgroundColor: "#181611",
+    padding: 18,
+  },
+  mvpChosenText: {
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#6B5318",
+    borderRadius: 16,
+    backgroundColor: "#332711",
+    color: "#F9C846",
+    fontSize: 13,
+    fontWeight: "900",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  mvpRows: {
+    gap: 9,
+  },
+  mvpRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 9,
+    borderWidth: 1,
+    borderColor: "#3A321C",
+    borderRadius: 18,
+    backgroundColor: "#211C12",
+    padding: 11,
+  },
+  mvpRowDisabled: {
+    opacity: 0.55,
+  },
+  mvpPlayerCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  mvpPlayerName: {
+    color: "#F4F7F2",
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  mvpPlayerMeta: {
+    color: "#C6B57B",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  mvpCountBadge: {
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#6B5318",
+    borderRadius: 999,
+    backgroundColor: "#332711",
+    color: "#F9C846",
+    fontSize: 11,
+    fontWeight: "900",
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+  },
+  mvpActionText: {
+    color: "#72E6A4",
+    fontSize: 12,
+    fontWeight: "900",
   },
   scoreBoard: {
     flexDirection: "row",

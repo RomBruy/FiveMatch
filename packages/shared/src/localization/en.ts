@@ -464,6 +464,20 @@ export const en = {
       "Unable to save stats. Check the score is saved and teams are locked.",
     matchEventsViewerHint:
       "Stats are visible to the group and prepare the final summary.",
+    mvpVoteTitle: "MVP vote",
+    mvpVoteSubtitle:
+      "Pick the player of the match from the locked teams. One vote only, not for yourself.",
+    mvpVoteSavedBadge: "Vote saved",
+    mvpVoteButton: "Vote",
+    mvpVoteSubmitting: "Voting...",
+    mvpVoteSaved: "MVP vote saved.",
+    mvpVoteError:
+      "Unable to save the MVP vote. Check you were confirmed and are not voting for yourself.",
+    mvpVoteNotConfirmed:
+      "Only confirmed players on the match sheet can vote.",
+    mvpVoteAlreadyVoted: "Your MVP",
+    mvpVoteSelfLabel: "you",
+    mvpVoteCountLabel: "vote(s)",
     confirmedCount: "confirmed",
     waitlistCount: "waitlisted",
     maxPlayers: "spots",

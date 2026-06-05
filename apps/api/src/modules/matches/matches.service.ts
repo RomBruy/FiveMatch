@@ -9,6 +9,7 @@ import {
   type Match as PrismaMatch,
   type MatchAttendance as PrismaMatchAttendance,
   type MatchEvent as PrismaMatchEvent,
+  type MatchMvpVote as PrismaMatchMvpVote,
   type TeamGenerationVersion as PrismaTeamGenerationVersion,
 } from '@prisma/client';
 import type {
@@ -21,6 +22,7 @@ import type {
   GroupMemberRole,
   ManualTeamAdjustmentInput,
   SubmitFinalScoreInput,
+  SubmitMvpVoteInput,
   SubmitMatchAttendanceInput,
   TeamGenerationExplanation,
   TeamGenerationInputSnapshot,
@@ -95,6 +97,15 @@ export type InternalFootballMatchEvent = {
   updatedAt: Date;
 };
 
+export type InternalFootballMatchMvpVote = {
+  id: string;
+  matchId: string;
+  voterPlayerId: string;
+  votedPlayerId: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 export type InternalFootballMatch = {
   id: string;
   groupId: string;
@@ -117,6 +128,8 @@ export type InternalFootballMatch = {
     submittedAt: Date;
   } | null;
   events: InternalFootballMatchEvent[];
+  mvpVotes: InternalFootballMatchMvpVote[];
+  myMvpVote: InternalFootballMatchMvpVote | null;
   attendances: InternalFootballMatchAttendance[];
   myAttendance: InternalFootballMatchAttendance | null;
   createdAt: Date;
@@ -327,7 +340,12 @@ export class MatchesService {
       match.scoreSubmittedByUserId &&
       match.scoreSubmittedAt
     ) {
-      return this.toInternalMatch(match);
+      const actorPlayer = await this.findGroupPlayer(
+        actorMembership.userId,
+        groupId,
+      );
+
+      return this.toInternalMatch(match, actorPlayer?.id);
     }
 
     const updatedMatch = await this.prisma.match.update({
@@ -342,7 +360,12 @@ export class MatchesService {
       },
     });
 
-    return this.toInternalMatch(updatedMatch);
+    const actorPlayer = await this.findGroupPlayer(
+      actorMembership.userId,
+      groupId,
+    );
+
+    return this.toInternalMatch(updatedMatch, actorPlayer?.id);
   }
 
   async upsertMatchPlayerEvents(
@@ -441,7 +464,103 @@ export class MatchesService {
 
     await this.prisma.$transaction(operations);
 
-    return this.toInternalMatch(match);
+    const actorPlayer = await this.findGroupPlayer(
+      actorMembership.userId,
+      groupId,
+    );
+
+    return this.toInternalMatch(match, actorPlayer?.id);
+  }
+
+  async submitMvpVote(
+    clerkUserId: string,
+    groupId: string,
+    matchId: string,
+    input: SubmitMvpVoteInput,
+  ): Promise<{
+    vote: InternalFootballMatchMvpVote;
+    match: InternalFootballMatch;
+  }> {
+    const actor = await this.requireGroupPlayer(clerkUserId, groupId);
+    const match = await this.prisma.match.findFirst({
+      where: {
+        id: matchId,
+        groupId,
+      },
+    });
+
+    if (!match || normalizeMatchStatus(match.status) !== 'locked') {
+      throw new ConflictException('Locked match required for MVP voting.');
+    }
+
+    const attendance = await this.prisma.matchAttendance.findUnique({
+      where: {
+        matchId_playerId: {
+          matchId,
+          playerId: actor.playerId,
+        },
+      },
+    });
+
+    if (
+      !attendance ||
+      normalizeAttendanceStatus(attendance.status) !== 'confirmed'
+    ) {
+      throw new ForbiddenException('Confirmed match player required.');
+    }
+
+    const lockedGeneration = await this.prisma.teamGenerationVersion.findFirst({
+      where: {
+        matchId: match.id,
+        status: 'locked',
+      },
+    });
+
+    if (!lockedGeneration) {
+      throw new ConflictException('Locked team generation required.');
+    }
+
+    const lockedPlayerIds = getLockedGenerationPlayerIds(lockedGeneration);
+
+    if (!lockedPlayerIds.has(actor.playerId)) {
+      throw new ForbiddenException('Voter must be a locked team player.');
+    }
+
+    if (!lockedPlayerIds.has(input.votedPlayerId)) {
+      throw new ConflictException(
+        'MVP candidate must be a locked team player.',
+      );
+    }
+
+    if (input.votedPlayerId === actor.playerId) {
+      throw new ConflictException('Self MVP votes are not allowed.');
+    }
+
+    const existingVote = await this.prisma.matchMvpVote.findUnique({
+      where: {
+        matchId_voterPlayerId: {
+          matchId: match.id,
+          voterPlayerId: actor.playerId,
+        },
+      },
+    });
+
+    if (existingVote) {
+      throw new ConflictException('MVP vote already submitted.');
+    }
+
+    const vote = await this.prisma.matchMvpVote.create({
+      data: {
+        matchId: match.id,
+        voterPlayerId: actor.playerId,
+        votedPlayerId: input.votedPlayerId,
+      },
+    });
+
+    return {
+      vote: this.toInternalMvpVote(vote),
+      match: await this.toInternalMatch(match, actor.playerId),
+    };
   }
 
   async generateTeamVersion(
@@ -1180,7 +1299,7 @@ export class MatchesService {
     match: PrismaMatch,
     currentPlayerId?: string,
   ): Promise<InternalFootballMatch> {
-    const [confirmedCount, waitlistCount, myAttendance, events] =
+    const [confirmedCount, waitlistCount, myAttendance, events, mvpVotes] =
       await Promise.all([
         this.prisma.matchAttendance.count({
           where: {
@@ -1220,6 +1339,19 @@ export class MatchesService {
             },
           ],
         }),
+        this.prisma.matchMvpVote.findMany({
+          where: {
+            matchId: match.id,
+          },
+          orderBy: [
+            {
+              createdAt: 'asc',
+            },
+            {
+              id: 'asc',
+            },
+          ],
+        }),
       ]);
     const attendances = await this.prisma.matchAttendance.findMany({
       where: {
@@ -1234,6 +1366,9 @@ export class MatchesService {
         },
       ],
     });
+    const internalMvpVotes = mvpVotes.map((vote) =>
+      this.toInternalMvpVote(vote),
+    );
 
     return {
       id: match.id,
@@ -1267,6 +1402,12 @@ export class MatchesService {
             }
           : null,
       events: events.map((event) => this.toInternalMatchEvent(event)),
+      mvpVotes: internalMvpVotes,
+      myMvpVote: currentPlayerId
+        ? (internalMvpVotes.find(
+            (vote) => vote.voterPlayerId === currentPlayerId,
+          ) ?? null)
+        : null,
       attendances: attendances.map((attendance) =>
         this.toInternalAttendance(attendance),
       ),
@@ -1306,6 +1447,19 @@ export class MatchesService {
       recordedByUserId: event.recordedByUserId,
       createdAt: event.createdAt,
       updatedAt: event.updatedAt,
+    };
+  }
+
+  private toInternalMvpVote(
+    vote: PrismaMatchMvpVote,
+  ): InternalFootballMatchMvpVote {
+    return {
+      id: vote.id,
+      matchId: vote.matchId,
+      voterPlayerId: vote.voterPlayerId,
+      votedPlayerId: vote.votedPlayerId,
+      createdAt: vote.createdAt,
+      updatedAt: vote.updatedAt,
     };
   }
 

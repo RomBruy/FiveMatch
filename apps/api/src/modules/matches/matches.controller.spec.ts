@@ -373,6 +373,88 @@ describe('MatchesController', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('submits and serializes an MVP vote', async () => {
+    const vote = createInternalMvpVote({
+      voterPlayerId: 'ply_1',
+      votedPlayerId: 'ply_2',
+    });
+    const submitMvpVote = jest.fn().mockResolvedValue({
+      vote,
+      match: createInternalMatch({
+        status: 'locked',
+        mvpVotes: [vote],
+        myMvpVote: vote,
+      }),
+    });
+    const controller = new MatchesController({
+      submitMvpVote,
+    } as unknown as MatchesService);
+
+    await expect(
+      controller.submitMvpVote(
+        {
+          auth: {
+            clerkUserId: 'user_123',
+          },
+        } as AuthenticatedRequest,
+        'grp_123',
+        'match_123',
+        {
+          votedPlayerId: 'ply_2',
+        },
+      ),
+    ).resolves.toMatchObject({
+      data: {
+        vote: {
+          voterPlayerId: 'ply_1',
+          votedPlayerId: 'ply_2',
+          createdAt: '2026-06-10T21:20:00.000Z',
+        },
+        match: {
+          mvpVotes: [
+            {
+              voterPlayerId: 'ply_1',
+              votedPlayerId: 'ply_2',
+            },
+          ],
+          myMvpVote: {
+            votedPlayerId: 'ply_2',
+          },
+        },
+      },
+    });
+
+    expect(submitMvpVote).toHaveBeenCalledWith(
+      'user_123',
+      'grp_123',
+      'match_123',
+      {
+        votedPlayerId: 'ply_2',
+      },
+    );
+  });
+
+  it('rejects an empty MVP vote target', async () => {
+    const controller = new MatchesController({
+      submitMvpVote: jest.fn(),
+    } as unknown as MatchesService);
+
+    await expect(
+      controller.submitMvpVote(
+        {
+          auth: {
+            clerkUserId: 'user_123',
+          },
+        } as AuthenticatedRequest,
+        'grp_123',
+        'match_123',
+        {
+          votedPlayerId: ' ',
+        },
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
   it('generates and serializes a team version', async () => {
     const generateTeamVersion = jest
       .fn()
@@ -675,6 +757,8 @@ function createInternalMatch(
       createdAt: Date;
       updatedAt: Date;
     } | null;
+    mvpVotes: ReturnType<typeof createInternalMvpVote>[];
+    myMvpVote: ReturnType<typeof createInternalMvpVote> | null;
   }> = {},
 ) {
   return {
@@ -694,6 +778,8 @@ function createInternalMatch(
     waitlistCount: 0,
     score: overrides.score ?? null,
     events: overrides.events ?? [],
+    mvpVotes: overrides.mvpVotes ?? [],
+    myMvpVote: overrides.myMvpVote ?? null,
     attendances: overrides.attendances ?? [],
     myAttendance: overrides.myAttendance ?? null,
     createdAt: new Date('2026-06-03T00:00:00.000Z'),
@@ -720,6 +806,24 @@ function createInternalMatchEvent(
     recordedByUserId: overrides.recordedByUserId ?? 'usr_123',
     createdAt: new Date('2026-06-10T21:15:00.000Z'),
     updatedAt: new Date('2026-06-10T21:15:00.000Z'),
+  };
+}
+
+function createInternalMvpVote(
+  overrides: Partial<{
+    id: string;
+    matchId: string;
+    voterPlayerId: string;
+    votedPlayerId: string;
+  }> = {},
+) {
+  return {
+    id: overrides.id ?? 'mvp_vote_1',
+    matchId: overrides.matchId ?? 'match_123',
+    voterPlayerId: overrides.voterPlayerId ?? 'ply_1',
+    votedPlayerId: overrides.votedPlayerId ?? 'ply_2',
+    createdAt: new Date('2026-06-10T21:20:00.000Z'),
+    updatedAt: new Date('2026-06-10T21:20:00.000Z'),
   };
 }
 

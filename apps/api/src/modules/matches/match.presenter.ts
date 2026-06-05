@@ -1,11 +1,13 @@
 import type {
   FootballMatch,
   FootballMatchAttendance,
+  FootballMatchMvpVote,
   TeamGenerationVersion,
 } from '@fit-five/shared';
 import type {
   InternalFootballMatch,
   InternalFootballMatchAttendance,
+  InternalFootballMatchMvpVote,
   InternalTeamGenerationVersion,
 } from './matches.service';
 
@@ -45,6 +47,8 @@ export function serializeFootballMatch(
       createdAt: event.createdAt.toISOString(),
       updatedAt: event.updatedAt.toISOString(),
     })),
+    mvpVotes: match.mvpVotes.map((vote) => serializeMvpVote(vote)),
+    myMvpVote: match.myMvpVote ? serializeMvpVote(match.myMvpVote) : null,
     attendances: match.attendances.map((attendance) =>
       serializeFootballMatchAttendance(attendance),
     ),
@@ -53,6 +57,19 @@ export function serializeFootballMatch(
       : null,
     createdAt: match.createdAt.toISOString(),
     updatedAt: match.updatedAt.toISOString(),
+  };
+}
+
+export function serializeMvpVote(
+  vote: InternalFootballMatchMvpVote,
+): FootballMatchMvpVote {
+  return {
+    id: vote.id,
+    matchId: vote.matchId,
+    voterPlayerId: vote.voterPlayerId,
+    votedPlayerId: vote.votedPlayerId,
+    createdAt: vote.createdAt.toISOString(),
+    updatedAt: vote.updatedAt.toISOString(),
   };
 }
 

@@ -26,6 +26,8 @@ import type {
   SubmitInitialPeerRatingResponse,
   SubmitMatchAttendanceInput,
   SubmitMatchAttendanceResponse,
+  SubmitMvpVoteInput,
+  SubmitMvpVoteResponse,
   SyncCurrentUserInput,
   TeamGenerationVersionsResponse,
   UpdateInitialPeerRatingInput,
@@ -379,6 +381,22 @@ export async function upsertMatchPlayerEvents(
     `/groups/${groupId}/matches/${matchId}/events`,
     {
       method: "PUT",
+      token,
+      body: JSON.stringify(input),
+    }
+  );
+}
+
+export async function submitMvpVote(
+  token: string,
+  groupId: string,
+  matchId: string,
+  input: SubmitMvpVoteInput
+): Promise<SubmitMvpVoteResponse> {
+  return apiFetch<SubmitMvpVoteResponse>(
+    `/groups/${groupId}/matches/${matchId}/mvp-votes`,
+    {
+      method: "POST",
       token,
       body: JSON.stringify(input),
     }

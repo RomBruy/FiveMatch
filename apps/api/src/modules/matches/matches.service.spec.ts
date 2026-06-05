@@ -674,6 +674,195 @@ describe('MatchesService', () => {
     expect(transaction).not.toHaveBeenCalled();
   });
 
+  it('saves one MVP vote for a confirmed locked-team player', async () => {
+    const vote = createMvpVoteRow({
+      voterPlayerId: 'ply_a_1',
+      votedPlayerId: 'ply_b_1',
+    });
+    const mvpVoteCreate = jest.fn().mockResolvedValue(vote);
+    const mvpVoteFindMany = jest.fn().mockResolvedValue([vote]);
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'member',
+        playerFindUnique: jest.fn().mockResolvedValue({
+          id: 'ply_a_1',
+        }),
+        findFirst: jest
+          .fn()
+          .mockResolvedValue(createMatchRow({ status: 'locked' })),
+        attendanceFindUnique: jest.fn().mockResolvedValue(
+          createAttendanceRow({
+            playerId: 'ply_a_1',
+            status: 'confirmed',
+          }),
+        ),
+        generationFindFirst: jest
+          .fn()
+          .mockResolvedValue(createTeamGenerationRow(createSwappableTeams())),
+        mvpVoteCreate,
+        mvpVoteFindMany,
+      }),
+    );
+
+    await expect(
+      service.submitMvpVote('user_123', 'grp_123', 'match_123', {
+        votedPlayerId: 'ply_b_1',
+      }),
+    ).resolves.toMatchObject({
+      vote: {
+        voterPlayerId: 'ply_a_1',
+        votedPlayerId: 'ply_b_1',
+      },
+      match: {
+        mvpVotes: [
+          {
+            voterPlayerId: 'ply_a_1',
+            votedPlayerId: 'ply_b_1',
+          },
+        ],
+        myMvpVote: {
+          votedPlayerId: 'ply_b_1',
+        },
+      },
+    });
+
+    expect(mvpVoteCreate).toHaveBeenCalledWith({
+      data: {
+        matchId: 'match_123',
+        voterPlayerId: 'ply_a_1',
+        votedPlayerId: 'ply_b_1',
+      },
+    });
+  });
+
+  it('blocks duplicate MVP votes from the same voter', async () => {
+    const mvpVoteCreate = jest.fn();
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'member',
+        playerFindUnique: jest.fn().mockResolvedValue({
+          id: 'ply_a_1',
+        }),
+        findFirst: jest
+          .fn()
+          .mockResolvedValue(createMatchRow({ status: 'locked' })),
+        attendanceFindUnique: jest.fn().mockResolvedValue(
+          createAttendanceRow({
+            playerId: 'ply_a_1',
+            status: 'confirmed',
+          }),
+        ),
+        generationFindFirst: jest
+          .fn()
+          .mockResolvedValue(createTeamGenerationRow(createSwappableTeams())),
+        mvpVoteFindUnique: jest
+          .fn()
+          .mockResolvedValue(createMvpVoteRow({ voterPlayerId: 'ply_a_1' })),
+        mvpVoteCreate,
+      }),
+    );
+
+    await expect(
+      service.submitMvpVote('user_123', 'grp_123', 'match_123', {
+        votedPlayerId: 'ply_b_1',
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(mvpVoteCreate).not.toHaveBeenCalled();
+  });
+
+  it('blocks self MVP votes', async () => {
+    const mvpVoteCreate = jest.fn();
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'member',
+        playerFindUnique: jest.fn().mockResolvedValue({
+          id: 'ply_a_1',
+        }),
+        findFirst: jest
+          .fn()
+          .mockResolvedValue(createMatchRow({ status: 'locked' })),
+        attendanceFindUnique: jest.fn().mockResolvedValue(
+          createAttendanceRow({
+            playerId: 'ply_a_1',
+            status: 'confirmed',
+          }),
+        ),
+        generationFindFirst: jest
+          .fn()
+          .mockResolvedValue(createTeamGenerationRow(createSwappableTeams())),
+        mvpVoteCreate,
+      }),
+    );
+
+    await expect(
+      service.submitMvpVote('user_123', 'grp_123', 'match_123', {
+        votedPlayerId: 'ply_a_1',
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(mvpVoteCreate).not.toHaveBeenCalled();
+  });
+
+  it('blocks MVP votes from players who were not confirmed', async () => {
+    const mvpVoteCreate = jest.fn();
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'member',
+        playerFindUnique: jest.fn().mockResolvedValue({
+          id: 'ply_a_1',
+        }),
+        findFirst: jest
+          .fn()
+          .mockResolvedValue(createMatchRow({ status: 'locked' })),
+        attendanceFindUnique: jest.fn().mockResolvedValue(
+          createAttendanceRow({
+            playerId: 'ply_a_1',
+            status: 'out',
+          }),
+        ),
+        mvpVoteCreate,
+      }),
+    );
+
+    await expect(
+      service.submitMvpVote('user_123', 'grp_123', 'match_123', {
+        votedPlayerId: 'ply_b_1',
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(mvpVoteCreate).not.toHaveBeenCalled();
+  });
+
+  it('blocks MVP votes for players outside locked teams', async () => {
+    const mvpVoteCreate = jest.fn();
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'member',
+        playerFindUnique: jest.fn().mockResolvedValue({
+          id: 'ply_a_1',
+        }),
+        findFirst: jest
+          .fn()
+          .mockResolvedValue(createMatchRow({ status: 'locked' })),
+        attendanceFindUnique: jest.fn().mockResolvedValue(
+          createAttendanceRow({
+            playerId: 'ply_a_1',
+            status: 'confirmed',
+          }),
+        ),
+        generationFindFirst: jest
+          .fn()
+          .mockResolvedValue(createTeamGenerationRow(createSwappableTeams())),
+        mvpVoteCreate,
+      }),
+    );
+
+    await expect(
+      service.submitMvpVote('user_123', 'grp_123', 'match_123', {
+        votedPlayerId: 'ply_not_locked',
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(mvpVoteCreate).not.toHaveBeenCalled();
+  });
+
   it('generates and saves a team version from a ready confirmed pool', async () => {
     const attendanceFindMany = jest.fn().mockResolvedValue(
       createConfirmedAttendances([
@@ -1284,6 +1473,9 @@ function createPrismaMock({
   create = jest.fn(),
   findFirst = jest.fn(),
   matchUpdate = jest.fn(),
+  playerFindUnique = jest.fn().mockResolvedValue({
+    id: 'ply_123',
+  }),
   attendanceCount = jest.fn().mockResolvedValue(0),
   attendanceFindFirst = jest.fn().mockResolvedValue(null),
   attendanceFindMany = jest.fn().mockResolvedValue([]),
@@ -1300,6 +1492,9 @@ function createPrismaMock({
   eventDeleteMany = jest.fn().mockResolvedValue({ count: 0 }),
   eventFindMany = jest.fn().mockResolvedValue([]),
   eventUpsert = jest.fn(),
+  mvpVoteCreate = jest.fn(),
+  mvpVoteFindMany = jest.fn().mockResolvedValue([]),
+  mvpVoteFindUnique = jest.fn().mockResolvedValue(null),
   transaction = jest.fn(async (operations: Array<Promise<unknown>>) =>
     Promise.all(operations),
   ),
@@ -1308,6 +1503,7 @@ function createPrismaMock({
   create?: jest.Mock;
   findFirst?: jest.Mock;
   matchUpdate?: jest.Mock;
+  playerFindUnique?: jest.Mock;
   attendanceCount?: jest.Mock;
   attendanceFindFirst?: jest.Mock;
   attendanceFindMany?: jest.Mock;
@@ -1324,6 +1520,9 @@ function createPrismaMock({
   eventDeleteMany?: jest.Mock;
   eventFindMany?: jest.Mock;
   eventUpsert?: jest.Mock;
+  mvpVoteCreate?: jest.Mock;
+  mvpVoteFindMany?: jest.Mock;
+  mvpVoteFindUnique?: jest.Mock;
   transaction?: jest.Mock;
 }) {
   return {
@@ -1340,9 +1539,7 @@ function createPrismaMock({
       }),
     },
     player: {
-      findUnique: jest.fn().mockResolvedValue({
-        id: 'ply_123',
-      }),
+      findUnique: playerFindUnique,
     },
     match: {
       create,
@@ -1372,6 +1569,11 @@ function createPrismaMock({
       deleteMany: eventDeleteMany,
       findMany: eventFindMany,
       upsert: eventUpsert,
+    },
+    matchMvpVote: {
+      create: mvpVoteCreate,
+      findMany: mvpVoteFindMany,
+      findUnique: mvpVoteFindUnique,
     },
   } as unknown as PrismaService;
 }
@@ -1456,6 +1658,24 @@ function createMatchEventRow(
     recordedByUserId: overrides.recordedByUserId ?? 'usr_123',
     createdAt: new Date('2026-06-10T21:15:00.000Z'),
     updatedAt: new Date('2026-06-10T21:15:00.000Z'),
+  };
+}
+
+function createMvpVoteRow(
+  overrides: Partial<{
+    id: string;
+    matchId: string;
+    voterPlayerId: string;
+    votedPlayerId: string;
+  }> = {},
+) {
+  return {
+    id: overrides.id ?? 'mvp_vote_1',
+    matchId: overrides.matchId ?? 'match_123',
+    voterPlayerId: overrides.voterPlayerId ?? 'ply_a_1',
+    votedPlayerId: overrides.votedPlayerId ?? 'ply_b_1',
+    createdAt: new Date('2026-06-10T21:20:00.000Z'),
+    updatedAt: new Date('2026-06-10T21:20:00.000Z'),
   };
 }
 
