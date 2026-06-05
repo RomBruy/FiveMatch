@@ -18,11 +18,15 @@ import type {
   GroupGeneratorStyle,
   GroupGoalkeeperMode,
   GroupMemberRole,
+  ManualTeamAdjustmentInput,
+  SubmitFinalScoreInput,
   SubmitMatchAttendanceInput,
   TeamGenerationExplanation,
   TeamGenerationInputSnapshot,
+  TeamGenerationPlayer,
   TeamGenerationScoreComponents,
   TeamGenerationTeam,
+  TeamManualAdjustment,
 } from '@fit-five/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -41,6 +45,30 @@ import {
 
 const INITIAL_PEER_RATING_READINESS_THRESHOLD = 3;
 export const TEAM_GENERATION_VERSION_LIMIT = 5;
+const MANUAL_ADJUSTMENT_SCORE_WEIGHTS = {
+  fair_fresh: {
+    rating: 10,
+    position: 1.75,
+    goalkeeper: 8,
+  },
+  max_fairness: {
+    rating: 14,
+    position: 1.25,
+    goalkeeper: 9,
+  },
+  more_variety: {
+    rating: 8,
+    position: 1.5,
+    goalkeeper: 7,
+  },
+} as const satisfies Record<
+  GroupGeneratorStyle,
+  {
+    rating: number;
+    position: number;
+    goalkeeper: number;
+  }
+>;
 
 export type InternalFootballMatchAttendance = {
   id: string;
@@ -69,6 +97,12 @@ export type InternalFootballMatch = {
   status: FootballMatchStatus;
   confirmedCount: number;
   waitlistCount: number;
+  score: {
+    teamAScore: number;
+    teamBScore: number;
+    submittedByUserId: string;
+    submittedAt: Date;
+  } | null;
   attendances: InternalFootballMatchAttendance[];
   myAttendance: InternalFootballMatchAttendance | null;
   createdAt: Date;
@@ -91,6 +125,7 @@ export type InternalTeamGenerationVersion = {
   inputSnapshot: TeamGenerationInputSnapshot;
   scoreComponents: TeamGenerationScoreComponents;
   explanation: TeamGenerationExplanation;
+  manualAdjustment: TeamManualAdjustment | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -144,7 +179,9 @@ export class MatchesService {
     const match = await this.prisma.match.findFirst({
       where: {
         groupId,
-        status: 'open',
+        status: {
+          in: ['open', 'locked'],
+        },
         startsAt: {
           gte: new Date(),
         },
@@ -222,6 +259,76 @@ export class MatchesService {
     await this.reconcileWaitlist(match);
 
     return this.toInternalMatch(match, actor.playerId);
+  }
+
+  async submitFinalScore(
+    clerkUserId: string,
+    groupId: string,
+    matchId: string,
+    input: SubmitFinalScoreInput,
+  ): Promise<InternalFootballMatch> {
+    const actorMembership = await this.requireGroupMembership(
+      clerkUserId,
+      groupId,
+    );
+    const match = await this.prisma.match.findFirst({
+      where: {
+        id: matchId,
+        groupId,
+      },
+    });
+
+    if (!match) {
+      throw new ForbiddenException('Match required.');
+    }
+
+    if (
+      !canUpdateGroupSettings(actorMembership.role) &&
+      match.organizerUserId !== actorMembership.userId
+    ) {
+      throw new ForbiddenException('Organizer role required.');
+    }
+
+    if (normalizeMatchStatus(match.status) !== 'locked') {
+      throw new ConflictException('Locked teams required before scoring.');
+    }
+
+    const lockedGeneration = await this.prisma.teamGenerationVersion.findFirst({
+      where: {
+        matchId: match.id,
+        status: 'locked',
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!lockedGeneration) {
+      throw new ConflictException('Locked team generation required.');
+    }
+
+    if (
+      match.teamAScore === input.teamAScore &&
+      match.teamBScore === input.teamBScore &&
+      match.scoreSubmittedByUserId &&
+      match.scoreSubmittedAt
+    ) {
+      return this.toInternalMatch(match);
+    }
+
+    const updatedMatch = await this.prisma.match.update({
+      where: {
+        id: match.id,
+      },
+      data: {
+        teamAScore: input.teamAScore,
+        teamBScore: input.teamBScore,
+        scoreSubmittedByUserId: actorMembership.userId,
+        scoreSubmittedAt: new Date(),
+      },
+    });
+
+    return this.toInternalMatch(updatedMatch);
   }
 
   async generateTeamVersion(
@@ -462,6 +569,215 @@ export class MatchesService {
     });
 
     return generation ? this.toInternalTeamGenerationVersion(generation) : null;
+  }
+
+  async applyManualTeamAdjustment(
+    clerkUserId: string,
+    groupId: string,
+    matchId: string,
+    generationId: string,
+    input: ManualTeamAdjustmentInput,
+  ): Promise<InternalTeamGenerationVersion> {
+    const actorMembership = await this.requireGroupMembership(
+      clerkUserId,
+      groupId,
+    );
+    const match = await this.prisma.match.findFirst({
+      where: {
+        id: matchId,
+        groupId,
+        status: 'open',
+      },
+      select: {
+        id: true,
+        organizerUserId: true,
+      },
+    });
+
+    if (!match) {
+      throw new ForbiddenException('Open match required.');
+    }
+
+    if (
+      !canUpdateGroupSettings(actorMembership.role) &&
+      match.organizerUserId !== actorMembership.userId
+    ) {
+      throw new ForbiddenException('Organizer role required.');
+    }
+
+    const generation = await this.prisma.teamGenerationVersion.findFirst({
+      where: {
+        id: generationId,
+        matchId: match.id,
+      },
+    });
+
+    if (!generation) {
+      throw new ForbiddenException('Team generation required.');
+    }
+
+    if (generation.status === 'locked') {
+      throw new ConflictException('Locked team generation cannot be adjusted.');
+    }
+
+    if (generation.manualAdjustment) {
+      throw new ConflictException('Manual adjustment already used.');
+    }
+
+    const teamA = generation.teamA as unknown as TeamGenerationTeam;
+    const teamB = generation.teamB as unknown as TeamGenerationTeam;
+    const adjustedTeams = swapTeamPlayers(
+      teamA,
+      teamB,
+      input.teamAPlayerId,
+      input.teamBPlayerId,
+    );
+    const inputSnapshot =
+      generation.inputSnapshot as unknown as TeamGenerationInputSnapshot;
+    const scoreComponents = scoreAdjustedTeams(
+      adjustedTeams.teamA,
+      adjustedTeams.teamB,
+      inputSnapshot,
+    );
+    const manualAdjustment: TeamManualAdjustment = {
+      type: 'swap',
+      adjustedAt: new Date().toISOString(),
+      adjustedByUserId: actorMembership.userId,
+      fromTeamAPlayerId: input.teamAPlayerId,
+      fromTeamBPlayerId: input.teamBPlayerId,
+    };
+    const explanation: TeamGenerationExplanation = {
+      summary: `Manual swap applied. Team A averages ${adjustedTeams.teamA.averageRating}/100 and Team B averages ${adjustedTeams.teamB.averageRating}/100, with a ${scoreComponents.ratingGap}/100 rating gap.`,
+      bullets: [
+        'One manual swap was used for this draft version.',
+        'Team totals and fairness were recalculated after the swap.',
+        'No additional manual adjustment is available for this version.',
+      ],
+    };
+    const updatedGeneration = await this.prisma.teamGenerationVersion.update({
+      where: {
+        id: generation.id,
+      },
+      data: {
+        teamA: adjustedTeams.teamA,
+        teamB: adjustedTeams.teamB,
+        teamATotal: adjustedTeams.teamA.totalRating,
+        teamBTotal: adjustedTeams.teamB.totalRating,
+        fairnessPercentage: getFairnessPercentage(scoreComponents),
+        scoreComponents,
+        explanation,
+        manualAdjustment,
+      },
+    });
+
+    return this.toInternalTeamGenerationVersion(updatedGeneration);
+  }
+
+  async confirmTeamGeneration(
+    clerkUserId: string,
+    groupId: string,
+    matchId: string,
+    generationId: string,
+  ): Promise<{
+    match: InternalFootballMatch;
+    generation: InternalTeamGenerationVersion;
+  }> {
+    const actorMembership = await this.requireGroupMembership(
+      clerkUserId,
+      groupId,
+    );
+    const match = await this.prisma.match.findFirst({
+      where: {
+        id: matchId,
+        groupId,
+      },
+    });
+
+    if (!match) {
+      throw new ForbiddenException('Match required.');
+    }
+
+    if (
+      !canUpdateGroupSettings(actorMembership.role) &&
+      match.organizerUserId !== actorMembership.userId
+    ) {
+      throw new ForbiddenException('Organizer role required.');
+    }
+
+    const generation = await this.prisma.teamGenerationVersion.findFirst({
+      where: {
+        id: generationId,
+        matchId: match.id,
+      },
+    });
+
+    if (!generation) {
+      throw new ForbiddenException('Team generation required.');
+    }
+
+    if (match.status === 'locked' && generation.status === 'locked') {
+      return {
+        match: await this.toInternalMatch(match),
+        generation: this.toInternalTeamGenerationVersion(generation),
+      };
+    }
+
+    if (normalizeMatchStatus(match.status) !== 'open') {
+      throw new ConflictException('Open match required for team confirmation.');
+    }
+
+    if (generation.status === 'locked') {
+      throw new ConflictException('Team generation is already locked.');
+    }
+
+    const lockedGeneration = await this.prisma.teamGenerationVersion.findFirst({
+      where: {
+        matchId: match.id,
+        status: 'locked',
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (lockedGeneration && lockedGeneration.id !== generation.id) {
+      throw new ConflictException('Another team generation is already locked.');
+    }
+
+    const [, updatedGeneration, updatedMatch] = await this.prisma.$transaction([
+      this.prisma.teamGenerationVersion.updateMany({
+        where: {
+          matchId: match.id,
+          NOT: {
+            id: generation.id,
+          },
+        },
+        data: {
+          status: 'draft',
+        },
+      }),
+      this.prisma.teamGenerationVersion.update({
+        where: {
+          id: generation.id,
+        },
+        data: {
+          status: 'locked',
+        },
+      }),
+      this.prisma.match.update({
+        where: {
+          id: match.id,
+        },
+        data: {
+          status: 'locked',
+        },
+      }),
+    ]);
+
+    return {
+      match: await this.toInternalMatch(updatedMatch),
+      generation: this.toInternalTeamGenerationVersion(updatedGeneration),
+    };
   }
 
   private async requireGroupMembership(
@@ -769,6 +1085,18 @@ export class MatchesService {
       status: normalizeMatchStatus(match.status),
       confirmedCount,
       waitlistCount,
+      score:
+        match.teamAScore !== null &&
+        match.teamBScore !== null &&
+        match.scoreSubmittedByUserId &&
+        match.scoreSubmittedAt
+          ? {
+              teamAScore: match.teamAScore,
+              teamBScore: match.teamBScore,
+              submittedByUserId: match.scoreSubmittedByUserId,
+              submittedAt: match.scoreSubmittedAt,
+            }
+          : null,
       attendances: attendances.map((attendance) =>
         this.toInternalAttendance(attendance),
       ),
@@ -818,8 +1146,159 @@ export class MatchesService {
         generation.scoreComponents as unknown as TeamGenerationScoreComponents,
       explanation:
         generation.explanation as unknown as TeamGenerationExplanation,
+      manualAdjustment:
+        (generation.manualAdjustment as unknown as TeamManualAdjustment | null) ??
+        null,
       createdAt: generation.createdAt,
       updatedAt: generation.updatedAt,
     };
   }
+}
+
+function swapTeamPlayers(
+  teamA: TeamGenerationTeam,
+  teamB: TeamGenerationTeam,
+  teamAPlayerId: string,
+  teamBPlayerId: string,
+) {
+  const teamAPlayerIndex = teamA.players.findIndex(
+    (player) => player.playerId === teamAPlayerId,
+  );
+  const teamBPlayerIndex = teamB.players.findIndex(
+    (player) => player.playerId === teamBPlayerId,
+  );
+
+  if (teamAPlayerIndex < 0 || teamBPlayerIndex < 0) {
+    throw new ConflictException(
+      'Manual swap requires one player from each team.',
+    );
+  }
+
+  const nextTeamAPlayers = [...teamA.players];
+  const nextTeamBPlayers = [...teamB.players];
+  const teamAPlayer = nextTeamAPlayers[teamAPlayerIndex];
+  const teamBPlayer = nextTeamBPlayers[teamBPlayerIndex];
+
+  nextTeamAPlayers[teamAPlayerIndex] = teamBPlayer;
+  nextTeamBPlayers[teamBPlayerIndex] = teamAPlayer;
+
+  return {
+    teamA: buildAdjustedTeam('A', nextTeamAPlayers),
+    teamB: buildAdjustedTeam('B', nextTeamBPlayers),
+  };
+}
+
+function buildAdjustedTeam(
+  label: TeamGenerationTeam['label'],
+  players: TeamGenerationPlayer[],
+): TeamGenerationTeam {
+  const normalizedPlayers = players.map((player, index) => ({
+    ...player,
+    slot: index + 1,
+  }));
+
+  return {
+    label,
+    players: normalizedPlayers,
+    totalRating: getTeamTotalRating(normalizedPlayers),
+    averageRating: getTeamAverageRating(normalizedPlayers),
+  };
+}
+
+function scoreAdjustedTeams(
+  teamA: TeamGenerationTeam,
+  teamB: TeamGenerationTeam,
+  inputSnapshot: TeamGenerationInputSnapshot,
+): TeamGenerationScoreComponents {
+  const weights = MANUAL_ADJUSTMENT_SCORE_WEIGHTS[inputSnapshot.generatorStyle];
+  const ratingGap = roundToOneDecimal(
+    Math.abs(teamA.averageRating - teamB.averageRating),
+  );
+  const positionImbalance = getPositionImbalance(teamA.players, teamB.players);
+  const goalkeeperImbalance = getGoalkeeperImbalance(
+    teamA.players,
+    teamB.players,
+    inputSnapshot.goalkeeperMode,
+  );
+
+  return {
+    ratingGap,
+    positionImbalance,
+    goalkeeperImbalance,
+    randomness: 0,
+    candidateScore: roundToThreeDecimals(
+      ratingGap * weights.rating +
+        positionImbalance * weights.position +
+        goalkeeperImbalance * weights.goalkeeper,
+    ),
+  };
+}
+
+function getFairnessPercentage(scoreComponents: TeamGenerationScoreComponents) {
+  return Math.max(
+    0,
+    Math.min(
+      100,
+      Math.round(
+        100 -
+          scoreComponents.ratingGap * 5 -
+          scoreComponents.positionImbalance * 1.5 -
+          scoreComponents.goalkeeperImbalance * 5,
+      ),
+    ),
+  );
+}
+
+function getTeamTotalRating(players: TeamGenerationPlayer[]) {
+  return roundToOneDecimal(
+    players.reduce((total, player) => total + player.rating, 0),
+  );
+}
+
+function getTeamAverageRating(players: TeamGenerationPlayer[]) {
+  return roundToOneDecimal(getTeamTotalRating(players) / players.length);
+}
+
+function getPositionImbalance(
+  teamA: TeamGenerationPlayer[],
+  teamB: TeamGenerationPlayer[],
+) {
+  const styles = new Set([
+    ...teamA.map((player) => player.preferredStyle ?? 'all_rounder'),
+    ...teamB.map((player) => player.preferredStyle ?? 'all_rounder'),
+  ]);
+
+  return [...styles].reduce((imbalance, style) => {
+    return (
+      imbalance + Math.abs(countStyle(teamA, style) - countStyle(teamB, style))
+    );
+  }, 0);
+}
+
+function getGoalkeeperImbalance(
+  teamA: TeamGenerationPlayer[],
+  teamB: TeamGenerationPlayer[],
+  goalkeeperMode: GroupGoalkeeperMode,
+) {
+  if (goalkeeperMode === 'no_goalkeeper') {
+    return 0;
+  }
+
+  return Math.abs(
+    countStyle(teamA, 'goalkeeper') - countStyle(teamB, 'goalkeeper'),
+  );
+}
+
+function countStyle(players: TeamGenerationPlayer[], style: string) {
+  return players.filter(
+    (player) => (player.preferredStyle ?? 'all_rounder') === style,
+  ).length;
+}
+
+function roundToOneDecimal(value: number) {
+  return Math.round(value * 10) / 10;
+}
+
+function roundToThreeDecimals(value: number) {
+  return Math.round(value * 1000) / 1000;
 }

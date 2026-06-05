@@ -20,6 +20,7 @@ export function NextMatchCard({
   const { strings } = usePreferences();
   const startsAt = new Date(match.startsAt);
   const activeResponse = match.myAttendance?.response ?? null;
+  const attendanceLocked = match.status !== "open";
 
   return (
     <View style={styles.card}>
@@ -43,7 +44,7 @@ export function NextMatchCard({
         </Text>
       </View>
 
-      {onRespond ? (
+      {onRespond && !attendanceLocked ? (
         <View style={styles.attendanceSection}>
           <View style={styles.responseRow}>
             {(["in", "maybe", "out"] as const).map((response) => (
@@ -92,7 +93,9 @@ export function NextMatchCard({
         </View>
       ) : (
         <Text style={styles.helperText}>
-          {strings.matches.attendancePlaceholder}
+          {attendanceLocked
+            ? strings.matches.attendanceLocked
+            : strings.matches.attendancePlaceholder}
         </Text>
       )}
     </View>

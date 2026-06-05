@@ -107,7 +107,9 @@ describe('MatchesService', () => {
     expect(findFirst).toHaveBeenCalledWith({
       where: {
         groupId: 'grp_123',
-        status: 'open',
+        status: {
+          in: ['open', 'locked'],
+        },
         startsAt: {
           gte: expect.any(Date) as Date,
         },
@@ -347,6 +349,165 @@ describe('MatchesService', () => {
         waitlistPosition: 1,
       },
     });
+  });
+
+  it('submits final score for a locked match idempotently', async () => {
+    const matchUpdate = jest.fn().mockResolvedValue(
+      createMatchRow({
+        status: 'locked',
+        teamAScore: 7,
+        teamBScore: 5,
+        scoreSubmittedByUserId: 'usr_123',
+        scoreSubmittedAt: new Date('2026-06-10T21:10:00.000Z'),
+      }),
+    );
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'admin',
+        findFirst: jest
+          .fn()
+          .mockResolvedValue(createMatchRow({ status: 'locked' })),
+        matchUpdate,
+        generationFindFirst: jest.fn().mockResolvedValue({
+          id: 'generation_locked',
+        }),
+      }),
+    );
+
+    await expect(
+      service.submitFinalScore('user_123', 'grp_123', 'match_123', {
+        teamAScore: 7,
+        teamBScore: 5,
+      }),
+    ).resolves.toMatchObject({
+      id: 'match_123',
+      status: 'locked',
+      score: {
+        teamAScore: 7,
+        teamBScore: 5,
+        submittedByUserId: 'usr_123',
+      },
+    });
+
+    expect(matchUpdate).toHaveBeenCalledWith({
+      where: {
+        id: 'match_123',
+      },
+      data: {
+        teamAScore: 7,
+        teamBScore: 5,
+        scoreSubmittedByUserId: 'usr_123',
+        scoreSubmittedAt: expect.any(Date) as Date,
+      },
+    });
+  });
+
+  it('edits final score while match completion is not finalized', async () => {
+    const matchUpdate = jest.fn().mockResolvedValue(
+      createMatchRow({
+        status: 'locked',
+        teamAScore: 8,
+        teamBScore: 6,
+        scoreSubmittedByUserId: 'usr_123',
+        scoreSubmittedAt: new Date('2026-06-10T21:20:00.000Z'),
+      }),
+    );
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'admin',
+        findFirst: jest.fn().mockResolvedValue(
+          createMatchRow({
+            status: 'locked',
+            teamAScore: 7,
+            teamBScore: 5,
+            scoreSubmittedByUserId: 'usr_123',
+            scoreSubmittedAt: new Date('2026-06-10T21:10:00.000Z'),
+          }),
+        ),
+        matchUpdate,
+        generationFindFirst: jest.fn().mockResolvedValue({
+          id: 'generation_locked',
+        }),
+      }),
+    );
+
+    await expect(
+      service.submitFinalScore('user_123', 'grp_123', 'match_123', {
+        teamAScore: 8,
+        teamBScore: 6,
+      }),
+    ).resolves.toMatchObject({
+      score: {
+        teamAScore: 8,
+        teamBScore: 6,
+      },
+    });
+
+    expect(matchUpdate).toHaveBeenCalledWith({
+      where: {
+        id: 'match_123',
+      },
+      data: expect.objectContaining({
+        teamAScore: 8,
+        teamBScore: 6,
+      }) as object,
+    });
+  });
+
+  it('does not rewrite score metadata for a duplicate score submission', async () => {
+    const submittedAt = new Date('2026-06-10T21:10:00.000Z');
+    const matchUpdate = jest.fn();
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'admin',
+        findFirst: jest.fn().mockResolvedValue(
+          createMatchRow({
+            status: 'locked',
+            teamAScore: 7,
+            teamBScore: 5,
+            scoreSubmittedByUserId: 'usr_123',
+            scoreSubmittedAt: submittedAt,
+          }),
+        ),
+        matchUpdate,
+        generationFindFirst: jest.fn().mockResolvedValue({
+          id: 'generation_locked',
+        }),
+      }),
+    );
+
+    await expect(
+      service.submitFinalScore('user_123', 'grp_123', 'match_123', {
+        teamAScore: 7,
+        teamBScore: 5,
+      }),
+    ).resolves.toMatchObject({
+      score: {
+        teamAScore: 7,
+        teamBScore: 5,
+        submittedAt,
+      },
+    });
+    expect(matchUpdate).not.toHaveBeenCalled();
+  });
+
+  it('blocks final score submission before teams are locked', async () => {
+    const matchUpdate = jest.fn();
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'admin',
+        findFirst: jest.fn().mockResolvedValue(createMatchRow()),
+        matchUpdate,
+      }),
+    );
+
+    await expect(
+      service.submitFinalScore('user_123', 'grp_123', 'match_123', {
+        teamAScore: 7,
+        teamBScore: 5,
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(matchUpdate).not.toHaveBeenCalled();
   });
 
   it('generates and saves a team version from a ready confirmed pool', async () => {
@@ -634,6 +795,282 @@ describe('MatchesService', () => {
     });
   });
 
+  it('applies one manual swap and recalculates team fairness', async () => {
+    const generationUpdate = jest
+      .fn()
+      .mockImplementation(({ data }: { data: TeamGenerationRowOverrides }) =>
+        Promise.resolve(
+          createTeamGenerationRow({
+            ...data,
+            id: 'generation_123',
+            versionNumber: 1,
+          }),
+        ),
+      );
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'admin',
+        findFirst: jest.fn().mockResolvedValue(createMatchRow()),
+        generationFindFirst: jest
+          .fn()
+          .mockResolvedValue(createTeamGenerationRow(createSwappableTeams())),
+        generationUpdate,
+      }),
+    );
+
+    await expect(
+      service.applyManualTeamAdjustment(
+        'user_123',
+        'grp_123',
+        'match_123',
+        'generation_123',
+        {
+          teamAPlayerId: 'ply_a_1',
+          teamBPlayerId: 'ply_b_1',
+        },
+      ),
+    ).resolves.toMatchObject({
+      id: 'generation_123',
+      teamA: {
+        players: expect.arrayContaining([
+          expect.objectContaining({
+            playerId: 'ply_b_1',
+          }) as object,
+        ]) as unknown[],
+      },
+      teamB: {
+        players: expect.arrayContaining([
+          expect.objectContaining({
+            playerId: 'ply_a_1',
+          }) as object,
+        ]) as unknown[],
+      },
+      fairnessPercentage: expect.any(Number) as number,
+      manualAdjustment: {
+        type: 'swap',
+        adjustedByUserId: 'usr_123',
+        fromTeamAPlayerId: 'ply_a_1',
+        fromTeamBPlayerId: 'ply_b_1',
+      },
+    });
+
+    expect(generationUpdate).toHaveBeenCalledWith({
+      where: {
+        id: 'generation_123',
+      },
+      data: expect.objectContaining({
+        teamA: expect.objectContaining({
+          totalRating: expect.any(Number) as number,
+        }) as object,
+        teamB: expect.objectContaining({
+          totalRating: expect.any(Number) as number,
+        }) as object,
+        fairnessPercentage: expect.any(Number) as number,
+        manualAdjustment: expect.objectContaining({
+          type: 'swap',
+        }) as object,
+      }) as object,
+    });
+  });
+
+  it('blocks a second manual adjustment on the same version', async () => {
+    const generationUpdate = jest.fn();
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'admin',
+        findFirst: jest.fn().mockResolvedValue(createMatchRow()),
+        generationFindFirst: jest.fn().mockResolvedValue(
+          createTeamGenerationRow({
+            ...createSwappableTeams(),
+            manualAdjustment: createManualAdjustment(),
+          }),
+        ),
+        generationUpdate,
+      }),
+    );
+
+    await expect(
+      service.applyManualTeamAdjustment(
+        'user_123',
+        'grp_123',
+        'match_123',
+        'generation_123',
+        {
+          teamAPlayerId: 'ply_a_1',
+          teamBPlayerId: 'ply_b_1',
+        },
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(generationUpdate).not.toHaveBeenCalled();
+  });
+
+  it('blocks manual adjustment on a locked version', async () => {
+    const generationUpdate = jest.fn();
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'admin',
+        findFirst: jest.fn().mockResolvedValue(createMatchRow()),
+        generationFindFirst: jest.fn().mockResolvedValue(
+          createTeamGenerationRow({
+            ...createSwappableTeams(),
+            status: 'locked',
+          }),
+        ),
+        generationUpdate,
+      }),
+    );
+
+    await expect(
+      service.applyManualTeamAdjustment(
+        'user_123',
+        'grp_123',
+        'match_123',
+        'generation_123',
+        {
+          teamAPlayerId: 'ply_a_1',
+          teamBPlayerId: 'ply_b_1',
+        },
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(generationUpdate).not.toHaveBeenCalled();
+  });
+
+  it('confirms one generation and locks the match as source of truth', async () => {
+    const generationUpdateMany = jest.fn().mockResolvedValue({
+      count: 1,
+    });
+    const generationUpdate = jest
+      .fn()
+      .mockResolvedValue(createTeamGenerationRow({ status: 'locked' }));
+    const matchUpdate = jest
+      .fn()
+      .mockResolvedValue(createMatchRow({ status: 'locked' }));
+    const transaction = jest.fn(async (operations: Array<Promise<unknown>>) =>
+      Promise.all(operations),
+    );
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'admin',
+        findFirst: jest.fn().mockResolvedValue(createMatchRow()),
+        matchUpdate,
+        generationFindFirst: jest
+          .fn()
+          .mockResolvedValueOnce(createTeamGenerationRow())
+          .mockResolvedValueOnce(null),
+        generationUpdate,
+        generationUpdateMany,
+        transaction,
+      }),
+    );
+
+    await expect(
+      service.confirmTeamGeneration(
+        'user_123',
+        'grp_123',
+        'match_123',
+        'generation_123',
+      ),
+    ).resolves.toMatchObject({
+      match: {
+        id: 'match_123',
+        status: 'locked',
+      },
+      generation: {
+        id: 'generation_123',
+        status: 'locked',
+      },
+    });
+
+    expect(generationUpdateMany).toHaveBeenCalledWith({
+      where: {
+        matchId: 'match_123',
+        NOT: {
+          id: 'generation_123',
+        },
+      },
+      data: {
+        status: 'draft',
+      },
+    });
+    expect(generationUpdate).toHaveBeenCalledWith({
+      where: {
+        id: 'generation_123',
+      },
+      data: {
+        status: 'locked',
+      },
+    });
+    expect(matchUpdate).toHaveBeenCalledWith({
+      where: {
+        id: 'match_123',
+      },
+      data: {
+        status: 'locked',
+      },
+    });
+    expect(transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns the locked source of truth idempotently', async () => {
+    const transaction = jest.fn();
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'admin',
+        findFirst: jest
+          .fn()
+          .mockResolvedValue(createMatchRow({ status: 'locked' })),
+        generationFindFirst: jest
+          .fn()
+          .mockResolvedValue(createTeamGenerationRow({ status: 'locked' })),
+        transaction,
+      }),
+    );
+
+    await expect(
+      service.confirmTeamGeneration(
+        'user_123',
+        'grp_123',
+        'match_123',
+        'generation_123',
+      ),
+    ).resolves.toMatchObject({
+      match: {
+        status: 'locked',
+      },
+      generation: {
+        status: 'locked',
+      },
+    });
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('blocks locking a second generation after teams are official', async () => {
+    const transaction = jest.fn();
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'admin',
+        findFirst: jest.fn().mockResolvedValue(createMatchRow()),
+        generationFindFirst: jest
+          .fn()
+          .mockResolvedValueOnce(createTeamGenerationRow())
+          .mockResolvedValueOnce({
+            id: 'generation_locked',
+          }),
+        transaction,
+      }),
+    );
+
+    await expect(
+      service.confirmTeamGeneration(
+        'user_123',
+        'grp_123',
+        'match_123',
+        'generation_123',
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
   it('blocks generation when confirmed players are below the rating threshold', async () => {
     const service = new MatchesService(
       createPrismaMock({
@@ -682,6 +1119,7 @@ function createPrismaMock({
   role,
   create = jest.fn(),
   findFirst = jest.fn(),
+  matchUpdate = jest.fn(),
   attendanceCount = jest.fn().mockResolvedValue(0),
   attendanceFindFirst = jest.fn().mockResolvedValue(null),
   attendanceFindMany = jest.fn().mockResolvedValue([]),
@@ -693,10 +1131,16 @@ function createPrismaMock({
   generationCreate = jest.fn(),
   generationFindFirst = jest.fn().mockResolvedValue(null),
   generationFindMany = jest.fn().mockResolvedValue([]),
+  generationUpdate = jest.fn(),
+  generationUpdateMany = jest.fn(),
+  transaction = jest.fn(async (operations: Array<Promise<unknown>>) =>
+    Promise.all(operations),
+  ),
 }: {
   role: string;
   create?: jest.Mock;
   findFirst?: jest.Mock;
+  matchUpdate?: jest.Mock;
   attendanceCount?: jest.Mock;
   attendanceFindFirst?: jest.Mock;
   attendanceFindMany?: jest.Mock;
@@ -708,8 +1152,12 @@ function createPrismaMock({
   generationCreate?: jest.Mock;
   generationFindFirst?: jest.Mock;
   generationFindMany?: jest.Mock;
+  generationUpdate?: jest.Mock;
+  generationUpdateMany?: jest.Mock;
+  transaction?: jest.Mock;
 }) {
   return {
+    $transaction: transaction,
     user: {
       findUnique: jest.fn().mockResolvedValue({
         id: 'usr_123',
@@ -729,6 +1177,7 @@ function createPrismaMock({
     match: {
       create,
       findFirst,
+      update: matchUpdate,
     },
     matchAttendance: {
       count: attendanceCount,
@@ -746,12 +1195,19 @@ function createPrismaMock({
       create: generationCreate,
       findFirst: generationFindFirst,
       findMany: generationFindMany,
+      update: generationUpdate,
+      updateMany: generationUpdateMany,
     },
   } as unknown as PrismaService;
 }
 
 function createMatchRow(
   overrides: Partial<{
+    status: string;
+    teamAScore: number | null;
+    teamBScore: number | null;
+    scoreSubmittedByUserId: string | null;
+    scoreSubmittedAt: Date | null;
     group: {
       settings: {
         generatorStyle: string;
@@ -772,7 +1228,11 @@ function createMatchRow(
     attendanceDeadlineAt: new Date('2026-06-10T16:00:00.000Z'),
     generatorStyleOverride: 'max_fairness',
     goalkeeperModeOverride: 'fixed_goalkeeper',
-    status: 'open',
+    status: overrides.status ?? 'open',
+    teamAScore: overrides.teamAScore ?? null,
+    teamBScore: overrides.teamBScore ?? null,
+    scoreSubmittedByUserId: overrides.scoreSubmittedByUserId ?? null,
+    scoreSubmittedAt: overrides.scoreSubmittedAt ?? null,
     group: overrides.group,
     createdAt: new Date('2026-06-03T00:00:00.000Z'),
     updatedAt: new Date('2026-06-03T01:00:00.000Z'),
@@ -878,6 +1338,7 @@ type TeamGenerationRowOverrides = Partial<{
   inputSnapshot: unknown;
   scoreComponents: unknown;
   explanation: unknown;
+  manualAdjustment: unknown;
   createdAt: Date;
   updatedAt: Date;
 }>;
@@ -925,7 +1386,72 @@ function createTeamGenerationRow(overrides: TeamGenerationRowOverrides = {}) {
       summary: 'Balanced teams generated.',
       bullets: [],
     },
+    manualAdjustment: overrides.manualAdjustment ?? null,
     createdAt: overrides.createdAt ?? new Date('2026-06-03T03:00:00.000Z'),
     updatedAt: overrides.updatedAt ?? new Date('2026-06-03T03:00:00.000Z'),
+  };
+}
+
+function createSwappableTeams(): TeamGenerationRowOverrides {
+  return {
+    teamA: {
+      label: 'A',
+      totalRating: 160,
+      averageRating: 80,
+      players: [
+        {
+          playerId: 'ply_a_1',
+          rating: 90,
+          preferredStyle: 'attacker',
+          slot: 1,
+        },
+        {
+          playerId: 'ply_a_2',
+          rating: 70,
+          preferredStyle: 'defender',
+          slot: 2,
+        },
+      ],
+    },
+    teamB: {
+      label: 'B',
+      totalRating: 150,
+      averageRating: 75,
+      players: [
+        {
+          playerId: 'ply_b_1',
+          rating: 85,
+          preferredStyle: 'goalkeeper',
+          slot: 1,
+        },
+        {
+          playerId: 'ply_b_2',
+          rating: 65,
+          preferredStyle: 'midfielder',
+          slot: 2,
+        },
+      ],
+    },
+    teamATotal: 160,
+    teamBTotal: 150,
+    fairnessPercentage: 75,
+    inputSnapshot: {
+      matchId: 'match_123',
+      groupId: 'grp_123',
+      playersPerTeam: 2,
+      generatorStyle: 'fair_fresh',
+      goalkeeperMode: 'rotating_goalkeeper',
+      playerRatings: [],
+    },
+  };
+}
+
+function createManualAdjustment() {
+  return {
+    type: 'swap',
+    adjustedAt: '2026-06-03T04:00:00.000Z',
+    adjustedByUserId: 'usr_123',
+    fromTeamAPlayerId: 'ply_a_1',
+    fromTeamBPlayerId: 'ply_b_1',
   };
 }

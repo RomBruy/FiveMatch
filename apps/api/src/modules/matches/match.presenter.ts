@@ -27,6 +27,14 @@ export function serializeFootballMatch(
     status: match.status,
     confirmedCount: match.confirmedCount,
     waitlistCount: match.waitlistCount,
+    score: match.score
+      ? {
+          teamAScore: match.score.teamAScore,
+          teamBScore: match.score.teamBScore,
+          submittedByUserId: match.score.submittedByUserId,
+          submittedAt: match.score.submittedAt.toISOString(),
+        }
+      : null,
     attendances: match.attendances.map((attendance) =>
       serializeFootballMatchAttendance(attendance),
     ),
@@ -73,6 +81,7 @@ export function serializeTeamGenerationVersion(
     inputSnapshot: generation.inputSnapshot,
     scoreComponents: generation.scoreComponents,
     explanation: generation.explanation,
+    manualAdjustment: generation.manualAdjustment,
     createdAt: generation.createdAt.toISOString(),
     updatedAt: generation.updatedAt.toISOString(),
   };

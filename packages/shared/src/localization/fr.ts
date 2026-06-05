@@ -367,6 +367,33 @@ export const fr = {
       "Touche une ancienne version pour la comparer avant de verrouiller les equipes.",
     versionLimitExplanation:
       "Limite MVP atteinte: ce match a deja 5 versions d'equipes sauvegardees.",
+    manualAdjustmentTitle: "Un swap manuel",
+    manualAdjustmentHint:
+      "Choisis un joueur dans chaque equipe. L'equite est recalculee et ce sera le seul ajustement manuel de cette version.",
+    manualAdjustmentUsed:
+      "Ajustement manuel utilise. Cette version ne peut plus etre modifiee manuellement.",
+    manualAdjustmentLocked:
+      "Equipes verrouillees. Les swaps manuels sont fermes pour cette version officielle.",
+    adjustedBadge: "Ajustee",
+    applyManualAdjustment: "Appliquer le swap",
+    applyingManualAdjustment: "Application...",
+    manualAdjustmentSaved: "Swap manuel enregistre. Equite recalculee.",
+    manualAdjustmentError:
+      "Impossible d'appliquer le swap manuel. Verifie que cette version est encore modifiable.",
+    lockTeamsTitle: "Rendre ces equipes officielles",
+    lockTeamsHint:
+      "Le verrouillage ferme la regeneration et les swaps manuels. Score, votes MVP, notes, stats et historique utiliseront cette version.",
+    confirmTeams: "Confirmer et verrouiller",
+    lockingTeams: "Verrouillage...",
+    teamsLockedTitle: "Equipes officielles verrouillees",
+    teamsLockedHint:
+      "Cette version devient la source de verite du match pour le score, le MVP, les notes, les stats, les cartes et l'historique.",
+    teamsLockedBadge: "Verrouillees",
+    teamsLockedSaved: "Equipes verrouillees. Cette version est officielle.",
+    teamsLockedError:
+      "Impossible de verrouiller les equipes. Verifie que ce match est encore ouvert et modifiable.",
+    teamsAlreadyLocked:
+      "Les equipes sont deja verrouillees. Regeneration et swaps manuels sont fermes.",
     noMatchForGeneration: "Cree un match avant de generer les equipes.",
     confirmedPoolBlocked:
       "La generation demande une liste de joueurs confirmes complete",
@@ -410,6 +437,23 @@ export const fr = {
     createError: "Impossible de creer le match.",
     noNextMatch: "Aucun match programme pour le moment.",
     attendancePlaceholder: "Presences ouvertes dans la prochaine story.",
+    attendanceLocked:
+      "Equipes verrouillees. Les changements de presence sont fermes.",
+    finalScoreTitle: "Score final",
+    finalScoreSubtitle:
+      "Entre le resultat du match avec les equipes verrouillees. Tu peux le corriger avant la finalisation.",
+    finalScoreSubmitted: "Score enregistre",
+    teamAScoreLabel: "Score equipe A",
+    teamBScoreLabel: "Score equipe B",
+    saveFinalScore: "Enregistrer le score",
+    updateFinalScore: "Corriger le score",
+    savingFinalScore: "Enregistrement...",
+    finalScoreSaved: "Score final enregistre.",
+    finalScoreError:
+      "Impossible d'enregistrer le score. Verifie que les equipes sont verrouillees et que le match n'est pas finalise.",
+    finalScoreViewerHint:
+      "Ce score est visible par le groupe et alimentera les actions post-match.",
+    noFinalScore: "Score pas encore enregistre.",
     confirmedCount: "confirmes",
     waitlistCount: "en attente",
     maxPlayers: "places",

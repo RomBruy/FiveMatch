@@ -34,6 +34,13 @@ export type FootballMatchAttendance = {
   updatedAt: string;
 };
 
+export type FootballMatchScore = {
+  teamAScore: number;
+  teamBScore: number;
+  submittedByUserId: string;
+  submittedAt: string;
+};
+
 export type FootballMatch = {
   id: string;
   groupId: string;
@@ -49,6 +56,7 @@ export type FootballMatch = {
   status: FootballMatchStatus;
   confirmedCount: number;
   waitlistCount: number;
+  score: FootballMatchScore | null;
   attendances: FootballMatchAttendance[];
   myAttendance: FootballMatchAttendance | null;
   createdAt: string;
@@ -82,6 +90,14 @@ export type TeamGenerationExplanation = {
   bullets: string[];
 };
 
+export type TeamManualAdjustment = {
+  type: "swap";
+  adjustedAt: string;
+  adjustedByUserId: string;
+  fromTeamAPlayerId: string;
+  fromTeamBPlayerId: string;
+};
+
 export type TeamGenerationInputSnapshot = {
   matchId: string;
   groupId: string;
@@ -112,6 +128,7 @@ export type TeamGenerationVersion = {
   inputSnapshot: TeamGenerationInputSnapshot;
   scoreComponents: TeamGenerationScoreComponents;
   explanation: TeamGenerationExplanation;
+  manualAdjustment: TeamManualAdjustment | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -142,6 +159,15 @@ export type SubmitMatchAttendanceResponse = ApiSuccessResponse<{
   match: FootballMatch;
 }>;
 
+export type SubmitFinalScoreInput = {
+  teamAScore: number;
+  teamBScore: number;
+};
+
+export type SubmitFinalScoreResponse = ApiSuccessResponse<{
+  match: FootballMatch;
+}>;
+
 export type GenerateTeamVersionResponse = ApiSuccessResponse<{
   generation: TeamGenerationVersion;
 }>;
@@ -154,4 +180,18 @@ export type TeamGenerationVersionsResponse = ApiSuccessResponse<{
   generations: TeamGenerationVersion[];
   limit: number;
   remaining: number;
+}>;
+
+export type ManualTeamAdjustmentInput = {
+  teamAPlayerId: string;
+  teamBPlayerId: string;
+};
+
+export type ManualTeamAdjustmentResponse = ApiSuccessResponse<{
+  generation: TeamGenerationVersion;
+}>;
+
+export type ConfirmTeamGenerationResponse = ApiSuccessResponse<{
+  match: FootballMatch;
+  generation: TeamGenerationVersion;
 }>;

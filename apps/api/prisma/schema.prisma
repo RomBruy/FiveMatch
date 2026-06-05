@@ -20,6 +20,7 @@ model User {
   playerProfiles     Player[]
   createdInvitations Invitation[]            @relation("InvitationCreator")
   organizedMatches   Match[]                 @relation("MatchOrganizer")
+  submittedScores    Match[]                 @relation("MatchScoreSubmitter")
   teamGenerations    TeamGenerationVersion[] @relation("TeamGenerationCreator")
   createdAt          DateTime                @default(now()) @map("created_at")
   updatedAt          DateTime                @updatedAt @map("updated_at")
@@ -177,6 +178,11 @@ model Match {
   generatorStyleOverride String?                 @map("generator_style_override")
   goalkeeperModeOverride String?                 @map("goalkeeper_mode_override")
   status                 String                  @default("open")
+  teamAScore             Int?                    @map("team_a_score")
+  teamBScore             Int?                    @map("team_b_score")
+  scoreSubmittedByUserId String?                 @map("score_submitted_by_user_id")
+  scoreSubmittedBy       User?                   @relation("MatchScoreSubmitter", fields: [scoreSubmittedByUserId], references: [id], onDelete: SetNull)
+  scoreSubmittedAt       DateTime?               @map("score_submitted_at")
   attendances            MatchAttendance[]
   teamGenerations        TeamGenerationVersion[]
   createdAt              DateTime                @default(now()) @map("created_at")
@@ -184,6 +190,7 @@ model Match {
 
   @@index([groupId, startsAt], map: "idx_matches_group_id_starts_at")
   @@index([organizerUserId], map: "idx_matches_organizer_user_id")
+  @@index([scoreSubmittedByUserId], map: "idx_matches_score_submitted_by_user_id")
   @@map("matches")
 }
 
@@ -224,6 +231,7 @@ model TeamGenerationVersion {
   inputSnapshot      Json     @map("input_snapshot")
   scoreComponents    Json     @map("score_components")
   explanation        Json
+  manualAdjustment   Json?    @map("manual_adjustment")
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
 

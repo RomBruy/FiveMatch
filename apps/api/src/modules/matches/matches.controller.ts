@@ -5,16 +5,23 @@ import {
   Get,
   InternalServerErrorException,
   Param,
+  Patch,
   Post,
+  Put,
   Req,
   UseGuards,
 } from '@nestjs/common';
 import type {
+  ConfirmTeamGenerationResponse,
   CreateFootballMatchInput,
   CreateFootballMatchResponse,
   GenerateTeamVersionResponse,
   LatestTeamGenerationResponse,
+  ManualTeamAdjustmentInput,
+  ManualTeamAdjustmentResponse,
   NextFootballMatchResponse,
+  SubmitFinalScoreInput,
+  SubmitFinalScoreResponse,
   SubmitMatchAttendanceInput,
   SubmitMatchAttendanceResponse,
   TeamGenerationVersionsResponse,
@@ -117,6 +124,32 @@ export class MatchesController {
     };
   }
 
+  @Put(':matchId/final-score')
+  @UseGuards(ClerkAuthGuard)
+  async submitFinalScore(
+    @Req() request: AuthenticatedRequest,
+    @Param('groupId') groupId: string,
+    @Param('matchId') matchId: string,
+    @Body() body: Partial<SubmitFinalScoreInput>,
+  ): Promise<SubmitFinalScoreResponse> {
+    if (!request.auth) {
+      throw new InternalServerErrorException('Authenticated user missing.');
+    }
+
+    const match = await this.matchesService.submitFinalScore(
+      request.auth.clerkUserId,
+      groupId,
+      matchId,
+      this.parseSubmitFinalScoreInput(body),
+    );
+
+    return {
+      data: {
+        match: serializeFootballMatch(match),
+      },
+    };
+  }
+
   @Post(':matchId/team-generations')
   @UseGuards(ClerkAuthGuard)
   async generateTeamVersion(
@@ -198,6 +231,61 @@ export class MatchesController {
     };
   }
 
+  @Patch(':matchId/team-generations/:generationId/manual-adjustment')
+  @UseGuards(ClerkAuthGuard)
+  async applyManualTeamAdjustment(
+    @Req() request: AuthenticatedRequest,
+    @Param('groupId') groupId: string,
+    @Param('matchId') matchId: string,
+    @Param('generationId') generationId: string,
+    @Body() body: Partial<ManualTeamAdjustmentInput>,
+  ): Promise<ManualTeamAdjustmentResponse> {
+    if (!request.auth) {
+      throw new InternalServerErrorException('Authenticated user missing.');
+    }
+
+    const generation = await this.matchesService.applyManualTeamAdjustment(
+      request.auth.clerkUserId,
+      groupId,
+      matchId,
+      generationId,
+      this.parseManualTeamAdjustmentInput(body),
+    );
+
+    return {
+      data: {
+        generation: serializeTeamGenerationVersion(generation),
+      },
+    };
+  }
+
+  @Patch(':matchId/team-generations/:generationId/confirm')
+  @UseGuards(ClerkAuthGuard)
+  async confirmTeamGeneration(
+    @Req() request: AuthenticatedRequest,
+    @Param('groupId') groupId: string,
+    @Param('matchId') matchId: string,
+    @Param('generationId') generationId: string,
+  ): Promise<ConfirmTeamGenerationResponse> {
+    if (!request.auth) {
+      throw new InternalServerErrorException('Authenticated user missing.');
+    }
+
+    const result = await this.matchesService.confirmTeamGeneration(
+      request.auth.clerkUserId,
+      groupId,
+      matchId,
+      generationId,
+    );
+
+    return {
+      data: {
+        match: serializeFootballMatch(result.match),
+        generation: serializeTeamGenerationVersion(result.generation),
+      },
+    };
+  }
+
   private parseCreateMatchInput(
     body: Partial<CreateFootballMatchInput>,
   ): CreateFootballMatchInput {
@@ -256,6 +344,55 @@ export class MatchesController {
       )
         ? body.goalkeeperModeOverride
         : null,
+    };
+  }
+
+  private parseManualTeamAdjustmentInput(
+    body: Partial<ManualTeamAdjustmentInput>,
+  ): ManualTeamAdjustmentInput {
+    const teamAPlayerId =
+      typeof body.teamAPlayerId === 'string' ? body.teamAPlayerId.trim() : '';
+    const teamBPlayerId =
+      typeof body.teamBPlayerId === 'string' ? body.teamBPlayerId.trim() : '';
+
+    if (!teamAPlayerId || !teamBPlayerId) {
+      throw new BadRequestException('Manual adjustment player ids required.');
+    }
+
+    if (teamAPlayerId === teamBPlayerId) {
+      throw new BadRequestException('Manual adjustment needs two players.');
+    }
+
+    return {
+      teamAPlayerId,
+      teamBPlayerId,
+    };
+  }
+
+  private parseSubmitFinalScoreInput(
+    body: Partial<SubmitFinalScoreInput>,
+  ): SubmitFinalScoreInput {
+    const teamAScore = body.teamAScore;
+    const teamBScore = body.teamBScore;
+
+    if (
+      teamAScore === undefined ||
+      teamBScore === undefined ||
+      !Number.isInteger(teamAScore) ||
+      !Number.isInteger(teamBScore) ||
+      teamAScore < 0 ||
+      teamBScore < 0 ||
+      teamAScore > 99 ||
+      teamBScore > 99
+    ) {
+      throw new BadRequestException(
+        'Final score values must be integers between 0 and 99.',
+      );
+    }
+
+    return {
+      teamAScore,
+      teamBScore,
     };
   }
 }

@@ -365,6 +365,33 @@ export const en = {
       "Tap a previous version to compare it before locking teams.",
     versionLimitExplanation:
       "MVP limit reached: this match already has 5 saved team versions.",
+    manualAdjustmentTitle: "One manual swap",
+    manualAdjustmentHint:
+      "Pick one player from each team. This recalculates fairness and uses the only manual adjustment for this version.",
+    manualAdjustmentUsed:
+      "Manual adjustment used. This version cannot be manually changed again.",
+    manualAdjustmentLocked:
+      "Teams are locked. Manual swaps are closed for this official version.",
+    adjustedBadge: "Adjusted",
+    applyManualAdjustment: "Apply swap",
+    applyingManualAdjustment: "Applying...",
+    manualAdjustmentSaved: "Manual swap saved. Fairness recalculated.",
+    manualAdjustmentError:
+      "Unable to apply the manual swap. Check this version is still editable.",
+    lockTeamsTitle: "Make these teams official",
+    lockTeamsHint:
+      "Locking closes regeneration and manual swaps. Score, MVP votes, ratings, stats, and history will use this version.",
+    confirmTeams: "Confirm and lock teams",
+    lockingTeams: "Locking teams...",
+    teamsLockedTitle: "Official teams locked",
+    teamsLockedHint:
+      "This version is now the match source of truth for score, MVP, ratings, stats, cards, and history.",
+    teamsLockedBadge: "Locked",
+    teamsLockedSaved: "Teams locked. This version is now official.",
+    teamsLockedError:
+      "Unable to lock teams. Check this match is still open and editable.",
+    teamsAlreadyLocked:
+      "Teams are already locked. Regeneration and manual swaps are closed.",
     noMatchForGeneration: "Create a match before generating teams.",
     confirmedPoolBlocked:
       "Generation needs the confirmed player pool to be full",
@@ -407,6 +434,22 @@ export const en = {
     createError: "Unable to create the match.",
     noNextMatch: "No match scheduled yet.",
     attendancePlaceholder: "Attendance opens in the next story.",
+    attendanceLocked: "Teams are locked. Attendance changes are closed.",
+    finalScoreTitle: "Final score",
+    finalScoreSubtitle:
+      "Submit the match result from the locked teams. You can edit it before finalization.",
+    finalScoreSubmitted: "Score saved",
+    teamAScoreLabel: "Team A score",
+    teamBScoreLabel: "Team B score",
+    saveFinalScore: "Save final score",
+    updateFinalScore: "Update final score",
+    savingFinalScore: "Saving score...",
+    finalScoreSaved: "Final score saved.",
+    finalScoreError:
+      "Unable to save the score. Check teams are locked and the match is not finalized.",
+    finalScoreViewerHint:
+      "This score is visible to the group and will feed post-match actions.",
+    noFinalScore: "Score not submitted yet.",
     confirmedCount: "confirmed",
     waitlistCount: "waitlisted",
     maxPlayers: "spots",

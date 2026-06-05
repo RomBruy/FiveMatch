@@ -12,7 +12,9 @@ import {
   type GroupGeneratorStyle,
   type GroupGoalkeeperMode,
   type InitialPeerRatingReadiness,
+  type ManualTeamAdjustmentInput,
   type PlayerProfile,
+  type SubmitFinalScoreInput,
   type TeamGenerationVersion,
 } from "@fit-five/shared";
 import { useEffect, useState } from "react";
@@ -29,6 +31,8 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import {
+  applyManualTeamAdjustment,
+  confirmTeamGeneration,
   createFootballMatch,
   generateTeamVersion,
   getInitialPeerRatingReadiness,
@@ -36,6 +40,7 @@ import {
   listTeamGenerations,
   listCurrentUserGroups,
   listGroupPlayers,
+  submitFinalScore,
   submitMatchAttendance,
 } from "@/api/client";
 import { NextMatchCard } from "@/features/matches/next-match-card";
@@ -44,6 +49,13 @@ import { usePreferences } from "@/features/preferences/preferences-context";
 type GateLoadState = "loading" | "ready" | "noGroup" | "error";
 type CreateMatchState = "idle" | "creating" | "created" | "error";
 type GenerationState = "idle" | "generating" | "generated" | "error";
+type ManualAdjustmentState = "idle" | "applying" | "error";
+type TeamLockState = "idle" | "locking" | "locked" | "error";
+type ScoreSubmitState = "idle" | "submitting" | "saved" | "error";
+type ScoreDraft = {
+  teamAScore: string;
+  teamBScore: string;
+};
 type MatchDraft = {
   title: string;
   date: string;
@@ -76,6 +88,15 @@ export default function MatchScreen() {
   >("idle");
   const [generationState, setGenerationState] =
     useState<GenerationState>("idle");
+  const [manualAdjustmentState, setManualAdjustmentState] =
+    useState<ManualAdjustmentState>("idle");
+  const [teamLockState, setTeamLockState] = useState<TeamLockState>("idle");
+  const [scoreSubmitState, setScoreSubmitState] =
+    useState<ScoreSubmitState>("idle");
+  const [scoreDraft, setScoreDraft] = useState<ScoreDraft>({
+    teamAScore: "",
+    teamBScore: "",
+  });
   const [teamGenerations, setTeamGenerations] = useState<
     TeamGenerationVersion[]
   >([]);
@@ -105,6 +126,10 @@ export default function MatchScreen() {
         setTeamGenerations([]);
         setTeamGeneration(null);
         setGenerationState("idle");
+        setManualAdjustmentState("idle");
+        setTeamLockState("idle");
+        setScoreSubmitState("idle");
+        setScoreDraft(createScoreDraft(null));
         setLoadState("noGroup");
         return;
       }
@@ -128,10 +153,17 @@ export default function MatchScreen() {
       setActiveGroup(firstGroup);
       setReadiness(readinessResponse.data.readiness);
       setNextMatch(nextMatchResponse.data.match);
+      setScoreDraft(createScoreDraft(nextMatchResponse.data.match));
+      setScoreSubmitState("idle");
       setPlayers(rosterResponse.data.players);
       setTeamGenerations(savedGenerations);
-      setTeamGeneration(savedGenerations[0] ?? null);
+      setTeamGeneration(selectPrimaryTeamGeneration(savedGenerations));
       setGenerationState(savedGenerations.length > 0 ? "generated" : "idle");
+      setTeamLockState(
+        savedGenerations.some((generation) => generation.status === "locked")
+          ? "locked"
+          : "idle"
+      );
       setLoadState("ready");
     } catch (error) {
       console.warn("Unable to load generation gate", error);
@@ -164,6 +196,14 @@ export default function MatchScreen() {
       return;
     }
 
+    if (
+      nextMatch.status === "locked" ||
+      teamGenerations.some((generation) => generation.status === "locked")
+    ) {
+      setActionMessage(strings.generation.teamsAlreadyLocked);
+      return;
+    }
+
     setGenerationState("generating");
     setActionMessage(null);
 
@@ -193,6 +233,7 @@ export default function MatchScreen() {
         ) ?? response.data.generation
       );
       setGenerationState("generated");
+      setTeamLockState("idle");
     } catch (error) {
       console.warn("Unable to generate teams", error);
       setGenerationState("error");
@@ -201,6 +242,126 @@ export default function MatchScreen() {
           ? strings.generation.versionLimitExplanation
           : strings.generation.generateError
       );
+    }
+  }
+
+  async function handleApplyManualAdjustment(
+    generationId: string,
+    input: ManualTeamAdjustmentInput
+  ) {
+    if (!activeGroup || !nextMatch) {
+      setActionMessage(strings.generation.noMatchForGeneration);
+      return;
+    }
+
+    setManualAdjustmentState("applying");
+    setActionMessage(null);
+
+    try {
+      const token = await getToken();
+
+      if (!token) {
+        throw new Error("Missing auth token.");
+      }
+
+      const response = await applyManualTeamAdjustment(
+        token,
+        activeGroup.id,
+        nextMatch.id,
+        generationId,
+        input
+      );
+      const updatedGeneration = response.data.generation;
+
+      setTeamGenerations((currentGenerations) =>
+        currentGenerations.map((generation) =>
+          generation.id === updatedGeneration.id ? updatedGeneration : generation
+        )
+      );
+      setTeamGeneration(updatedGeneration);
+      setManualAdjustmentState("idle");
+      setActionMessage(strings.generation.manualAdjustmentSaved);
+    } catch (error) {
+      console.warn("Unable to apply manual adjustment", error);
+      setManualAdjustmentState("error");
+      setActionMessage(strings.generation.manualAdjustmentError);
+    }
+  }
+
+  async function handleConfirmTeamGeneration(generationId: string) {
+    if (!activeGroup || !nextMatch) {
+      setActionMessage(strings.generation.noMatchForGeneration);
+      return;
+    }
+
+    setTeamLockState("locking");
+    setActionMessage(null);
+
+    try {
+      const token = await getToken();
+
+      if (!token) {
+        throw new Error("Missing auth token.");
+      }
+
+      const response = await confirmTeamGeneration(
+        token,
+        activeGroup.id,
+        nextMatch.id,
+        generationId
+      );
+      const updatedGeneration = response.data.generation;
+
+      setNextMatch(response.data.match);
+      setScoreDraft(createScoreDraft(response.data.match));
+      setScoreSubmitState("idle");
+      setTeamGenerations((currentGenerations) =>
+        currentGenerations.map((generation) =>
+          generation.id === updatedGeneration.id ? updatedGeneration : generation
+        )
+      );
+      setTeamGeneration(updatedGeneration);
+      setManualAdjustmentState("idle");
+      setTeamLockState("locked");
+      setActionMessage(strings.generation.teamsLockedSaved);
+    } catch (error) {
+      console.warn("Unable to confirm team generation", error);
+      setTeamLockState("error");
+      setActionMessage(strings.generation.teamsLockedError);
+    }
+  }
+
+  async function handleSubmitFinalScore(input: SubmitFinalScoreInput) {
+    if (!activeGroup || !nextMatch) {
+      setActionMessage(strings.generation.noMatchForGeneration);
+      return;
+    }
+
+    setScoreSubmitState("submitting");
+    setActionMessage(null);
+
+    try {
+      const token = await getToken();
+
+      if (!token) {
+        throw new Error("Missing auth token.");
+      }
+
+      const response = await submitFinalScore(
+        token,
+        activeGroup.id,
+        nextMatch.id,
+        input
+      );
+
+      setNextMatch(response.data.match);
+      setScoreDraft(createScoreDraft(response.data.match));
+      setScoreSubmitState("saved");
+      setActionMessage(strings.matches.finalScoreSaved);
+    } catch (error) {
+      console.warn("Unable to submit final score", error);
+      setScoreSubmitState("error");
+      setActionMessage(strings.matches.finalScoreError);
     }
   }
 
@@ -242,6 +403,10 @@ export default function MatchScreen() {
       setNextMatch(response.data.match);
       setTeamGenerations([]);
       setTeamGeneration(null);
+      setManualAdjustmentState("idle");
+      setTeamLockState("idle");
+      setScoreSubmitState("idle");
+      setScoreDraft(createScoreDraft(response.data.match));
       setCreateState("created");
     } catch (error) {
       console.warn("Unable to create match", error);
@@ -278,6 +443,10 @@ export default function MatchScreen() {
       setTeamGenerations([]);
       setTeamGeneration(null);
       setGenerationState("idle");
+      setManualAdjustmentState("idle");
+      setTeamLockState("idle");
+      setScoreSubmitState("idle");
+      setScoreDraft(createScoreDraft(attendanceResponse.data.match));
       setAttendanceState("idle");
     } catch (error) {
       console.warn("Unable to submit attendance", error);
@@ -291,14 +460,20 @@ export default function MatchScreen() {
   const missingPlayers = getMissingPlayers(readiness, players);
   const generationLimitReached =
     teamGenerations.length >= teamGenerationVersionLimit;
+  const teamsLocked =
+    nextMatch?.status === "locked" ||
+    teamGenerations.some((generation) => generation.status === "locked");
   const generationPoolReady =
     Boolean(readiness?.ready) &&
     (nextMatch ? nextMatch.confirmedCount === nextMatch.maxPlayers : false) &&
-    !generationLimitReached;
+    nextMatch?.status === "open" &&
+    !generationLimitReached &&
+    !teamsLocked;
   const generationBlockedReason = getGenerationBlockedReason(
     readiness,
     nextMatch,
     generationLimitReached,
+    teamsLocked,
     strings
   );
 
@@ -398,8 +573,23 @@ export default function MatchScreen() {
               <GeneratedTeamsCard
                 generation={teamGeneration}
                 generations={teamGenerations}
+                manualAdjustmentState={manualAdjustmentState}
+                teamLockState={teamLockState}
+                onApplyManualAdjustment={handleApplyManualAdjustment}
+                onConfirmGeneration={handleConfirmTeamGeneration}
                 onSelectGeneration={setTeamGeneration}
                 players={players}
+              />
+            ) : null}
+
+            {nextMatch?.status === "locked" ? (
+              <FinalScoreCard
+                canEditScore={canCreateMatch}
+                draft={scoreDraft}
+                match={nextMatch}
+                onChange={setScoreDraft}
+                onSubmit={handleSubmitFinalScore}
+                submitState={scoreSubmitState}
               />
             ) : null}
 
@@ -873,20 +1063,178 @@ function AttendancePlayerRow({
   );
 }
 
+function FinalScoreCard({
+  canEditScore,
+  draft,
+  match,
+  onChange,
+  onSubmit,
+  submitState,
+}: {
+  canEditScore: boolean;
+  draft: ScoreDraft;
+  match: FootballMatch;
+  onChange: (draft: ScoreDraft) => void;
+  onSubmit: (input: SubmitFinalScoreInput) => void;
+  submitState: ScoreSubmitState;
+}) {
+  const { strings } = usePreferences();
+  const scoreInput = parseScoreDraft(draft);
+  const isSubmitting = submitState === "submitting";
+  const canSubmit = canEditScore && !isSubmitting && scoreInput !== null;
+
+  function updateDraft(partialDraft: Partial<ScoreDraft>) {
+    onChange({
+      ...draft,
+      ...partialDraft,
+    });
+  }
+
+  return (
+    <View style={styles.finalScoreCard}>
+      <View style={styles.attendanceHeader}>
+        <View style={styles.attendanceHeaderCopy}>
+          <Text style={styles.cardTitle}>{strings.matches.finalScoreTitle}</Text>
+          <Text style={styles.helperText}>
+            {strings.matches.finalScoreSubtitle}
+          </Text>
+        </View>
+        {match.score ? (
+          <Text style={styles.lockBadge}>
+            {strings.matches.finalScoreSubmitted}
+          </Text>
+        ) : null}
+      </View>
+
+      <View style={styles.scoreBoard}>
+        <View style={styles.scoreTeam}>
+          <Text style={styles.scoreTeamLabel}>
+            {strings.generation.teamLabel} A
+          </Text>
+          <Text style={styles.scoreNumber}>
+            {match.score?.teamAScore ?? "-"}
+          </Text>
+        </View>
+        <Text style={styles.scoreSeparator}>-</Text>
+        <View style={styles.scoreTeam}>
+          <Text style={styles.scoreTeamLabel}>
+            {strings.generation.teamLabel} B
+          </Text>
+          <Text style={styles.scoreNumber}>
+            {match.score?.teamBScore ?? "-"}
+          </Text>
+        </View>
+      </View>
+
+      {canEditScore ? (
+        <>
+          <View style={styles.scoreInputRow}>
+            <View style={styles.scoreInputColumn}>
+              <Text style={styles.fieldLabel}>
+                {strings.matches.teamAScoreLabel}
+              </Text>
+              <TextInput
+                keyboardType="number-pad"
+                maxLength={2}
+                onChangeText={(teamAScore) => updateDraft({ teamAScore })}
+                placeholder="0"
+                placeholderTextColor="#6B7482"
+                style={styles.input}
+                value={draft.teamAScore}
+              />
+            </View>
+            <View style={styles.scoreInputColumn}>
+              <Text style={styles.fieldLabel}>
+                {strings.matches.teamBScoreLabel}
+              </Text>
+              <TextInput
+                keyboardType="number-pad"
+                maxLength={2}
+                onChangeText={(teamBScore) => updateDraft({ teamBScore })}
+                placeholder="0"
+                placeholderTextColor="#6B7482"
+                style={styles.input}
+                value={draft.teamBScore}
+              />
+            </View>
+          </View>
+
+          <Pressable
+            accessibilityRole="button"
+            disabled={!canSubmit}
+            onPress={() => {
+              if (scoreInput) {
+                onSubmit(scoreInput);
+              }
+            }}
+            style={[
+              styles.submitButton,
+              !canSubmit && styles.submitButtonDisabled,
+            ]}
+          >
+            <Text style={styles.submitButtonText}>
+              {isSubmitting
+                ? strings.matches.savingFinalScore
+                : match.score
+                  ? strings.matches.updateFinalScore
+                  : strings.matches.saveFinalScore}
+            </Text>
+          </Pressable>
+        </>
+      ) : (
+        <Text style={styles.helperText}>
+          {match.score
+            ? strings.matches.finalScoreViewerHint
+            : strings.matches.noFinalScore}
+        </Text>
+      )}
+
+      {submitState === "error" ? (
+        <Text style={styles.errorText}>{strings.matches.finalScoreError}</Text>
+      ) : null}
+    </View>
+  );
+}
+
 function GeneratedTeamsCard({
   generation,
   generations,
+  manualAdjustmentState,
+  teamLockState,
+  onApplyManualAdjustment,
+  onConfirmGeneration,
   onSelectGeneration,
   players,
 }: {
   generation: TeamGenerationVersion;
   generations: TeamGenerationVersion[];
+  manualAdjustmentState: ManualAdjustmentState;
+  teamLockState: TeamLockState;
+  onApplyManualAdjustment: (
+    generationId: string,
+    input: ManualTeamAdjustmentInput
+  ) => void;
+  onConfirmGeneration: (generationId: string) => void;
   onSelectGeneration: (generation: TeamGenerationVersion) => void;
   players: PlayerProfile[];
 }) {
   const { strings } = usePreferences();
   const [detailsExpanded, setDetailsExpanded] = useState(false);
+  const [selectedTeamAPlayerId, setSelectedTeamAPlayerId] = useState<
+    string | null
+  >(null);
+  const [selectedTeamBPlayerId, setSelectedTeamBPlayerId] = useState<
+    string | null
+  >(null);
   const playersById = new Map(players.map((player) => [player.id, player]));
+  const activeTeamAPlayerId = getSelectedTeamPlayerId(
+    generation.teamA,
+    selectedTeamAPlayerId
+  );
+  const activeTeamBPlayerId = getSelectedTeamPlayerId(
+    generation.teamB,
+    selectedTeamBPlayerId
+  );
 
   return (
     <View style={styles.generatedCard}>
@@ -971,6 +1319,32 @@ function GeneratedTeamsCard({
         ))}
       </View>
 
+      <ManualAdjustmentPanel
+        generation={generation}
+        manualAdjustmentState={manualAdjustmentState}
+        onApply={() => {
+          if (!activeTeamAPlayerId || !activeTeamBPlayerId) {
+            return;
+          }
+
+          onApplyManualAdjustment(generation.id, {
+            teamAPlayerId: activeTeamAPlayerId,
+            teamBPlayerId: activeTeamBPlayerId,
+          });
+        }}
+        onSelectTeamAPlayer={setSelectedTeamAPlayerId}
+        onSelectTeamBPlayer={setSelectedTeamBPlayerId}
+        playersById={playersById}
+        selectedTeamAPlayerId={activeTeamAPlayerId}
+        selectedTeamBPlayerId={activeTeamBPlayerId}
+      />
+
+      <TeamLockPanel
+        generation={generation}
+        onConfirm={() => onConfirmGeneration(generation.id)}
+        teamLockState={teamLockState}
+      />
+
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ expanded: detailsExpanded }}
@@ -1020,6 +1394,212 @@ function GeneratedTeamsCard({
           />
         </View>
       ) : null}
+    </View>
+  );
+}
+
+function TeamLockPanel({
+  generation,
+  onConfirm,
+  teamLockState,
+}: {
+  generation: TeamGenerationVersion;
+  onConfirm: () => void;
+  teamLockState: TeamLockState;
+}) {
+  const { strings } = usePreferences();
+  const locked = generation.status === "locked";
+  const locking = teamLockState === "locking";
+
+  return (
+    <View style={[styles.lockPanel, locked && styles.lockPanelOfficial]}>
+      <View style={styles.manualHeader}>
+        <View style={styles.attendanceHeaderCopy}>
+          <Text style={styles.lockTitle}>
+            {locked
+              ? strings.generation.teamsLockedTitle
+              : strings.generation.lockTeamsTitle}
+          </Text>
+          <Text style={styles.lockHint}>
+            {locked
+              ? strings.generation.teamsLockedHint
+              : strings.generation.lockTeamsHint}
+          </Text>
+        </View>
+        {locked ? (
+          <Text style={styles.lockBadge}>
+            {strings.generation.teamsLockedBadge}
+          </Text>
+        ) : null}
+      </View>
+
+      {!locked ? (
+        <Pressable
+          accessibilityRole="button"
+          disabled={locking}
+          onPress={onConfirm}
+          style={[styles.lockButton, locking && styles.lockButtonDisabled]}
+        >
+          <Text
+            style={[
+              styles.lockButtonText,
+              locking && styles.lockButtonTextDisabled,
+            ]}
+          >
+            {locking
+              ? strings.generation.lockingTeams
+              : strings.generation.confirmTeams}
+          </Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+function ManualAdjustmentPanel({
+  generation,
+  manualAdjustmentState,
+  onApply,
+  onSelectTeamAPlayer,
+  onSelectTeamBPlayer,
+  playersById,
+  selectedTeamAPlayerId,
+  selectedTeamBPlayerId,
+}: {
+  generation: TeamGenerationVersion;
+  manualAdjustmentState: ManualAdjustmentState;
+  onApply: () => void;
+  onSelectTeamAPlayer: (playerId: string) => void;
+  onSelectTeamBPlayer: (playerId: string) => void;
+  playersById: Map<string, PlayerProfile>;
+  selectedTeamAPlayerId: string | null;
+  selectedTeamBPlayerId: string | null;
+}) {
+  const { strings } = usePreferences();
+  const adjustmentUsed = Boolean(generation.manualAdjustment);
+  const locked = generation.status === "locked";
+  const applying = manualAdjustmentState === "applying";
+  const disabled =
+    adjustmentUsed ||
+    locked ||
+    applying ||
+    !selectedTeamAPlayerId ||
+    !selectedTeamBPlayerId;
+
+  return (
+    <View style={styles.manualPanel}>
+      <View style={styles.manualHeader}>
+        <View style={styles.attendanceHeaderCopy}>
+          <Text style={styles.manualTitle}>
+            {strings.generation.manualAdjustmentTitle}
+          </Text>
+          <Text style={styles.manualHint}>
+            {adjustmentUsed
+              ? strings.generation.manualAdjustmentUsed
+              : locked
+                ? strings.generation.manualAdjustmentLocked
+                : strings.generation.manualAdjustmentHint}
+          </Text>
+        </View>
+        {adjustmentUsed ? (
+          <Text style={styles.manualBadge}>
+            {strings.generation.adjustedBadge}
+          </Text>
+        ) : null}
+      </View>
+
+      {!adjustmentUsed && !locked ? (
+        <>
+          <ManualPlayerPicker
+            label={`${strings.generation.teamLabel} A`}
+            onSelect={onSelectTeamAPlayer}
+            players={generation.teamA.players}
+            playersById={playersById}
+            selectedPlayerId={selectedTeamAPlayerId}
+          />
+          <ManualPlayerPicker
+            label={`${strings.generation.teamLabel} B`}
+            onSelect={onSelectTeamBPlayer}
+            players={generation.teamB.players}
+            playersById={playersById}
+            selectedPlayerId={selectedTeamBPlayerId}
+          />
+          <Pressable
+            accessibilityRole="button"
+            disabled={disabled}
+            onPress={onApply}
+            style={[
+              styles.manualButton,
+              disabled && styles.manualButtonDisabled,
+            ]}
+          >
+            <Text
+              style={[
+                styles.manualButtonText,
+                disabled && styles.manualButtonTextDisabled,
+              ]}
+            >
+              {applying
+                ? strings.generation.applyingManualAdjustment
+                : strings.generation.applyManualAdjustment}
+            </Text>
+          </Pressable>
+        </>
+      ) : null}
+    </View>
+  );
+}
+
+function ManualPlayerPicker({
+  label,
+  onSelect,
+  players,
+  playersById,
+  selectedPlayerId,
+}: {
+  label: string;
+  onSelect: (playerId: string) => void;
+  players: TeamGenerationVersion["teamA"]["players"];
+  playersById: Map<string, PlayerProfile>;
+  selectedPlayerId: string | null;
+}) {
+  const { strings } = usePreferences();
+
+  return (
+    <View style={styles.manualPicker}>
+      <Text style={styles.manualPickerLabel}>{label}</Text>
+      <View style={styles.manualChipRow}>
+        {players.map((teamPlayer) => {
+          const selected = selectedPlayerId === teamPlayer.playerId;
+          const player = playersById.get(teamPlayer.playerId) ?? null;
+          const displayName = getPlayerDisplayName(
+            player,
+            strings.profile.fallbackName
+          );
+
+          return (
+            <Pressable
+              key={teamPlayer.playerId}
+              accessibilityRole="button"
+              accessibilityState={{ selected }}
+              onPress={() => onSelect(teamPlayer.playerId)}
+              style={[
+                styles.manualChip,
+                selected && styles.manualChipSelected,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.manualChipText,
+                  selected && styles.manualChipTextSelected,
+                ]}
+              >
+                {displayName}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
     </View>
   );
 }
@@ -1146,6 +1726,7 @@ function getGenerationBlockedReason(
   readiness: InitialPeerRatingReadiness | null,
   match: FootballMatch | null,
   generationLimitReached: boolean,
+  teamsLocked: boolean,
   strings: ReturnType<typeof usePreferences>["strings"]
 ) {
   if (!readiness?.ready) {
@@ -1154,6 +1735,10 @@ function getGenerationBlockedReason(
 
   if (!match) {
     return strings.generation.noMatchForGeneration;
+  }
+
+  if (teamsLocked || match.status === "locked") {
+    return strings.generation.teamsAlreadyLocked;
   }
 
   if (match.confirmedCount !== match.maxPlayers) {
@@ -1165,6 +1750,51 @@ function getGenerationBlockedReason(
   }
 
   return null;
+}
+
+function getSelectedTeamPlayerId(
+  team: TeamGenerationVersion["teamA"],
+  selectedPlayerId: string | null
+) {
+  if (
+    selectedPlayerId &&
+    team.players.some((player) => player.playerId === selectedPlayerId)
+  ) {
+    return selectedPlayerId;
+  }
+
+  return team.players[0]?.playerId ?? null;
+}
+
+function selectPrimaryTeamGeneration(generations: TeamGenerationVersion[]) {
+  return (
+    generations.find((generation) => generation.status === "locked") ??
+    generations[0] ??
+    null
+  );
+}
+
+function createScoreDraft(match: FootballMatch | null): ScoreDraft {
+  return {
+    teamAScore: match?.score ? String(match.score.teamAScore) : "",
+    teamBScore: match?.score ? String(match.score.teamBScore) : "",
+  };
+}
+
+function parseScoreDraft(draft: ScoreDraft): SubmitFinalScoreInput | null {
+  const validIntegerPattern = /^\d{1,2}$/;
+
+  if (
+    !validIntegerPattern.test(draft.teamAScore) ||
+    !validIntegerPattern.test(draft.teamBScore)
+  ) {
+    return null;
+  }
+
+  return {
+    teamAScore: Number(draft.teamAScore),
+    teamBScore: Number(draft.teamBScore),
+  };
 }
 
 function getBalanceSignalLabel(
@@ -1607,6 +2237,55 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     padding: 11,
   },
+  finalScoreCard: {
+    gap: 15,
+    borderWidth: 1,
+    borderColor: "#27435D",
+    borderRadius: 26,
+    backgroundColor: "#101923",
+    padding: 18,
+  },
+  scoreBoard: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 16,
+    borderWidth: 1,
+    borderColor: "#25313D",
+    borderRadius: 22,
+    backgroundColor: "#0B1118",
+    padding: 16,
+  },
+  scoreTeam: {
+    flex: 1,
+    alignItems: "center",
+    gap: 5,
+  },
+  scoreTeamLabel: {
+    color: "#8EC9FF",
+    fontSize: 12,
+    fontWeight: "900",
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+  },
+  scoreNumber: {
+    color: "#F4F7F2",
+    fontSize: 42,
+    fontWeight: "900",
+  },
+  scoreSeparator: {
+    color: "#8D96A5",
+    fontSize: 28,
+    fontWeight: "900",
+  },
+  scoreInputRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  scoreInputColumn: {
+    flex: 1,
+    gap: 8,
+  },
   generatedCard: {
     gap: 16,
     borderWidth: 1,
@@ -1735,6 +2414,147 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "800",
     lineHeight: 17,
+  },
+  lockPanel: {
+    gap: 12,
+    borderWidth: 1,
+    borderColor: "#1F513A",
+    borderRadius: 20,
+    backgroundColor: "#0B1B15",
+    padding: 14,
+  },
+  lockPanelOfficial: {
+    borderColor: "#35C77B",
+    backgroundColor: "#0C2118",
+  },
+  lockTitle: {
+    color: "#F4F7F2",
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  lockHint: {
+    color: "#AEB8C7",
+    fontSize: 12,
+    fontWeight: "800",
+    lineHeight: 17,
+  },
+  lockBadge: {
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#35C77B",
+    borderRadius: 999,
+    backgroundColor: "#113B2B",
+    color: "#72E6A4",
+    fontSize: 11,
+    fontWeight: "900",
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+  },
+  lockButton: {
+    alignItems: "center",
+    borderRadius: 16,
+    backgroundColor: "#35C77B",
+    paddingVertical: 13,
+  },
+  lockButtonDisabled: {
+    backgroundColor: "#1C2530",
+  },
+  lockButtonText: {
+    color: "#06110C",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  lockButtonTextDisabled: {
+    color: "#8D96A5",
+  },
+  manualPanel: {
+    gap: 12,
+    borderWidth: 1,
+    borderColor: "#2D2A1E",
+    borderRadius: 20,
+    backgroundColor: "#10161D",
+    padding: 14,
+  },
+  manualHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  manualTitle: {
+    color: "#F4F7F2",
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  manualHint: {
+    color: "#AEB8C7",
+    fontSize: 12,
+    fontWeight: "800",
+    lineHeight: 17,
+  },
+  manualBadge: {
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#1F513A",
+    borderRadius: 999,
+    backgroundColor: "#113B2B",
+    color: "#72E6A4",
+    fontSize: 11,
+    fontWeight: "900",
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+  },
+  manualPicker: {
+    gap: 7,
+  },
+  manualPickerLabel: {
+    color: "#F9C846",
+    fontSize: 12,
+    fontWeight: "900",
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+  },
+  manualChipRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  manualChip: {
+    borderWidth: 1,
+    borderColor: "#25313D",
+    borderRadius: 999,
+    backgroundColor: "#171E27",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  manualChipSelected: {
+    borderColor: "#F9C846",
+    backgroundColor: "#332711",
+  },
+  manualChipText: {
+    color: "#AEB8C7",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  manualChipTextSelected: {
+    color: "#F9C846",
+  },
+  manualButton: {
+    alignItems: "center",
+    borderRadius: 16,
+    backgroundColor: "#F9C846",
+    paddingVertical: 13,
+  },
+  manualButtonDisabled: {
+    backgroundColor: "#1C2530",
+  },
+  manualButtonText: {
+    color: "#141006",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  manualButtonTextDisabled: {
+    color: "#8D96A5",
   },
   detailToggle: {
     alignItems: "center",

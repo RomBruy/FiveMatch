@@ -175,6 +175,84 @@ describe('MatchesController', () => {
     );
   });
 
+  it('submits and serializes final score for locked teams', async () => {
+    const submitFinalScore = jest.fn().mockResolvedValue(
+      createInternalMatch({
+        status: 'locked',
+        score: {
+          teamAScore: 7,
+          teamBScore: 5,
+          submittedByUserId: 'usr_123',
+          submittedAt: new Date('2026-06-10T21:10:00.000Z'),
+        },
+      }),
+    );
+    const controller = new MatchesController({
+      submitFinalScore,
+    } as unknown as MatchesService);
+
+    await expect(
+      controller.submitFinalScore(
+        {
+          auth: {
+            clerkUserId: 'user_123',
+          },
+        } as AuthenticatedRequest,
+        'grp_123',
+        'match_123',
+        {
+          teamAScore: 7,
+          teamBScore: 5,
+        },
+      ),
+    ).resolves.toMatchObject({
+      data: {
+        match: {
+          id: 'match_123',
+          status: 'locked',
+          score: {
+            teamAScore: 7,
+            teamBScore: 5,
+            submittedByUserId: 'usr_123',
+            submittedAt: '2026-06-10T21:10:00.000Z',
+          },
+        },
+      },
+    });
+
+    expect(submitFinalScore).toHaveBeenCalledWith(
+      'user_123',
+      'grp_123',
+      'match_123',
+      {
+        teamAScore: 7,
+        teamBScore: 5,
+      },
+    );
+  });
+
+  it('rejects invalid final score values', async () => {
+    const controller = new MatchesController({
+      submitFinalScore: jest.fn(),
+    } as unknown as MatchesService);
+
+    await expect(
+      controller.submitFinalScore(
+        {
+          auth: {
+            clerkUserId: 'user_123',
+          },
+        } as AuthenticatedRequest,
+        'grp_123',
+        'match_123',
+        {
+          teamAScore: 7.5,
+          teamBScore: -1,
+        },
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
   it('generates and serializes a team version', async () => {
     const generateTeamVersion = jest
       .fn()
@@ -300,6 +378,128 @@ describe('MatchesController', () => {
     );
   });
 
+  it('applies and serializes a manual team adjustment', async () => {
+    const applyManualTeamAdjustment = jest.fn().mockResolvedValue({
+      ...createInternalTeamGenerationVersion(),
+      manualAdjustment: {
+        type: 'swap',
+        adjustedAt: '2026-06-03T04:00:00.000Z',
+        adjustedByUserId: 'usr_123',
+        fromTeamAPlayerId: 'ply_1',
+        fromTeamBPlayerId: 'ply_2',
+      },
+    });
+    const controller = new MatchesController({
+      applyManualTeamAdjustment,
+    } as unknown as MatchesService);
+
+    await expect(
+      controller.applyManualTeamAdjustment(
+        {
+          auth: {
+            clerkUserId: 'user_123',
+          },
+        } as AuthenticatedRequest,
+        'grp_123',
+        'match_123',
+        'generation_123',
+        {
+          teamAPlayerId: 'ply_1',
+          teamBPlayerId: 'ply_2',
+        },
+      ),
+    ).resolves.toMatchObject({
+      data: {
+        generation: {
+          id: 'generation_123',
+          manualAdjustment: {
+            type: 'swap',
+            fromTeamAPlayerId: 'ply_1',
+            fromTeamBPlayerId: 'ply_2',
+          },
+        },
+      },
+    });
+
+    expect(applyManualTeamAdjustment).toHaveBeenCalledWith(
+      'user_123',
+      'grp_123',
+      'match_123',
+      'generation_123',
+      {
+        teamAPlayerId: 'ply_1',
+        teamBPlayerId: 'ply_2',
+      },
+    );
+  });
+
+  it('rejects a manual adjustment with the same player twice', async () => {
+    const controller = new MatchesController({
+      applyManualTeamAdjustment: jest.fn(),
+    } as unknown as MatchesService);
+
+    await expect(
+      controller.applyManualTeamAdjustment(
+        {
+          auth: {
+            clerkUserId: 'user_123',
+          },
+        } as AuthenticatedRequest,
+        'grp_123',
+        'match_123',
+        'generation_123',
+        {
+          teamAPlayerId: 'ply_1',
+          teamBPlayerId: 'ply_1',
+        },
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('confirms and serializes locked teams', async () => {
+    const confirmTeamGeneration = jest.fn().mockResolvedValue({
+      match: createInternalMatch({ status: 'locked' }),
+      generation: {
+        ...createInternalTeamGenerationVersion(),
+        status: 'locked',
+      },
+    });
+    const controller = new MatchesController({
+      confirmTeamGeneration,
+    } as unknown as MatchesService);
+
+    await expect(
+      controller.confirmTeamGeneration(
+        {
+          auth: {
+            clerkUserId: 'user_123',
+          },
+        } as AuthenticatedRequest,
+        'grp_123',
+        'match_123',
+        'generation_123',
+      ),
+    ).resolves.toMatchObject({
+      data: {
+        match: {
+          id: 'match_123',
+          status: 'locked',
+        },
+        generation: {
+          id: 'generation_123',
+          status: 'locked',
+        },
+      },
+    });
+
+    expect(confirmTeamGeneration).toHaveBeenCalledWith(
+      'user_123',
+      'grp_123',
+      'match_123',
+      'generation_123',
+    );
+  });
+
   it('returns null when no latest generation is available', async () => {
     const controller = new MatchesController({
       getLatestTeamGeneration: jest.fn().mockResolvedValue(null),
@@ -325,6 +525,13 @@ describe('MatchesController', () => {
 
 function createInternalMatch(
   overrides: Partial<{
+    status: 'open' | 'cancelled' | 'locked' | 'completed';
+    score: {
+      teamAScore: number;
+      teamBScore: number;
+      submittedByUserId: string;
+      submittedAt: Date;
+    } | null;
     attendances: {
       id: string;
       matchId: string;
@@ -361,9 +568,10 @@ function createInternalMatch(
     attendanceDeadlineAt: new Date('2026-06-10T16:00:00.000Z'),
     generatorStyleOverride: 'max_fairness',
     goalkeeperModeOverride: 'fixed_goalkeeper',
-    status: 'open',
+    status: overrides.status ?? 'open',
     confirmedCount: 0,
     waitlistCount: 0,
+    score: overrides.score ?? null,
     attendances: overrides.attendances ?? [],
     myAttendance: overrides.myAttendance ?? null,
     createdAt: new Date('2026-06-03T00:00:00.000Z'),
@@ -435,6 +643,7 @@ function createInternalTeamGenerationVersion() {
       summary: 'Team A and Team B are close on average rating.',
       bullets: ['Balanced by rating first.'],
     },
+    manualAdjustment: null,
     createdAt: new Date('2026-06-03T03:00:00.000Z'),
     updatedAt: new Date('2026-06-03T03:00:00.000Z'),
   };

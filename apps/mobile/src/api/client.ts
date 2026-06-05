@@ -5,6 +5,7 @@ import type {
   CreateFootballGroupResponse,
   CreateFootballMatchInput,
   CreateFootballMatchResponse,
+  ConfirmTeamGenerationResponse,
   CurrentUserResponse,
   FootballGroupMembersResponse,
   FootballGroupsResponse,
@@ -12,11 +13,15 @@ import type {
   HealthResponse,
   InitialPeerRatingReadinessResponse,
   LatestTeamGenerationResponse,
+  ManualTeamAdjustmentInput,
+  ManualTeamAdjustmentResponse,
   MyInitialPeerRatingsResponse,
   NextFootballMatchResponse,
   PlayerProfileResponse,
   PlayerRosterResponse,
   RemoveFootballGroupMemberResponse,
+  SubmitFinalScoreInput,
+  SubmitFinalScoreResponse,
   SubmitInitialPeerRatingInput,
   SubmitInitialPeerRatingResponse,
   SubmitMatchAttendanceInput,
@@ -346,6 +351,22 @@ export async function submitMatchAttendance(
   );
 }
 
+export async function submitFinalScore(
+  token: string,
+  groupId: string,
+  matchId: string,
+  input: SubmitFinalScoreInput
+): Promise<SubmitFinalScoreResponse> {
+  return apiFetch<SubmitFinalScoreResponse>(
+    `/groups/${groupId}/matches/${matchId}/final-score`,
+    {
+      method: "PUT",
+      token,
+      body: JSON.stringify(input),
+    }
+  );
+}
+
 export async function generateTeamVersion(
   token: string,
   groupId: string,
@@ -381,6 +402,38 @@ export async function listTeamGenerations(
   return apiFetch<TeamGenerationVersionsResponse>(
     `/groups/${groupId}/matches/${matchId}/team-generations`,
     {
+      token,
+    }
+  );
+}
+
+export async function applyManualTeamAdjustment(
+  token: string,
+  groupId: string,
+  matchId: string,
+  generationId: string,
+  input: ManualTeamAdjustmentInput
+): Promise<ManualTeamAdjustmentResponse> {
+  return apiFetch<ManualTeamAdjustmentResponse>(
+    `/groups/${groupId}/matches/${matchId}/team-generations/${generationId}/manual-adjustment`,
+    {
+      method: "PATCH",
+      token,
+      body: JSON.stringify(input),
+    }
+  );
+}
+
+export async function confirmTeamGeneration(
+  token: string,
+  groupId: string,
+  matchId: string,
+  generationId: string
+): Promise<ConfirmTeamGenerationResponse> {
+  return apiFetch<ConfirmTeamGenerationResponse>(
+    `/groups/${groupId}/matches/${matchId}/team-generations/${generationId}/confirm`,
+    {
+      method: "PATCH",
       token,
     }
   );
