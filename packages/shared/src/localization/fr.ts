@@ -454,6 +454,20 @@ export const fr = {
     finalScoreViewerHint:
       "Ce score est visible par le groupe et alimentera les actions post-match.",
     noFinalScore: "Score pas encore enregistre.",
+    matchEventsTitle: "Buts et passes",
+    matchEventsSubtitle:
+      "Renseigne les stats rapides du match pour alimenter l'historique, les classements et les cartes.",
+    matchEventsSavedBadge: "Stats enregistrees",
+    goalsShortLabel: "Buts",
+    assistsShortLabel: "Passes",
+    noMatchEvents: "Aucune stat enregistree pour le moment.",
+    saveMatchEvents: "Enregistrer les stats",
+    savingMatchEvents: "Enregistrement...",
+    matchEventsSaved: "Buts et passes enregistres.",
+    matchEventsError:
+      "Impossible d'enregistrer les stats. Verifie que le score est enregistre et que les equipes sont verrouillees.",
+    matchEventsViewerHint:
+      "Les stats sont visibles par le groupe et preparent le resume final.",
     confirmedCount: "confirmes",
     waitlistCount: "en attente",
     maxPlayers: "places",

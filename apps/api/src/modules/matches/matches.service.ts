@@ -8,6 +8,7 @@ import {
   type InitialPeerRating as PrismaInitialPeerRating,
   type Match as PrismaMatch,
   type MatchAttendance as PrismaMatchAttendance,
+  type MatchEvent as PrismaMatchEvent,
   type TeamGenerationVersion as PrismaTeamGenerationVersion,
 } from '@prisma/client';
 import type {
@@ -27,6 +28,7 @@ import type {
   TeamGenerationScoreComponents,
   TeamGenerationTeam,
   TeamManualAdjustment,
+  UpsertMatchPlayerEventsInput,
 } from '@fit-five/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import {
@@ -82,6 +84,17 @@ export type InternalFootballMatchAttendance = {
   updatedAt: Date;
 };
 
+export type InternalFootballMatchEvent = {
+  id: string;
+  matchId: string;
+  playerId: string;
+  kind: 'goal' | 'assist';
+  count: number;
+  recordedByUserId: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 export type InternalFootballMatch = {
   id: string;
   groupId: string;
@@ -103,6 +116,7 @@ export type InternalFootballMatch = {
     submittedByUserId: string;
     submittedAt: Date;
   } | null;
+  events: InternalFootballMatchEvent[];
   attendances: InternalFootballMatchAttendance[];
   myAttendance: InternalFootballMatchAttendance | null;
   createdAt: Date;
@@ -329,6 +343,105 @@ export class MatchesService {
     });
 
     return this.toInternalMatch(updatedMatch);
+  }
+
+  async upsertMatchPlayerEvents(
+    clerkUserId: string,
+    groupId: string,
+    matchId: string,
+    input: UpsertMatchPlayerEventsInput,
+  ): Promise<InternalFootballMatch> {
+    const actorMembership = await this.requireGroupMembership(
+      clerkUserId,
+      groupId,
+    );
+    const match = await this.prisma.match.findFirst({
+      where: {
+        id: matchId,
+        groupId,
+      },
+    });
+
+    if (!match) {
+      throw new ForbiddenException('Match required.');
+    }
+
+    if (
+      !canUpdateGroupSettings(actorMembership.role) &&
+      match.organizerUserId !== actorMembership.userId
+    ) {
+      throw new ForbiddenException('Organizer role required.');
+    }
+
+    if (
+      normalizeMatchStatus(match.status) !== 'locked' ||
+      match.teamAScore === null ||
+      match.teamBScore === null
+    ) {
+      throw new ConflictException(
+        'Locked teams and submitted score required before match events.',
+      );
+    }
+
+    const lockedGeneration = await this.prisma.teamGenerationVersion.findFirst({
+      where: {
+        matchId: match.id,
+        status: 'locked',
+      },
+    });
+
+    if (!lockedGeneration) {
+      throw new ConflictException('Locked team generation required.');
+    }
+
+    const lockedPlayerIds = getLockedGenerationPlayerIds(lockedGeneration);
+    const requestedPlayerIds = new Set<string>();
+
+    for (const statLine of input.players) {
+      if (!lockedPlayerIds.has(statLine.playerId)) {
+        throw new ConflictException(
+          'Match events can only use locked team players.',
+        );
+      }
+
+      if (requestedPlayerIds.has(statLine.playerId)) {
+        throw new ConflictException('Duplicate player event row.');
+      }
+
+      requestedPlayerIds.add(statLine.playerId);
+    }
+
+    const statLineByPlayerId = new Map(
+      input.players.map((statLine) => [statLine.playerId, statLine]),
+    );
+    const operations = [...lockedPlayerIds].flatMap((playerId) => {
+      const statLine = statLineByPlayerId.get(playerId) ?? {
+        playerId,
+        goals: 0,
+        assists: 0,
+      };
+
+      return [
+        this.buildMatchEventWriteOperation(
+          match.id,
+          playerId,
+          'goal',
+          statLine.goals,
+          actorMembership.userId,
+        ),
+        this.buildMatchEventWriteOperation(
+          match.id,
+          playerId,
+          'assist',
+          statLine.assists,
+          actorMembership.userId,
+        ),
+      ];
+    });
+
+    await this.prisma.$transaction(operations);
+
+    return this.toInternalMatch(match);
   }
 
   async generateTeamVersion(
@@ -780,6 +893,45 @@ export class MatchesService {
     };
   }
 
+  private buildMatchEventWriteOperation(
+    matchId: string,
+    playerId: string,
+    kind: InternalFootballMatchEvent['kind'],
+    count: number,
+    recordedByUserId: string,
+  ) {
+    if (count <= 0) {
+      return this.prisma.matchEvent.deleteMany({
+        where: {
+          matchId,
+          playerId,
+          kind,
+        },
+      });
+    }
+
+    return this.prisma.matchEvent.upsert({
+      where: {
+        matchId_playerId_kind: {
+          matchId,
+          playerId,
+          kind,
+        },
+      },
+      create: {
+        matchId,
+        playerId,
+        kind,
+        count,
+        recordedByUserId,
+      },
+      update: {
+        count,
+        recordedByUserId,
+      },
+    });
+  }
+
   private async requireGroupMembership(
     clerkUserId: string,
     groupId: string,
@@ -1028,30 +1180,47 @@ export class MatchesService {
     match: PrismaMatch,
     currentPlayerId?: string,
   ): Promise<InternalFootballMatch> {
-    const [confirmedCount, waitlistCount, myAttendance] = await Promise.all([
-      this.prisma.matchAttendance.count({
-        where: {
-          matchId: match.id,
-          status: 'confirmed',
-        },
-      }),
-      this.prisma.matchAttendance.count({
-        where: {
-          matchId: match.id,
-          status: 'waitlisted',
-        },
-      }),
-      currentPlayerId
-        ? this.prisma.matchAttendance.findUnique({
-            where: {
-              matchId_playerId: {
-                matchId: match.id,
-                playerId: currentPlayerId,
+    const [confirmedCount, waitlistCount, myAttendance, events] =
+      await Promise.all([
+        this.prisma.matchAttendance.count({
+          where: {
+            matchId: match.id,
+            status: 'confirmed',
+          },
+        }),
+        this.prisma.matchAttendance.count({
+          where: {
+            matchId: match.id,
+            status: 'waitlisted',
+          },
+        }),
+        currentPlayerId
+          ? this.prisma.matchAttendance.findUnique({
+              where: {
+                matchId_playerId: {
+                  matchId: match.id,
+                  playerId: currentPlayerId,
+                },
               },
+            })
+          : null,
+        this.prisma.matchEvent.findMany({
+          where: {
+            matchId: match.id,
+          },
+          orderBy: [
+            {
+              kind: 'asc',
             },
-          })
-        : null,
-    ]);
+            {
+              count: 'desc',
+            },
+            {
+              updatedAt: 'asc',
+            },
+          ],
+        }),
+      ]);
     const attendances = await this.prisma.matchAttendance.findMany({
       where: {
         matchId: match.id,
@@ -1097,6 +1266,7 @@ export class MatchesService {
               submittedAt: match.scoreSubmittedAt,
             }
           : null,
+      events: events.map((event) => this.toInternalMatchEvent(event)),
       attendances: attendances.map((attendance) =>
         this.toInternalAttendance(attendance),
       ),
@@ -1121,6 +1291,21 @@ export class MatchesService {
       respondedAt: attendance.respondedAt,
       createdAt: attendance.createdAt,
       updatedAt: attendance.updatedAt,
+    };
+  }
+
+  private toInternalMatchEvent(
+    event: PrismaMatchEvent,
+  ): InternalFootballMatchEvent {
+    return {
+      id: event.id,
+      matchId: event.matchId,
+      playerId: event.playerId,
+      kind: event.kind === 'assist' ? 'assist' : 'goal',
+      count: event.count,
+      recordedByUserId: event.recordedByUserId,
+      createdAt: event.createdAt,
+      updatedAt: event.updatedAt,
     };
   }
 
@@ -1186,6 +1371,16 @@ function swapTeamPlayers(
     teamA: buildAdjustedTeam('A', nextTeamAPlayers),
     teamB: buildAdjustedTeam('B', nextTeamBPlayers),
   };
+}
+
+function getLockedGenerationPlayerIds(generation: PrismaTeamGenerationVersion) {
+  const teamA = generation.teamA as unknown as TeamGenerationTeam;
+  const teamB = generation.teamB as unknown as TeamGenerationTeam;
+
+  return new Set([
+    ...teamA.players.map((player) => player.playerId),
+    ...teamB.players.map((player) => player.playerId),
+  ]);
 }
 
 function buildAdjustedTeam(

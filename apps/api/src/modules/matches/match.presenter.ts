@@ -35,6 +35,16 @@ export function serializeFootballMatch(
           submittedAt: match.score.submittedAt.toISOString(),
         }
       : null,
+    events: match.events.map((event) => ({
+      id: event.id,
+      matchId: event.matchId,
+      playerId: event.playerId,
+      kind: event.kind,
+      count: event.count,
+      recordedByUserId: event.recordedByUserId,
+      createdAt: event.createdAt.toISOString(),
+      updatedAt: event.updatedAt.toISOString(),
+    })),
     attendances: match.attendances.map((attendance) =>
       serializeFootballMatchAttendance(attendance),
     ),

@@ -510,6 +510,170 @@ describe('MatchesService', () => {
     expect(matchUpdate).not.toHaveBeenCalled();
   });
 
+  it('saves goals and assists for locked team players', async () => {
+    const eventUpsert = jest
+      .fn()
+      .mockResolvedValue(createMatchEventRow({ playerId: 'ply_a_1' }));
+    const eventDeleteMany = jest.fn().mockResolvedValue({ count: 0 });
+    const eventFindMany = jest.fn().mockResolvedValue([
+      createMatchEventRow({
+        playerId: 'ply_a_1',
+        kind: 'goal',
+        count: 2,
+      }),
+      createMatchEventRow({
+        id: 'event_assist_1',
+        playerId: 'ply_a_1',
+        kind: 'assist',
+        count: 1,
+      }),
+    ]);
+    const transaction = jest.fn(async (operations: Array<Promise<unknown>>) =>
+      Promise.all(operations),
+    );
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'admin',
+        findFirst: jest.fn().mockResolvedValue(
+          createMatchRow({
+            status: 'locked',
+            teamAScore: 7,
+            teamBScore: 5,
+            scoreSubmittedByUserId: 'usr_123',
+            scoreSubmittedAt: new Date('2026-06-10T21:10:00.000Z'),
+          }),
+        ),
+        generationFindFirst: jest
+          .fn()
+          .mockResolvedValue(createTeamGenerationRow(createSwappableTeams())),
+        eventDeleteMany,
+        eventFindMany,
+        eventUpsert,
+        transaction,
+      }),
+    );
+
+    await expect(
+      service.upsertMatchPlayerEvents('user_123', 'grp_123', 'match_123', {
+        players: [
+          {
+            playerId: 'ply_a_1',
+            goals: 2,
+            assists: 1,
+          },
+          {
+            playerId: 'ply_b_1',
+            goals: 0,
+            assists: 0,
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({
+      events: [
+        {
+          playerId: 'ply_a_1',
+          kind: 'goal',
+          count: 2,
+        },
+        {
+          playerId: 'ply_a_1',
+          kind: 'assist',
+          count: 1,
+        },
+      ],
+    });
+
+    expect(eventUpsert).toHaveBeenCalledWith({
+      where: {
+        matchId_playerId_kind: {
+          matchId: 'match_123',
+          playerId: 'ply_a_1',
+          kind: 'goal',
+        },
+      },
+      create: expect.objectContaining({
+        count: 2,
+        recordedByUserId: 'usr_123',
+      }) as object,
+      update: {
+        count: 2,
+        recordedByUserId: 'usr_123',
+      },
+    });
+    expect(eventDeleteMany).toHaveBeenCalledWith({
+      where: {
+        matchId: 'match_123',
+        playerId: 'ply_b_1',
+        kind: 'goal',
+      },
+    });
+    expect(transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects goals and assists for players outside locked teams', async () => {
+    const eventUpsert = jest.fn();
+    const transaction = jest.fn();
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'admin',
+        findFirst: jest.fn().mockResolvedValue(
+          createMatchRow({
+            status: 'locked',
+            teamAScore: 7,
+            teamBScore: 5,
+            scoreSubmittedByUserId: 'usr_123',
+            scoreSubmittedAt: new Date('2026-06-10T21:10:00.000Z'),
+          }),
+        ),
+        generationFindFirst: jest
+          .fn()
+          .mockResolvedValue(createTeamGenerationRow(createSwappableTeams())),
+        eventUpsert,
+        transaction,
+      }),
+    );
+
+    await expect(
+      service.upsertMatchPlayerEvents('user_123', 'grp_123', 'match_123', {
+        players: [
+          {
+            playerId: 'ply_not_locked',
+            goals: 1,
+            assists: 0,
+          },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(eventUpsert).not.toHaveBeenCalled();
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('blocks goals and assists before score is submitted', async () => {
+    const transaction = jest.fn();
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'admin',
+        findFirst: jest
+          .fn()
+          .mockResolvedValue(createMatchRow({ status: 'locked' })),
+        transaction,
+      }),
+    );
+
+    await expect(
+      service.upsertMatchPlayerEvents('user_123', 'grp_123', 'match_123', {
+        players: [
+          {
+            playerId: 'ply_a_1',
+            goals: 1,
+            assists: 0,
+          },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
   it('generates and saves a team version from a ready confirmed pool', async () => {
     const attendanceFindMany = jest.fn().mockResolvedValue(
       createConfirmedAttendances([
@@ -1133,6 +1297,9 @@ function createPrismaMock({
   generationFindMany = jest.fn().mockResolvedValue([]),
   generationUpdate = jest.fn(),
   generationUpdateMany = jest.fn(),
+  eventDeleteMany = jest.fn().mockResolvedValue({ count: 0 }),
+  eventFindMany = jest.fn().mockResolvedValue([]),
+  eventUpsert = jest.fn(),
   transaction = jest.fn(async (operations: Array<Promise<unknown>>) =>
     Promise.all(operations),
   ),
@@ -1154,6 +1321,9 @@ function createPrismaMock({
   generationFindMany?: jest.Mock;
   generationUpdate?: jest.Mock;
   generationUpdateMany?: jest.Mock;
+  eventDeleteMany?: jest.Mock;
+  eventFindMany?: jest.Mock;
+  eventUpsert?: jest.Mock;
   transaction?: jest.Mock;
 }) {
   return {
@@ -1197,6 +1367,11 @@ function createPrismaMock({
       findMany: generationFindMany,
       update: generationUpdate,
       updateMany: generationUpdateMany,
+    },
+    matchEvent: {
+      deleteMany: eventDeleteMany,
+      findMany: eventFindMany,
+      upsert: eventUpsert,
     },
   } as unknown as PrismaService;
 }
@@ -1259,6 +1434,28 @@ function createAttendanceRow(
     respondedAt: new Date('2026-06-03T02:00:00.000Z'),
     createdAt: new Date('2026-06-03T02:00:00.000Z'),
     updatedAt: new Date('2026-06-03T02:00:00.000Z'),
+  };
+}
+
+function createMatchEventRow(
+  overrides: Partial<{
+    id: string;
+    matchId: string;
+    playerId: string;
+    kind: string;
+    count: number;
+    recordedByUserId: string;
+  }> = {},
+) {
+  return {
+    id: overrides.id ?? 'event_goal_1',
+    matchId: overrides.matchId ?? 'match_123',
+    playerId: overrides.playerId ?? 'ply_1',
+    kind: overrides.kind ?? 'goal',
+    count: overrides.count ?? 1,
+    recordedByUserId: overrides.recordedByUserId ?? 'usr_123',
+    createdAt: new Date('2026-06-10T21:15:00.000Z'),
+    updatedAt: new Date('2026-06-10T21:15:00.000Z'),
   };
 }
 

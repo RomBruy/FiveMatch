@@ -450,6 +450,20 @@ export const en = {
     finalScoreViewerHint:
       "This score is visible to the group and will feed post-match actions.",
     noFinalScore: "Score not submitted yet.",
+    matchEventsTitle: "Goals and assists",
+    matchEventsSubtitle:
+      "Capture the quick match stats that power history, rankings, and cards.",
+    matchEventsSavedBadge: "Stats saved",
+    goalsShortLabel: "Goals",
+    assistsShortLabel: "Assists",
+    noMatchEvents: "No stats saved yet.",
+    saveMatchEvents: "Save stats",
+    savingMatchEvents: "Saving stats...",
+    matchEventsSaved: "Goals and assists saved.",
+    matchEventsError:
+      "Unable to save stats. Check the score is saved and teams are locked.",
+    matchEventsViewerHint:
+      "Stats are visible to the group and prepare the final summary.",
     confirmedCount: "confirmed",
     waitlistCount: "waitlisted",
     maxPlayers: "spots",

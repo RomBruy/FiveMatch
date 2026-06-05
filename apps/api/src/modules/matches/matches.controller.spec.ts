@@ -253,6 +253,126 @@ describe('MatchesController', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('saves and serializes goals and assists', async () => {
+    const upsertMatchPlayerEvents = jest.fn().mockResolvedValue(
+      createInternalMatch({
+        status: 'locked',
+        score: {
+          teamAScore: 7,
+          teamBScore: 5,
+          submittedByUserId: 'usr_123',
+          submittedAt: new Date('2026-06-10T21:10:00.000Z'),
+        },
+        events: [
+          createInternalMatchEvent({
+            playerId: 'ply_1',
+            kind: 'goal',
+            count: 3,
+          }),
+          createInternalMatchEvent({
+            id: 'event_assist_1',
+            playerId: 'ply_2',
+            kind: 'assist',
+            count: 2,
+          }),
+        ],
+      }),
+    );
+    const controller = new MatchesController({
+      upsertMatchPlayerEvents,
+    } as unknown as MatchesService);
+
+    await expect(
+      controller.upsertMatchPlayerEvents(
+        {
+          auth: {
+            clerkUserId: 'user_123',
+          },
+        } as AuthenticatedRequest,
+        'grp_123',
+        'match_123',
+        {
+          players: [
+            {
+              playerId: 'ply_1',
+              goals: 3,
+              assists: 0,
+            },
+            {
+              playerId: 'ply_2',
+              goals: 0,
+              assists: 2,
+            },
+          ],
+        },
+      ),
+    ).resolves.toMatchObject({
+      data: {
+        match: {
+          events: [
+            {
+              playerId: 'ply_1',
+              kind: 'goal',
+              count: 3,
+            },
+            {
+              playerId: 'ply_2',
+              kind: 'assist',
+              count: 2,
+            },
+          ],
+        },
+      },
+    });
+
+    expect(upsertMatchPlayerEvents).toHaveBeenCalledWith(
+      'user_123',
+      'grp_123',
+      'match_123',
+      {
+        players: [
+          {
+            playerId: 'ply_1',
+            goals: 3,
+            assists: 0,
+          },
+          {
+            playerId: 'ply_2',
+            goals: 0,
+            assists: 2,
+          },
+        ],
+      },
+    );
+  });
+
+  it('rejects invalid goal and assist values', async () => {
+    const controller = new MatchesController({
+      upsertMatchPlayerEvents: jest.fn(),
+    } as unknown as MatchesService);
+
+    await expect(
+      controller.upsertMatchPlayerEvents(
+        {
+          auth: {
+            clerkUserId: 'user_123',
+          },
+        } as AuthenticatedRequest,
+        'grp_123',
+        'match_123',
+        {
+          players: [
+            {
+              playerId: 'ply_1',
+              goals: -1,
+              assists: 0,
+            },
+          ],
+        },
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
   it('generates and serializes a team version', async () => {
     const generateTeamVersion = jest
       .fn()
@@ -532,6 +652,7 @@ function createInternalMatch(
       submittedByUserId: string;
       submittedAt: Date;
     } | null;
+    events: ReturnType<typeof createInternalMatchEvent>[];
     attendances: {
       id: string;
       matchId: string;
@@ -572,10 +693,33 @@ function createInternalMatch(
     confirmedCount: 0,
     waitlistCount: 0,
     score: overrides.score ?? null,
+    events: overrides.events ?? [],
     attendances: overrides.attendances ?? [],
     myAttendance: overrides.myAttendance ?? null,
     createdAt: new Date('2026-06-03T00:00:00.000Z'),
     updatedAt: new Date('2026-06-03T01:00:00.000Z'),
+  };
+}
+
+function createInternalMatchEvent(
+  overrides: Partial<{
+    id: string;
+    matchId: string;
+    playerId: string;
+    kind: 'goal' | 'assist';
+    count: number;
+    recordedByUserId: string;
+  }> = {},
+) {
+  return {
+    id: overrides.id ?? 'event_goal_1',
+    matchId: overrides.matchId ?? 'match_123',
+    playerId: overrides.playerId ?? 'ply_1',
+    kind: overrides.kind ?? 'goal',
+    count: overrides.count ?? 1,
+    recordedByUserId: overrides.recordedByUserId ?? 'usr_123',
+    createdAt: new Date('2026-06-10T21:15:00.000Z'),
+    updatedAt: new Date('2026-06-10T21:15:00.000Z'),
   };
 }
 

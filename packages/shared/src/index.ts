@@ -33,6 +33,7 @@ export {
 export {
   footballMatchAttendanceResponses,
   footballMatchAttendanceStatuses,
+  footballMatchEventKinds,
   footballMatchStatuses,
   teamGenerationVersionLimit,
   type CreateFootballMatchInput,
@@ -42,6 +43,8 @@ export {
   type FootballMatchAttendance,
   type FootballMatchAttendanceResponse,
   type FootballMatchAttendanceStatus,
+  type FootballMatchEvent,
+  type FootballMatchEventKind,
   type FootballMatchScore,
   type FootballMatchStatus,
   type GenerateTeamVersionResponse,
@@ -61,6 +64,8 @@ export {
   type TeamGenerationVersion,
   type TeamGenerationVersionsResponse,
   type TeamManualAdjustment,
+  type UpsertMatchPlayerEventsInput,
+  type UpsertMatchPlayerEventsResponse,
 } from "./api/matches.js";
 export {
   playerDominantFeet,

@@ -39,6 +39,8 @@ import type {
   UpsertPlayerVestiaireResponse,
   UpdateFootballGroupSettingsInput,
   UpdateFootballGroupSettingsResponse,
+  UpsertMatchPlayerEventsInput,
+  UpsertMatchPlayerEventsResponse,
 } from "@fit-five/shared";
 import Constants from "expo-constants";
 
@@ -359,6 +361,22 @@ export async function submitFinalScore(
 ): Promise<SubmitFinalScoreResponse> {
   return apiFetch<SubmitFinalScoreResponse>(
     `/groups/${groupId}/matches/${matchId}/final-score`,
+    {
+      method: "PUT",
+      token,
+      body: JSON.stringify(input),
+    }
+  );
+}
+
+export async function upsertMatchPlayerEvents(
+  token: string,
+  groupId: string,
+  matchId: string,
+  input: UpsertMatchPlayerEventsInput
+): Promise<UpsertMatchPlayerEventsResponse> {
+  return apiFetch<UpsertMatchPlayerEventsResponse>(
+    `/groups/${groupId}/matches/${matchId}/events`,
     {
       method: "PUT",
       token,

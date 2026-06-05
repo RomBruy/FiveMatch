@@ -25,6 +25,8 @@ import type {
   SubmitMatchAttendanceInput,
   SubmitMatchAttendanceResponse,
   TeamGenerationVersionsResponse,
+  UpsertMatchPlayerEventsInput,
+  UpsertMatchPlayerEventsResponse,
 } from '@fit-five/shared';
 import { ClerkAuthGuard } from '../auth/clerk-auth.guard';
 import type { AuthenticatedRequest } from '../auth/auth.types';
@@ -141,6 +143,32 @@ export class MatchesController {
       groupId,
       matchId,
       this.parseSubmitFinalScoreInput(body),
+    );
+
+    return {
+      data: {
+        match: serializeFootballMatch(match),
+      },
+    };
+  }
+
+  @Put(':matchId/events')
+  @UseGuards(ClerkAuthGuard)
+  async upsertMatchPlayerEvents(
+    @Req() request: AuthenticatedRequest,
+    @Param('groupId') groupId: string,
+    @Param('matchId') matchId: string,
+    @Body() body: Partial<UpsertMatchPlayerEventsInput>,
+  ): Promise<UpsertMatchPlayerEventsResponse> {
+    if (!request.auth) {
+      throw new InternalServerErrorException('Authenticated user missing.');
+    }
+
+    const match = await this.matchesService.upsertMatchPlayerEvents(
+      request.auth.clerkUserId,
+      groupId,
+      matchId,
+      this.parseUpsertMatchPlayerEventsInput(body),
     );
 
     return {
@@ -393,6 +421,43 @@ export class MatchesController {
     return {
       teamAScore,
       teamBScore,
+    };
+  }
+
+  private parseUpsertMatchPlayerEventsInput(
+    body: Partial<UpsertMatchPlayerEventsInput>,
+  ): UpsertMatchPlayerEventsInput {
+    if (!Array.isArray(body.players)) {
+      throw new BadRequestException('Match event player rows required.');
+    }
+
+    return {
+      players: body.players.map((player) => {
+        const playerId =
+          typeof player.playerId === 'string' ? player.playerId.trim() : '';
+        const goals = player.goals;
+        const assists = player.assists;
+
+        if (
+          !playerId ||
+          !Number.isInteger(goals) ||
+          !Number.isInteger(assists) ||
+          goals < 0 ||
+          assists < 0 ||
+          goals > 99 ||
+          assists > 99
+        ) {
+          throw new BadRequestException(
+            'Match event rows need player id and 0-99 goal/assist counts.',
+          );
+        }
+
+        return {
+          playerId,
+          goals,
+          assists,
+        };
+      }),
     };
   }
 }

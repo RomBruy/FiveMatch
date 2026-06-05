@@ -16,6 +16,7 @@ import {
   type PlayerProfile,
   type SubmitFinalScoreInput,
   type TeamGenerationVersion,
+  type UpsertMatchPlayerEventsInput,
 } from "@fit-five/shared";
 import { useEffect, useState } from "react";
 import {
@@ -42,6 +43,7 @@ import {
   listGroupPlayers,
   submitFinalScore,
   submitMatchAttendance,
+  upsertMatchPlayerEvents,
 } from "@/api/client";
 import { NextMatchCard } from "@/features/matches/next-match-card";
 import { usePreferences } from "@/features/preferences/preferences-context";
@@ -52,10 +54,18 @@ type GenerationState = "idle" | "generating" | "generated" | "error";
 type ManualAdjustmentState = "idle" | "applying" | "error";
 type TeamLockState = "idle" | "locking" | "locked" | "error";
 type ScoreSubmitState = "idle" | "submitting" | "saved" | "error";
+type MatchEventsSubmitState = "idle" | "submitting" | "saved" | "error";
 type ScoreDraft = {
   teamAScore: string;
   teamBScore: string;
 };
+type MatchEventsDraft = Record<
+  string,
+  {
+    goals: string;
+    assists: string;
+  }
+>;
 type MatchDraft = {
   title: string;
   date: string;
@@ -93,6 +103,8 @@ export default function MatchScreen() {
   const [teamLockState, setTeamLockState] = useState<TeamLockState>("idle");
   const [scoreSubmitState, setScoreSubmitState] =
     useState<ScoreSubmitState>("idle");
+  const [matchEventsSubmitState, setMatchEventsSubmitState] =
+    useState<MatchEventsSubmitState>("idle");
   const [scoreDraft, setScoreDraft] = useState<ScoreDraft>({
     teamAScore: "",
     teamBScore: "",
@@ -129,6 +141,7 @@ export default function MatchScreen() {
         setManualAdjustmentState("idle");
         setTeamLockState("idle");
         setScoreSubmitState("idle");
+        setMatchEventsSubmitState("idle");
         setScoreDraft(createScoreDraft(null));
         setLoadState("noGroup");
         return;
@@ -155,6 +168,7 @@ export default function MatchScreen() {
       setNextMatch(nextMatchResponse.data.match);
       setScoreDraft(createScoreDraft(nextMatchResponse.data.match));
       setScoreSubmitState("idle");
+      setMatchEventsSubmitState("idle");
       setPlayers(rosterResponse.data.players);
       setTeamGenerations(savedGenerations);
       setTeamGeneration(selectPrimaryTeamGeneration(savedGenerations));
@@ -315,6 +329,7 @@ export default function MatchScreen() {
       setNextMatch(response.data.match);
       setScoreDraft(createScoreDraft(response.data.match));
       setScoreSubmitState("idle");
+      setMatchEventsSubmitState("idle");
       setTeamGenerations((currentGenerations) =>
         currentGenerations.map((generation) =>
           generation.id === updatedGeneration.id ? updatedGeneration : generation
@@ -356,12 +371,46 @@ export default function MatchScreen() {
 
       setNextMatch(response.data.match);
       setScoreDraft(createScoreDraft(response.data.match));
+      setMatchEventsSubmitState("idle");
       setScoreSubmitState("saved");
       setActionMessage(strings.matches.finalScoreSaved);
     } catch (error) {
       console.warn("Unable to submit final score", error);
       setScoreSubmitState("error");
       setActionMessage(strings.matches.finalScoreError);
+    }
+  }
+
+  async function handleSubmitMatchEvents(input: UpsertMatchPlayerEventsInput) {
+    if (!activeGroup || !nextMatch) {
+      setActionMessage(strings.generation.noMatchForGeneration);
+      return;
+    }
+
+    setMatchEventsSubmitState("submitting");
+    setActionMessage(null);
+
+    try {
+      const token = await getToken();
+
+      if (!token) {
+        throw new Error("Missing auth token.");
+      }
+
+      const response = await upsertMatchPlayerEvents(
+        token,
+        activeGroup.id,
+        nextMatch.id,
+        input
+      );
+
+      setNextMatch(response.data.match);
+      setMatchEventsSubmitState("saved");
+      setActionMessage(strings.matches.matchEventsSaved);
+    } catch (error) {
+      console.warn("Unable to submit match events", error);
+      setMatchEventsSubmitState("error");
+      setActionMessage(strings.matches.matchEventsError);
     }
   }
 
@@ -406,6 +455,7 @@ export default function MatchScreen() {
       setManualAdjustmentState("idle");
       setTeamLockState("idle");
       setScoreSubmitState("idle");
+      setMatchEventsSubmitState("idle");
       setScoreDraft(createScoreDraft(response.data.match));
       setCreateState("created");
     } catch (error) {
@@ -446,6 +496,7 @@ export default function MatchScreen() {
       setManualAdjustmentState("idle");
       setTeamLockState("idle");
       setScoreSubmitState("idle");
+      setMatchEventsSubmitState("idle");
       setScoreDraft(createScoreDraft(attendanceResponse.data.match));
       setAttendanceState("idle");
     } catch (error) {
@@ -590,6 +641,19 @@ export default function MatchScreen() {
                 onChange={setScoreDraft}
                 onSubmit={handleSubmitFinalScore}
                 submitState={scoreSubmitState}
+              />
+            ) : null}
+
+            {nextMatch?.status === "locked" &&
+            nextMatch.score &&
+            teamGeneration?.status === "locked" ? (
+              <MatchEventsCard
+                canEditEvents={canCreateMatch}
+                match={nextMatch}
+                onSubmit={handleSubmitMatchEvents}
+                players={players}
+                submitState={matchEventsSubmitState}
+                teamPlayers={getLockedTeamPlayers(teamGeneration)}
               />
             ) : null}
 
@@ -1196,6 +1260,188 @@ function FinalScoreCard({
   );
 }
 
+function MatchEventsCard({
+  canEditEvents,
+  match,
+  onSubmit,
+  players,
+  submitState,
+  teamPlayers,
+}: {
+  canEditEvents: boolean;
+  match: FootballMatch;
+  onSubmit: (input: UpsertMatchPlayerEventsInput) => void;
+  players: PlayerProfile[];
+  submitState: MatchEventsSubmitState;
+  teamPlayers: Array<{
+    playerId: string;
+    teamLabel: "A" | "B";
+  }>;
+}) {
+  const { strings } = usePreferences();
+  const playersById = new Map(players.map((player) => [player.id, player]));
+  const [draft, setDraft] = useState<MatchEventsDraft>(() =>
+    createMatchEventsDraft(match, teamPlayers)
+  );
+  const parsedInput = parseMatchEventsDraft(draft, teamPlayers);
+  const isSubmitting = submitState === "submitting";
+  const canSubmit = canEditEvents && !isSubmitting && parsedInput !== null;
+  const scoringEvents = match.events.filter((event) => event.count > 0);
+  const teamPlayerKey = teamPlayers
+    .map((teamPlayer) => `${teamPlayer.teamLabel}:${teamPlayer.playerId}`)
+    .join("|");
+
+  useEffect(() => {
+    setDraft(createMatchEventsDraft(match, teamPlayers));
+  }, [match.events, match.id, teamPlayerKey]);
+
+  function updateDraft(
+    playerId: string,
+    field: keyof MatchEventsDraft[string],
+    value: string
+  ) {
+    setDraft((currentDraft) => ({
+      ...currentDraft,
+      [playerId]: {
+        goals: currentDraft[playerId]?.goals ?? "",
+        assists: currentDraft[playerId]?.assists ?? "",
+        [field]: value,
+      },
+    }));
+  }
+
+  return (
+    <View style={styles.matchEventsCard}>
+      <View style={styles.attendanceHeader}>
+        <View style={styles.attendanceHeaderCopy}>
+          <Text style={styles.cardTitle}>{strings.matches.matchEventsTitle}</Text>
+          <Text style={styles.helperText}>
+            {strings.matches.matchEventsSubtitle}
+          </Text>
+        </View>
+        {scoringEvents.length > 0 ? (
+          <Text style={styles.lockBadge}>
+            {strings.matches.matchEventsSavedBadge}
+          </Text>
+        ) : null}
+      </View>
+
+      {scoringEvents.length > 0 ? (
+        <View style={styles.eventSummaryList}>
+          {scoringEvents.map((event) => {
+            const player = playersById.get(event.playerId) ?? null;
+            const displayName = getPlayerDisplayName(
+              player,
+              strings.profile.fallbackName
+            );
+
+            return (
+              <Text key={event.id} style={styles.eventSummaryText}>
+                {displayName}: {event.count}{" "}
+                {event.kind === "goal"
+                  ? strings.matches.goalsShortLabel
+                  : strings.matches.assistsShortLabel}
+              </Text>
+            );
+          })}
+        </View>
+      ) : (
+        <Text style={styles.helperText}>{strings.matches.noMatchEvents}</Text>
+      )}
+
+      {canEditEvents ? (
+        <>
+          <View style={styles.eventRows}>
+            <View style={styles.eventInputHeaderRow}>
+              <Text style={styles.eventInputHeaderSpacer} />
+              <Text style={styles.eventInputHeader}>
+                {strings.matches.goalsShortLabel}
+              </Text>
+              <Text style={styles.eventInputHeader}>
+                {strings.matches.assistsShortLabel}
+              </Text>
+            </View>
+            {teamPlayers.map((teamPlayer) => {
+              const player = playersById.get(teamPlayer.playerId) ?? null;
+              const displayName = getPlayerDisplayName(
+                player,
+                strings.profile.fallbackName
+              );
+              const rowDraft = draft[teamPlayer.playerId] ?? {
+                goals: "",
+                assists: "",
+              };
+
+              return (
+                <View key={teamPlayer.playerId} style={styles.eventRow}>
+                  <View style={styles.eventPlayerCopy}>
+                    <Text style={styles.eventPlayerName}>{displayName}</Text>
+                    <Text style={styles.eventPlayerMeta}>
+                      {strings.generation.teamLabel} {teamPlayer.teamLabel}
+                    </Text>
+                  </View>
+                  <TextInput
+                    accessibilityLabel={`${displayName} ${strings.matches.goalsShortLabel}`}
+                    keyboardType="number-pad"
+                    maxLength={2}
+                    onChangeText={(goals) =>
+                      updateDraft(teamPlayer.playerId, "goals", goals)
+                    }
+                    placeholder="0"
+                    placeholderTextColor="#6B7482"
+                    style={styles.eventInput}
+                    value={rowDraft.goals}
+                  />
+                  <TextInput
+                    accessibilityLabel={`${displayName} ${strings.matches.assistsShortLabel}`}
+                    keyboardType="number-pad"
+                    maxLength={2}
+                    onChangeText={(assists) =>
+                      updateDraft(teamPlayer.playerId, "assists", assists)
+                    }
+                    placeholder="0"
+                    placeholderTextColor="#6B7482"
+                    style={styles.eventInput}
+                    value={rowDraft.assists}
+                  />
+                </View>
+              );
+            })}
+          </View>
+
+          <Pressable
+            accessibilityRole="button"
+            disabled={!canSubmit}
+            onPress={() => {
+              if (parsedInput) {
+                onSubmit(parsedInput);
+              }
+            }}
+            style={[
+              styles.submitButton,
+              !canSubmit && styles.submitButtonDisabled,
+            ]}
+          >
+            <Text style={styles.submitButtonText}>
+              {isSubmitting
+                ? strings.matches.savingMatchEvents
+                : strings.matches.saveMatchEvents}
+            </Text>
+          </Pressable>
+        </>
+      ) : (
+        <Text style={styles.helperText}>
+          {strings.matches.matchEventsViewerHint}
+        </Text>
+      )}
+
+      {submitState === "error" ? (
+        <Text style={styles.errorText}>{strings.matches.matchEventsError}</Text>
+      ) : null}
+    </View>
+  );
+}
+
 function GeneratedTeamsCard({
   generation,
   generations,
@@ -1781,6 +2027,76 @@ function createScoreDraft(match: FootballMatch | null): ScoreDraft {
   };
 }
 
+function getLockedTeamPlayers(generation: TeamGenerationVersion) {
+  return [
+    ...generation.teamA.players.map((player) => ({
+      playerId: player.playerId,
+      teamLabel: "A" as const,
+    })),
+    ...generation.teamB.players.map((player) => ({
+      playerId: player.playerId,
+      teamLabel: "B" as const,
+    })),
+  ];
+}
+
+function createMatchEventsDraft(
+  match: FootballMatch,
+  teamPlayers: ReturnType<typeof getLockedTeamPlayers>
+): MatchEventsDraft {
+  const draft: MatchEventsDraft = {};
+
+  for (const teamPlayer of teamPlayers) {
+    const goals =
+      match.events.find(
+        (event) =>
+          event.playerId === teamPlayer.playerId && event.kind === "goal"
+      )?.count ?? 0;
+    const assists =
+      match.events.find(
+        (event) =>
+          event.playerId === teamPlayer.playerId && event.kind === "assist"
+      )?.count ?? 0;
+
+    draft[teamPlayer.playerId] = {
+      goals: goals > 0 ? String(goals) : "",
+      assists: assists > 0 ? String(assists) : "",
+    };
+  }
+
+  return draft;
+}
+
+function parseMatchEventsDraft(
+  draft: MatchEventsDraft,
+  teamPlayers: ReturnType<typeof getLockedTeamPlayers>
+): UpsertMatchPlayerEventsInput | null {
+  const validIntegerPattern = /^\d{0,2}$/;
+  const players: UpsertMatchPlayerEventsInput["players"] = [];
+
+  for (const teamPlayer of teamPlayers) {
+    const rowDraft = draft[teamPlayer.playerId] ?? {
+      goals: "",
+      assists: "",
+    };
+
+    if (
+      !validIntegerPattern.test(rowDraft.goals) ||
+      !validIntegerPattern.test(rowDraft.assists)
+    ) {
+      return null;
+    }
+
+    players.push({
+      playerId: teamPlayer.playerId,
+      goals: rowDraft.goals === "" ? 0 : Number(rowDraft.goals),
+      assists: rowDraft.assists === "" ? 0 : Number(rowDraft.assists),
+    });
+  }
+
+  return { players };
+}
+
 function parseScoreDraft(draft: ScoreDraft): SubmitFinalScoreInput | null {
   const validIntegerPattern = /^\d{1,2}$/;
 
@@ -2244,6 +2560,85 @@ const styles = StyleSheet.create({
     borderRadius: 26,
     backgroundColor: "#101923",
     padding: 18,
+  },
+  matchEventsCard: {
+    gap: 15,
+    borderWidth: 1,
+    borderColor: "#1F513A",
+    borderRadius: 26,
+    backgroundColor: "#0B1B15",
+    padding: 18,
+  },
+  eventSummaryList: {
+    gap: 7,
+    borderWidth: 1,
+    borderColor: "#20342B",
+    borderRadius: 18,
+    backgroundColor: "#101A16",
+    padding: 12,
+  },
+  eventSummaryText: {
+    color: "#CFE8D8",
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  eventRows: {
+    gap: 9,
+  },
+  eventInputHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 9,
+    paddingHorizontal: 2,
+  },
+  eventInputHeaderSpacer: {
+    flex: 1,
+  },
+  eventInputHeader: {
+    width: 58,
+    color: "#72E6A4",
+    fontSize: 11,
+    fontWeight: "900",
+    letterSpacing: 0.7,
+    textAlign: "center",
+    textTransform: "uppercase",
+  },
+  eventRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 9,
+    borderWidth: 1,
+    borderColor: "#20342B",
+    borderRadius: 18,
+    backgroundColor: "#101A16",
+    padding: 11,
+  },
+  eventPlayerCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  eventPlayerName: {
+    color: "#F4F7F2",
+    fontSize: 14,
+    fontWeight: "900",
+  },
+  eventPlayerMeta: {
+    color: "#8D96A5",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  eventInput: {
+    width: 58,
+    borderWidth: 1,
+    borderColor: "#25313D",
+    borderRadius: 14,
+    backgroundColor: "#141A22",
+    color: "#F4F7F2",
+    fontSize: 15,
+    fontWeight: "900",
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    textAlign: "center",
   },
   scoreBoard: {
     flexDirection: "row",

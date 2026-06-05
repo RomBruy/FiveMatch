@@ -21,6 +21,7 @@ model User {
   createdInvitations Invitation[]            @relation("InvitationCreator")
   organizedMatches   Match[]                 @relation("MatchOrganizer")
   submittedScores    Match[]                 @relation("MatchScoreSubmitter")
+  recordedMatchEvents MatchEvent[]           @relation("MatchEventRecorder")
   teamGenerations    TeamGenerationVersion[] @relation("TeamGenerationCreator")
   createdAt          DateTime                @default(now()) @map("created_at")
   updatedAt          DateTime                @updatedAt @map("updated_at")
@@ -105,6 +106,7 @@ model Player {
   initialRatingsGiven    InitialPeerRating[] @relation("InitialPeerRatingsGiven")
   initialRatingsReceived InitialPeerRating[] @relation("InitialPeerRatingsReceived")
   matchAttendances       MatchAttendance[]
+  matchEvents            MatchEvent[]
   firstName              String?             @map("first_name")
   lastName               String?             @map("last_name")
   nickname               String?
@@ -184,6 +186,7 @@ model Match {
   scoreSubmittedBy       User?                   @relation("MatchScoreSubmitter", fields: [scoreSubmittedByUserId], references: [id], onDelete: SetNull)
   scoreSubmittedAt       DateTime?               @map("score_submitted_at")
   attendances            MatchAttendance[]
+  events                 MatchEvent[]
   teamGenerations        TeamGenerationVersion[]
   createdAt              DateTime                @default(now()) @map("created_at")
   updatedAt              DateTime                @updatedAt @map("updated_at")
@@ -192,6 +195,26 @@ model Match {
   @@index([organizerUserId], map: "idx_matches_organizer_user_id")
   @@index([scoreSubmittedByUserId], map: "idx_matches_score_submitted_by_user_id")
   @@map("matches")
+}
+
+model MatchEvent {
+  id               String   @id @default(cuid())
+  matchId          String   @map("match_id")
+  match            Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  playerId         String   @map("player_id")
+  player           Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  kind             String
+  count            Int
+  recordedByUserId String   @map("recorded_by_user_id")
+  recordedBy       User     @relation("MatchEventRecorder", fields: [recordedByUserId], references: [id], onDelete: Restrict)
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@unique([matchId, playerId, kind], map: "uq_match_events_match_player_kind")
+  @@index([matchId, kind], map: "idx_match_events_match_id_kind")
+  @@index([playerId], map: "idx_match_events_player_id")
+  @@index([recordedByUserId], map: "idx_match_events_recorded_by_user_id")
+  @@map("match_events")
 }
 
 model MatchAttendance {

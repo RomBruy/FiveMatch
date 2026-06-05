@@ -14,6 +14,7 @@ export const footballMatchAttendanceStatuses = [
   "out",
   "maybe",
 ] as const;
+export const footballMatchEventKinds = ["goal", "assist"] as const;
 export const teamGenerationVersionLimit = 5;
 
 export type FootballMatchStatus = (typeof footballMatchStatuses)[number];
@@ -21,6 +22,7 @@ export type FootballMatchAttendanceResponse =
   (typeof footballMatchAttendanceResponses)[number];
 export type FootballMatchAttendanceStatus =
   (typeof footballMatchAttendanceStatuses)[number];
+export type FootballMatchEventKind = (typeof footballMatchEventKinds)[number];
 
 export type FootballMatchAttendance = {
   id: string;
@@ -41,6 +43,17 @@ export type FootballMatchScore = {
   submittedAt: string;
 };
 
+export type FootballMatchEvent = {
+  id: string;
+  matchId: string;
+  playerId: string;
+  kind: FootballMatchEventKind;
+  count: number;
+  recordedByUserId: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type FootballMatch = {
   id: string;
   groupId: string;
@@ -57,6 +70,7 @@ export type FootballMatch = {
   confirmedCount: number;
   waitlistCount: number;
   score: FootballMatchScore | null;
+  events: FootballMatchEvent[];
   attendances: FootballMatchAttendance[];
   myAttendance: FootballMatchAttendance | null;
   createdAt: string;
@@ -165,6 +179,18 @@ export type SubmitFinalScoreInput = {
 };
 
 export type SubmitFinalScoreResponse = ApiSuccessResponse<{
+  match: FootballMatch;
+}>;
+
+export type UpsertMatchPlayerEventsInput = {
+  players: Array<{
+    playerId: string;
+    goals: number;
+    assists: number;
+  }>;
+};
+
+export type UpsertMatchPlayerEventsResponse = ApiSuccessResponse<{
   match: FootballMatch;
 }>;
 
