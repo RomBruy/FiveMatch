@@ -455,6 +455,155 @@ describe('MatchesController', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('submits and serializes quick opponent ratings', async () => {
+    const completion = createInternalOpponentRatingCompletion({
+      status: 'submitted',
+    });
+    const submitOpponentRatings = jest.fn().mockResolvedValue({
+      ratings: [
+        createInternalOpponentRating({
+          ratedPlayerId: 'ply_b_1',
+          rating: 82,
+          tags: ['fast', 'technical'],
+        }),
+      ],
+      completion,
+      match: createInternalMatch({
+        status: 'locked',
+        myOpponentRatingCompletion: completion,
+      }),
+    });
+    const controller = new MatchesController({
+      submitOpponentRatings,
+    } as unknown as MatchesService);
+
+    await expect(
+      controller.submitOpponentRatings(
+        {
+          auth: {
+            clerkUserId: 'user_123',
+          },
+        } as AuthenticatedRequest,
+        'grp_123',
+        'match_123',
+        {
+          ratings: [
+            {
+              ratedPlayerId: ' ply_b_1 ',
+              rating: 82,
+              tags: ['fast', 'technical'],
+            },
+          ],
+        },
+      ),
+    ).resolves.toMatchObject({
+      data: {
+        ratings: [
+          {
+            ratedPlayerId: 'ply_b_1',
+            rating: 82,
+            tags: ['fast', 'technical'],
+          },
+        ],
+        completion: {
+          status: 'submitted',
+        },
+        match: {
+          myOpponentRatingCompletion: {
+            status: 'submitted',
+          },
+        },
+      },
+    });
+
+    expect(submitOpponentRatings).toHaveBeenCalledWith(
+      'user_123',
+      'grp_123',
+      'match_123',
+      {
+        ratings: [
+          {
+            ratedPlayerId: 'ply_b_1',
+            rating: 82,
+            tags: ['fast', 'technical'],
+          },
+        ],
+      },
+    );
+  });
+
+  it('rejects invalid quick opponent ratings', async () => {
+    const controller = new MatchesController({
+      submitOpponentRatings: jest.fn(),
+    } as unknown as MatchesService);
+
+    await expect(
+      controller.submitOpponentRatings(
+        {
+          auth: {
+            clerkUserId: 'user_123',
+          },
+        } as AuthenticatedRequest,
+        'grp_123',
+        'match_123',
+        {
+          ratings: [
+            {
+              ratedPlayerId: 'ply_b_1',
+              rating: 101,
+              tags: ['fast'],
+            },
+          ],
+        },
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('skips quick opponent ratings', async () => {
+    const completion = createInternalOpponentRatingCompletion({
+      status: 'skipped',
+    });
+    const skipOpponentRatings = jest.fn().mockResolvedValue({
+      completion,
+      match: createInternalMatch({
+        status: 'locked',
+        myOpponentRatingCompletion: completion,
+      }),
+    });
+    const controller = new MatchesController({
+      skipOpponentRatings,
+    } as unknown as MatchesService);
+
+    await expect(
+      controller.skipOpponentRatings(
+        {
+          auth: {
+            clerkUserId: 'user_123',
+          },
+        } as AuthenticatedRequest,
+        'grp_123',
+        'match_123',
+      ),
+    ).resolves.toMatchObject({
+      data: {
+        completion: {
+          status: 'skipped',
+        },
+        match: {
+          myOpponentRatingCompletion: {
+            status: 'skipped',
+          },
+        },
+      },
+    });
+
+    expect(skipOpponentRatings).toHaveBeenCalledWith(
+      'user_123',
+      'grp_123',
+      'match_123',
+    );
+  });
+
   it('generates and serializes a team version', async () => {
     const generateTeamVersion = jest
       .fn()
@@ -759,6 +908,9 @@ function createInternalMatch(
     } | null;
     mvpVotes: ReturnType<typeof createInternalMvpVote>[];
     myMvpVote: ReturnType<typeof createInternalMvpVote> | null;
+    myOpponentRatingCompletion: ReturnType<
+      typeof createInternalOpponentRatingCompletion
+    > | null;
   }> = {},
 ) {
   return {
@@ -780,6 +932,7 @@ function createInternalMatch(
     events: overrides.events ?? [],
     mvpVotes: overrides.mvpVotes ?? [],
     myMvpVote: overrides.myMvpVote ?? null,
+    myOpponentRatingCompletion: overrides.myOpponentRatingCompletion ?? null,
     attendances: overrides.attendances ?? [],
     myAttendance: overrides.myAttendance ?? null,
     createdAt: new Date('2026-06-03T00:00:00.000Z'),
@@ -824,6 +977,55 @@ function createInternalMvpVote(
     votedPlayerId: overrides.votedPlayerId ?? 'ply_2',
     createdAt: new Date('2026-06-10T21:20:00.000Z'),
     updatedAt: new Date('2026-06-10T21:20:00.000Z'),
+  };
+}
+
+function createInternalOpponentRating(
+  overrides: Partial<{
+    id: string;
+    matchId: string;
+    raterPlayerId: string;
+    ratedPlayerId: string;
+    rating: number;
+    tags: Array<
+      | 'fast'
+      | 'technical'
+      | 'aggressive'
+      | 'playmaker'
+      | 'finisher'
+      | 'defensive_wall'
+      | 'funny'
+      | 'team_player'
+    >;
+  }> = {},
+) {
+  return {
+    id: overrides.id ?? 'opponent_rating_1',
+    matchId: overrides.matchId ?? 'match_123',
+    raterPlayerId: overrides.raterPlayerId ?? 'ply_a_1',
+    ratedPlayerId: overrides.ratedPlayerId ?? 'ply_b_1',
+    rating: overrides.rating ?? 80,
+    tags: overrides.tags ?? [],
+    createdAt: new Date('2026-06-10T21:25:00.000Z'),
+    updatedAt: new Date('2026-06-10T21:25:00.000Z'),
+  };
+}
+
+function createInternalOpponentRatingCompletion(
+  overrides: Partial<{
+    id: string;
+    matchId: string;
+    playerId: string;
+    status: 'submitted' | 'skipped';
+  }> = {},
+) {
+  return {
+    id: overrides.id ?? 'opponent_rating_completion_1',
+    matchId: overrides.matchId ?? 'match_123',
+    playerId: overrides.playerId ?? 'ply_a_1',
+    status: overrides.status ?? 'submitted',
+    createdAt: new Date('2026-06-10T21:26:00.000Z'),
+    updatedAt: new Date('2026-06-10T21:26:00.000Z'),
   };
 }
 

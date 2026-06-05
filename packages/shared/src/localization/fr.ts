@@ -482,6 +482,36 @@ export const fr = {
     mvpVoteAlreadyVoted: "Ton MVP",
     mvpVoteSelfLabel: "toi",
     mvpVoteCountLabel: "vote(s)",
+    opponentRatingsTitle: "Notes adversaires",
+    opponentRatingsSubtitle:
+      "Note rapidement chaque adversaire sur 100. Les tags sont optionnels mais aident l'algo.",
+    opponentRatingsSubmittedBadge: "Notes envoyees",
+    opponentRatingsSkippedBadge: "Passe",
+    opponentRatingsNotConfirmed:
+      "Seuls les joueurs confirmes dans les equipes verrouillees peuvent noter les adversaires.",
+    opponentRatingsSkipReminder:
+      "Tu peux passer, mais les notes rendent les prochaines equipes plus justes.",
+    opponentRatingsAlreadySubmitted:
+      "Merci, tes notes adversaires sont enregistrees pour ce match.",
+    opponentRatingInputLabel: "note adversaire",
+    skipOpponentRatings: "Passer",
+    saveOpponentRatings: "Envoyer les notes",
+    savingOpponentRatings: "Envoi...",
+    opponentRatingsSaved: "Notes adversaires enregistrees.",
+    opponentRatingsSkipped:
+      "Notes adversaires passees. Tu pourras aider l'algo au prochain match.",
+    opponentRatingsError:
+      "Impossible d'enregistrer les notes adversaires. Verifie que tu etais confirme et que tu notes seulement les adversaires.",
+    opponentRatingTags: {
+      fast: "Rapide",
+      technical: "Technique",
+      aggressive: "Aggressif",
+      playmaker: "Meneur",
+      finisher: "Buteur",
+      defensive_wall: "Mur",
+      funny: "Drole",
+      team_player: "Collectif",
+    },
     confirmedCount: "confirmes",
     waitlistCount: "en attente",
     maxPlayers: "places",

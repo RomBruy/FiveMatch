@@ -2,12 +2,16 @@ import type {
   FootballMatch,
   FootballMatchAttendance,
   FootballMatchMvpVote,
+  FootballMatchOpponentRating,
+  FootballMatchOpponentRatingCompletion,
   TeamGenerationVersion,
 } from '@fit-five/shared';
 import type {
   InternalFootballMatch,
   InternalFootballMatchAttendance,
   InternalFootballMatchMvpVote,
+  InternalFootballMatchOpponentRating,
+  InternalFootballMatchOpponentRatingCompletion,
   InternalTeamGenerationVersion,
 } from './matches.service';
 
@@ -49,6 +53,9 @@ export function serializeFootballMatch(
     })),
     mvpVotes: match.mvpVotes.map((vote) => serializeMvpVote(vote)),
     myMvpVote: match.myMvpVote ? serializeMvpVote(match.myMvpVote) : null,
+    myOpponentRatingCompletion: match.myOpponentRatingCompletion
+      ? serializeOpponentRatingCompletion(match.myOpponentRatingCompletion)
+      : null,
     attendances: match.attendances.map((attendance) =>
       serializeFootballMatchAttendance(attendance),
     ),
@@ -70,6 +77,34 @@ export function serializeMvpVote(
     votedPlayerId: vote.votedPlayerId,
     createdAt: vote.createdAt.toISOString(),
     updatedAt: vote.updatedAt.toISOString(),
+  };
+}
+
+export function serializeOpponentRating(
+  rating: InternalFootballMatchOpponentRating,
+): FootballMatchOpponentRating {
+  return {
+    id: rating.id,
+    matchId: rating.matchId,
+    raterPlayerId: rating.raterPlayerId,
+    ratedPlayerId: rating.ratedPlayerId,
+    rating: rating.rating,
+    tags: rating.tags,
+    createdAt: rating.createdAt.toISOString(),
+    updatedAt: rating.updatedAt.toISOString(),
+  };
+}
+
+export function serializeOpponentRatingCompletion(
+  completion: InternalFootballMatchOpponentRatingCompletion,
+): FootballMatchOpponentRatingCompletion {
+  return {
+    id: completion.id,
+    matchId: completion.matchId,
+    playerId: completion.playerId,
+    status: completion.status,
+    createdAt: completion.createdAt.toISOString(),
+    updatedAt: completion.updatedAt.toISOString(),
   };
 }
 

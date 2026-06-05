@@ -10,6 +10,8 @@ import {
   type MatchAttendance as PrismaMatchAttendance,
   type MatchEvent as PrismaMatchEvent,
   type MatchMvpVote as PrismaMatchMvpVote,
+  type MatchOpponentRating as PrismaMatchOpponentRating,
+  type MatchOpponentRatingCompletion as PrismaMatchOpponentRatingCompletion,
   type TeamGenerationVersion as PrismaTeamGenerationVersion,
 } from '@prisma/client';
 import type {
@@ -21,8 +23,11 @@ import type {
   GroupGoalkeeperMode,
   GroupMemberRole,
   ManualTeamAdjustmentInput,
+  OpponentRatingCompletionStatus,
+  OpponentRatingTag,
   SubmitFinalScoreInput,
   SubmitMvpVoteInput,
+  SubmitOpponentRatingsInput,
   SubmitMatchAttendanceInput,
   TeamGenerationExplanation,
   TeamGenerationInputSnapshot,
@@ -45,6 +50,7 @@ import {
   normalizeAttendanceResponse,
   normalizeAttendanceStatus,
   normalizeMatchStatus,
+  isSupportedOpponentRatingTag,
 } from './match-options';
 
 const INITIAL_PEER_RATING_READINESS_THRESHOLD = 3;
@@ -106,6 +112,26 @@ export type InternalFootballMatchMvpVote = {
   updatedAt: Date;
 };
 
+export type InternalFootballMatchOpponentRating = {
+  id: string;
+  matchId: string;
+  raterPlayerId: string;
+  ratedPlayerId: string;
+  rating: number;
+  tags: OpponentRatingTag[];
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+export type InternalFootballMatchOpponentRatingCompletion = {
+  id: string;
+  matchId: string;
+  playerId: string;
+  status: OpponentRatingCompletionStatus;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 export type InternalFootballMatch = {
   id: string;
   groupId: string;
@@ -130,6 +156,7 @@ export type InternalFootballMatch = {
   events: InternalFootballMatchEvent[];
   mvpVotes: InternalFootballMatchMvpVote[];
   myMvpVote: InternalFootballMatchMvpVote | null;
+  myOpponentRatingCompletion: InternalFootballMatchOpponentRatingCompletion | null;
   attendances: InternalFootballMatchAttendance[];
   myAttendance: InternalFootballMatchAttendance | null;
   createdAt: Date;
@@ -559,6 +586,139 @@ export class MatchesService {
 
     return {
       vote: this.toInternalMvpVote(vote),
+      match: await this.toInternalMatch(match, actor.playerId),
+    };
+  }
+
+  async submitOpponentRatings(
+    clerkUserId: string,
+    groupId: string,
+    matchId: string,
+    input: SubmitOpponentRatingsInput,
+  ): Promise<{
+    ratings: InternalFootballMatchOpponentRating[];
+    completion: InternalFootballMatchOpponentRatingCompletion;
+    match: InternalFootballMatch;
+  }> {
+    const actor = await this.requireGroupPlayer(clerkUserId, groupId);
+    const { match, opponentPlayerIds } = await this.getOpponentRatingContext(
+      groupId,
+      matchId,
+      actor.playerId,
+    );
+    const requestedPlayerIds = new Set<string>();
+
+    if (input.ratings.length !== opponentPlayerIds.size) {
+      throw new ConflictException('Every opponent must be rated or skipped.');
+    }
+
+    for (const rating of input.ratings) {
+      if (!opponentPlayerIds.has(rating.ratedPlayerId)) {
+        throw new ConflictException('Only opponents can be rated.');
+      }
+
+      if (requestedPlayerIds.has(rating.ratedPlayerId)) {
+        throw new ConflictException('Duplicate opponent rating row.');
+      }
+
+      if (rating.tags?.some((tag) => !isSupportedOpponentRatingTag(tag))) {
+        throw new ConflictException('Unsupported opponent rating tag.');
+      }
+
+      requestedPlayerIds.add(rating.ratedPlayerId);
+    }
+
+    const operations = [
+      ...input.ratings.map((rating) =>
+        this.prisma.matchOpponentRating.upsert({
+          where: {
+            matchId_raterPlayerId_ratedPlayerId: {
+              matchId: match.id,
+              raterPlayerId: actor.playerId,
+              ratedPlayerId: rating.ratedPlayerId,
+            },
+          },
+          create: {
+            matchId: match.id,
+            raterPlayerId: actor.playerId,
+            ratedPlayerId: rating.ratedPlayerId,
+            rating: rating.rating,
+            tags: [...new Set(rating.tags ?? [])],
+          },
+          update: {
+            rating: rating.rating,
+            tags: [...new Set(rating.tags ?? [])],
+          },
+        }),
+      ),
+      this.prisma.matchOpponentRatingCompletion.upsert({
+        where: {
+          matchId_playerId: {
+            matchId: match.id,
+            playerId: actor.playerId,
+          },
+        },
+        create: {
+          matchId: match.id,
+          playerId: actor.playerId,
+          status: 'submitted',
+        },
+        update: {
+          status: 'submitted',
+        },
+      }),
+    ];
+    const results = await this.prisma.$transaction(operations);
+    const savedRatings = results.slice(
+      0,
+      input.ratings.length,
+    ) as PrismaMatchOpponentRating[];
+    const completion = results[
+      results.length - 1
+    ] as PrismaMatchOpponentRatingCompletion;
+
+    return {
+      ratings: savedRatings.map((rating) =>
+        this.toInternalOpponentRating(rating),
+      ),
+      completion: this.toInternalOpponentRatingCompletion(completion),
+      match: await this.toInternalMatch(match, actor.playerId),
+    };
+  }
+
+  async skipOpponentRatings(
+    clerkUserId: string,
+    groupId: string,
+    matchId: string,
+  ): Promise<{
+    completion: InternalFootballMatchOpponentRatingCompletion;
+    match: InternalFootballMatch;
+  }> {
+    const actor = await this.requireGroupPlayer(clerkUserId, groupId);
+    const { match } = await this.getOpponentRatingContext(
+      groupId,
+      matchId,
+      actor.playerId,
+    );
+    const completion = await this.prisma.matchOpponentRatingCompletion.upsert({
+      where: {
+        matchId_playerId: {
+          matchId: match.id,
+          playerId: actor.playerId,
+        },
+      },
+      create: {
+        matchId: match.id,
+        playerId: actor.playerId,
+        status: 'skipped',
+      },
+      update: {
+        status: 'skipped',
+      },
+    });
+
+    return {
+      completion: this.toInternalOpponentRatingCompletion(completion),
       match: await this.toInternalMatch(match, actor.playerId),
     };
   }
@@ -1051,6 +1211,69 @@ export class MatchesService {
     });
   }
 
+  private async getOpponentRatingContext(
+    groupId: string,
+    matchId: string,
+    playerId: string,
+  ): Promise<{
+    match: PrismaMatch;
+    opponentPlayerIds: Set<string>;
+  }> {
+    const match = await this.prisma.match.findFirst({
+      where: {
+        id: matchId,
+        groupId,
+      },
+    });
+
+    if (!match || normalizeMatchStatus(match.status) !== 'locked') {
+      throw new ConflictException(
+        'Locked match required for opponent ratings.',
+      );
+    }
+
+    const attendance = await this.prisma.matchAttendance.findUnique({
+      where: {
+        matchId_playerId: {
+          matchId,
+          playerId,
+        },
+      },
+    });
+
+    if (
+      !attendance ||
+      normalizeAttendanceStatus(attendance.status) !== 'confirmed'
+    ) {
+      throw new ForbiddenException('Confirmed match player required.');
+    }
+
+    const lockedGeneration = await this.prisma.teamGenerationVersion.findFirst({
+      where: {
+        matchId: match.id,
+        status: 'locked',
+      },
+    });
+
+    if (!lockedGeneration) {
+      throw new ConflictException('Locked team generation required.');
+    }
+
+    const opponentPlayerIds = getOpponentPlayerIds(
+      getLockedGenerationTeamContext(lockedGeneration),
+      playerId,
+    );
+
+    if (!opponentPlayerIds) {
+      throw new ForbiddenException('Rater must be a locked team player.');
+    }
+
+    return {
+      match,
+      opponentPlayerIds,
+    };
+  }
+
   private async requireGroupMembership(
     clerkUserId: string,
     groupId: string,
@@ -1299,60 +1522,76 @@ export class MatchesService {
     match: PrismaMatch,
     currentPlayerId?: string,
   ): Promise<InternalFootballMatch> {
-    const [confirmedCount, waitlistCount, myAttendance, events, mvpVotes] =
-      await Promise.all([
-        this.prisma.matchAttendance.count({
-          where: {
-            matchId: match.id,
-            status: 'confirmed',
-          },
-        }),
-        this.prisma.matchAttendance.count({
-          where: {
-            matchId: match.id,
-            status: 'waitlisted',
-          },
-        }),
-        currentPlayerId
-          ? this.prisma.matchAttendance.findUnique({
-              where: {
-                matchId_playerId: {
-                  matchId: match.id,
-                  playerId: currentPlayerId,
-                },
+    const [
+      confirmedCount,
+      waitlistCount,
+      myAttendance,
+      events,
+      mvpVotes,
+      opponentRatingCompletion,
+    ] = await Promise.all([
+      this.prisma.matchAttendance.count({
+        where: {
+          matchId: match.id,
+          status: 'confirmed',
+        },
+      }),
+      this.prisma.matchAttendance.count({
+        where: {
+          matchId: match.id,
+          status: 'waitlisted',
+        },
+      }),
+      currentPlayerId
+        ? this.prisma.matchAttendance.findUnique({
+            where: {
+              matchId_playerId: {
+                matchId: match.id,
+                playerId: currentPlayerId,
               },
-            })
-          : null,
-        this.prisma.matchEvent.findMany({
-          where: {
-            matchId: match.id,
+            },
+          })
+        : null,
+      this.prisma.matchEvent.findMany({
+        where: {
+          matchId: match.id,
+        },
+        orderBy: [
+          {
+            kind: 'asc',
           },
-          orderBy: [
-            {
-              kind: 'asc',
-            },
-            {
-              count: 'desc',
-            },
-            {
-              updatedAt: 'asc',
-            },
-          ],
-        }),
-        this.prisma.matchMvpVote.findMany({
-          where: {
-            matchId: match.id,
+          {
+            count: 'desc',
           },
-          orderBy: [
-            {
-              createdAt: 'asc',
+          {
+            updatedAt: 'asc',
+          },
+        ],
+      }),
+      this.prisma.matchMvpVote.findMany({
+        where: {
+          matchId: match.id,
+        },
+        orderBy: [
+          {
+            createdAt: 'asc',
+          },
+          {
+            id: 'asc',
+          },
+        ],
+      }),
+      currentPlayerId
+        ? this.prisma.matchOpponentRatingCompletion.findUnique({
+            where: {
+              matchId_playerId: {
+                matchId: match.id,
+                playerId: currentPlayerId,
+              },
             },
-            {
-              id: 'asc',
-            },
-          ],
-        }),
-      ]);
+          })
+        : null,
+    ]);
     const attendances = await this.prisma.matchAttendance.findMany({
       where: {
         matchId: match.id,
@@ -1408,6 +1647,9 @@ export class MatchesService {
             (vote) => vote.voterPlayerId === currentPlayerId,
           ) ?? null)
         : null,
+      myOpponentRatingCompletion: opponentRatingCompletion
+        ? this.toInternalOpponentRatingCompletion(opponentRatingCompletion)
+        : null,
       attendances: attendances.map((attendance) =>
         this.toInternalAttendance(attendance),
       ),
@@ -1460,6 +1702,34 @@ export class MatchesService {
       votedPlayerId: vote.votedPlayerId,
       createdAt: vote.createdAt,
       updatedAt: vote.updatedAt,
+    };
+  }
+
+  private toInternalOpponentRating(
+    rating: PrismaMatchOpponentRating,
+  ): InternalFootballMatchOpponentRating {
+    return {
+      id: rating.id,
+      matchId: rating.matchId,
+      raterPlayerId: rating.raterPlayerId,
+      ratedPlayerId: rating.ratedPlayerId,
+      rating: rating.rating,
+      tags: rating.tags.filter(isSupportedOpponentRatingTag),
+      createdAt: rating.createdAt,
+      updatedAt: rating.updatedAt,
+    };
+  }
+
+  private toInternalOpponentRatingCompletion(
+    completion: PrismaMatchOpponentRatingCompletion,
+  ): InternalFootballMatchOpponentRatingCompletion {
+    return {
+      id: completion.id,
+      matchId: completion.matchId,
+      playerId: completion.playerId,
+      status: completion.status === 'submitted' ? 'submitted' : 'skipped',
+      createdAt: completion.createdAt,
+      updatedAt: completion.updatedAt,
     };
   }
 
@@ -1528,13 +1798,41 @@ function swapTeamPlayers(
 }
 
 function getLockedGenerationPlayerIds(generation: PrismaTeamGenerationVersion) {
+  return getLockedGenerationTeamContext(generation).allPlayerIds;
+}
+
+function getLockedGenerationTeamContext(
+  generation: PrismaTeamGenerationVersion,
+) {
   const teamA = generation.teamA as unknown as TeamGenerationTeam;
   const teamB = generation.teamB as unknown as TeamGenerationTeam;
+  const teamAPlayerIds = new Set(
+    teamA.players.map((player) => player.playerId),
+  );
+  const teamBPlayerIds = new Set(
+    teamB.players.map((player) => player.playerId),
+  );
 
-  return new Set([
-    ...teamA.players.map((player) => player.playerId),
-    ...teamB.players.map((player) => player.playerId),
-  ]);
+  return {
+    teamAPlayerIds,
+    teamBPlayerIds,
+    allPlayerIds: new Set([...teamAPlayerIds, ...teamBPlayerIds]),
+  };
+}
+
+function getOpponentPlayerIds(
+  context: ReturnType<typeof getLockedGenerationTeamContext>,
+  playerId: string,
+) {
+  if (context.teamAPlayerIds.has(playerId)) {
+    return context.teamBPlayerIds;
+  }
+
+  if (context.teamBPlayerIds.has(playerId)) {
+    return context.teamAPlayerIds;
+  }
+
+  return null;
 }
 
 function buildAdjustedTeam(

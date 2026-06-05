@@ -4,6 +4,7 @@ import type {
   FootballMatchStatus,
   GroupGeneratorStyle,
   GroupGoalkeeperMode,
+  OpponentRatingTag,
 } from '@fit-five/shared';
 import {
   isSupportedGroupGeneratorStyle,
@@ -27,6 +28,16 @@ const supportedAttendanceStatuses = [
   'out',
   'maybe',
 ] as const satisfies readonly FootballMatchAttendanceStatus[];
+export const supportedOpponentRatingTags = [
+  'fast',
+  'technical',
+  'aggressive',
+  'playmaker',
+  'finisher',
+  'defensive_wall',
+  'funny',
+  'team_player',
+] as const satisfies readonly OpponentRatingTag[];
 
 export function normalizeMatchStatus(value: unknown): FootballMatchStatus {
   return typeof value === 'string' &&
@@ -59,6 +70,15 @@ export function normalizeAttendanceStatus(
     supportedAttendanceStatuses.includes(value as FootballMatchAttendanceStatus)
     ? (value as FootballMatchAttendanceStatus)
     : 'maybe';
+}
+
+export function isSupportedOpponentRatingTag(
+  value: unknown,
+): value is OpponentRatingTag {
+  return (
+    typeof value === 'string' &&
+    supportedOpponentRatingTags.includes(value as OpponentRatingTag)
+  );
 }
 
 export function normalizeGeneratorStyleOverride(

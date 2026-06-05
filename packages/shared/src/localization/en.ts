@@ -478,6 +478,36 @@ export const en = {
     mvpVoteAlreadyVoted: "Your MVP",
     mvpVoteSelfLabel: "you",
     mvpVoteCountLabel: "vote(s)",
+    opponentRatingsTitle: "Opponent ratings",
+    opponentRatingsSubtitle:
+      "Quickly rate each opponent out of 100. Tags are optional but help the algorithm.",
+    opponentRatingsSubmittedBadge: "Ratings sent",
+    opponentRatingsSkippedBadge: "Skipped",
+    opponentRatingsNotConfirmed:
+      "Only confirmed players in locked teams can rate opponents.",
+    opponentRatingsSkipReminder:
+      "You can skip, but ratings make the next teams fairer.",
+    opponentRatingsAlreadySubmitted:
+      "Thanks, your opponent ratings are saved for this match.",
+    opponentRatingInputLabel: "opponent rating",
+    skipOpponentRatings: "Skip",
+    saveOpponentRatings: "Send ratings",
+    savingOpponentRatings: "Sending...",
+    opponentRatingsSaved: "Opponent ratings saved.",
+    opponentRatingsSkipped:
+      "Opponent ratings skipped. You can help the algorithm next match.",
+    opponentRatingsError:
+      "Unable to save opponent ratings. Check you were confirmed and only rated opponents.",
+    opponentRatingTags: {
+      fast: "Fast",
+      technical: "Technical",
+      aggressive: "Aggressive",
+      playmaker: "Playmaker",
+      finisher: "Finisher",
+      defensive_wall: "Wall",
+      funny: "Funny",
+      team_player: "Team player",
+    },
     confirmedCount: "confirmed",
     waitlistCount: "waitlisted",
     maxPlayers: "spots",

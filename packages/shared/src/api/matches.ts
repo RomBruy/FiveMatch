@@ -15,6 +15,17 @@ export const footballMatchAttendanceStatuses = [
   "maybe",
 ] as const;
 export const footballMatchEventKinds = ["goal", "assist"] as const;
+export const opponentRatingTags = [
+  "fast",
+  "technical",
+  "aggressive",
+  "playmaker",
+  "finisher",
+  "defensive_wall",
+  "funny",
+  "team_player",
+] as const;
+export const opponentRatingCompletionStatuses = ["submitted", "skipped"] as const;
 export const teamGenerationVersionLimit = 5;
 
 export type FootballMatchStatus = (typeof footballMatchStatuses)[number];
@@ -23,6 +34,9 @@ export type FootballMatchAttendanceResponse =
 export type FootballMatchAttendanceStatus =
   (typeof footballMatchAttendanceStatuses)[number];
 export type FootballMatchEventKind = (typeof footballMatchEventKinds)[number];
+export type OpponentRatingTag = (typeof opponentRatingTags)[number];
+export type OpponentRatingCompletionStatus =
+  (typeof opponentRatingCompletionStatuses)[number];
 
 export type FootballMatchAttendance = {
   id: string;
@@ -63,6 +77,15 @@ export type FootballMatchMvpVote = {
   updatedAt: string;
 };
 
+export type FootballMatchOpponentRatingCompletion = {
+  id: string;
+  matchId: string;
+  playerId: string;
+  status: OpponentRatingCompletionStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type FootballMatch = {
   id: string;
   groupId: string;
@@ -82,6 +105,7 @@ export type FootballMatch = {
   events: FootballMatchEvent[];
   mvpVotes: FootballMatchMvpVote[];
   myMvpVote: FootballMatchMvpVote | null;
+  myOpponentRatingCompletion: FootballMatchOpponentRatingCompletion | null;
   attendances: FootballMatchAttendance[];
   myAttendance: FootballMatchAttendance | null;
   createdAt: string;
@@ -211,6 +235,36 @@ export type SubmitMvpVoteInput = {
 
 export type SubmitMvpVoteResponse = ApiSuccessResponse<{
   vote: FootballMatchMvpVote;
+  match: FootballMatch;
+}>;
+
+export type SubmitOpponentRatingsInput = {
+  ratings: Array<{
+    ratedPlayerId: string;
+    rating: number;
+    tags?: OpponentRatingTag[];
+  }>;
+};
+
+export type FootballMatchOpponentRating = {
+  id: string;
+  matchId: string;
+  raterPlayerId: string;
+  ratedPlayerId: string;
+  rating: number;
+  tags: OpponentRatingTag[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SubmitOpponentRatingsResponse = ApiSuccessResponse<{
+  ratings: FootballMatchOpponentRating[];
+  completion: FootballMatchOpponentRatingCompletion;
+  match: FootballMatch;
+}>;
+
+export type SkipOpponentRatingsResponse = ApiSuccessResponse<{
+  completion: FootballMatchOpponentRatingCompletion;
   match: FootballMatch;
 }>;
 

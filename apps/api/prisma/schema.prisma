@@ -107,6 +107,9 @@ model Player {
   initialRatingsReceived InitialPeerRating[] @relation("InitialPeerRatingsReceived")
   matchAttendances       MatchAttendance[]
   matchEvents            MatchEvent[]
+  opponentRatingsGiven   MatchOpponentRating[] @relation("MatchOpponentRatingGiven")
+  opponentRatingsReceived MatchOpponentRating[] @relation("MatchOpponentRatingReceived")
+  opponentRatingCompletions MatchOpponentRatingCompletion[]
   mvpVotesCast           MatchMvpVote[]      @relation("MatchMvpVoteVoter")
   mvpVotesReceived       MatchMvpVote[]      @relation("MatchMvpVoteTarget")
   firstName              String?             @map("first_name")
@@ -189,6 +192,8 @@ model Match {
   scoreSubmittedAt       DateTime?               @map("score_submitted_at")
   attendances            MatchAttendance[]
   events                 MatchEvent[]
+  opponentRatings        MatchOpponentRating[]
+  opponentRatingCompletions MatchOpponentRatingCompletion[]
   mvpVotes               MatchMvpVote[]
   teamGenerations        TeamGenerationVersion[]
   createdAt              DateTime                @default(now()) @map("created_at")
@@ -255,6 +260,42 @@ model MatchMvpVote {
   @@index([voterPlayerId], map: "idx_match_mvp_votes_voter_player_id")
   @@index([votedPlayerId], map: "idx_match_mvp_votes_voted_player_id")
   @@map("match_mvp_votes")
+}
+
+model MatchOpponentRating {
+  id            String   @id @default(cuid())
+  matchId       String   @map("match_id")
+  match         Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  raterPlayerId String   @map("rater_player_id")
+  raterPlayer   Player   @relation("MatchOpponentRatingGiven", fields: [raterPlayerId], references: [id], onDelete: Cascade)
+  ratedPlayerId String   @map("rated_player_id")
+  ratedPlayer   Player   @relation("MatchOpponentRatingReceived", fields: [ratedPlayerId], references: [id], onDelete: Cascade)
+  rating        Int
+  tags          String[] @default([])
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@unique([matchId, raterPlayerId, ratedPlayerId], map: "uq_match_opponent_ratings_match_rater_rated")
+  @@index([matchId, ratedPlayerId], map: "idx_match_opponent_ratings_match_rated_player")
+  @@index([raterPlayerId], map: "idx_match_opponent_ratings_rater_player_id")
+  @@index([ratedPlayerId], map: "idx_match_opponent_ratings_rated_player_id")
+  @@map("match_opponent_ratings")
+}
+
+model MatchOpponentRatingCompletion {
+  id        String   @id @default(cuid())
+  matchId   String   @map("match_id")
+  match     Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  playerId  String   @map("player_id")
+  player    Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  status    String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([matchId, playerId], map: "uq_match_opponent_rating_completions_match_player")
+  @@index([matchId, status], map: "idx_match_opponent_rating_completions_match_status")
+  @@index([playerId], map: "idx_match_opponent_rating_completions_player_id")
+  @@map("match_opponent_rating_completions")
 }
 
 model TeamGenerationVersion {

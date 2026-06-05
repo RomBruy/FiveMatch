@@ -3,6 +3,7 @@ import { useRouter } from "expo-router";
 import {
   groupGeneratorStyles,
   groupGoalkeeperModes,
+  opponentRatingTags,
   teamGenerationVersionLimit,
   type FootballGroup,
   type FootballMatch,
@@ -13,9 +14,11 @@ import {
   type GroupGoalkeeperMode,
   type InitialPeerRatingReadiness,
   type ManualTeamAdjustmentInput,
+  type OpponentRatingTag,
   type PlayerProfile,
   type SubmitFinalScoreInput,
   type SubmitMvpVoteInput,
+  type SubmitOpponentRatingsInput,
   type TeamGenerationVersion,
   type UpsertMatchPlayerEventsInput,
 } from "@fit-five/shared";
@@ -42,9 +45,11 @@ import {
   listTeamGenerations,
   listCurrentUserGroups,
   listGroupPlayers,
+  skipOpponentRatings,
   submitFinalScore,
   submitMatchAttendance,
   submitMvpVote,
+  submitOpponentRatings,
   upsertMatchPlayerEvents,
 } from "@/api/client";
 import { NextMatchCard } from "@/features/matches/next-match-card";
@@ -58,6 +63,7 @@ type TeamLockState = "idle" | "locking" | "locked" | "error";
 type ScoreSubmitState = "idle" | "submitting" | "saved" | "error";
 type MatchEventsSubmitState = "idle" | "submitting" | "saved" | "error";
 type MvpVoteSubmitState = "idle" | "submitting" | "saved" | "error";
+type OpponentRatingsSubmitState = "idle" | "submitting" | "saved" | "error";
 type ScoreDraft = {
   teamAScore: string;
   teamBScore: string;
@@ -67,6 +73,13 @@ type MatchEventsDraft = Record<
   {
     goals: string;
     assists: string;
+  }
+>;
+type OpponentRatingsDraft = Record<
+  string,
+  {
+    rating: string;
+    tags: OpponentRatingTag[];
   }
 >;
 type MatchDraft = {
@@ -110,6 +123,8 @@ export default function MatchScreen() {
     useState<MatchEventsSubmitState>("idle");
   const [mvpVoteSubmitState, setMvpVoteSubmitState] =
     useState<MvpVoteSubmitState>("idle");
+  const [opponentRatingsSubmitState, setOpponentRatingsSubmitState] =
+    useState<OpponentRatingsSubmitState>("idle");
   const [scoreDraft, setScoreDraft] = useState<ScoreDraft>({
     teamAScore: "",
     teamBScore: "",
@@ -148,6 +163,7 @@ export default function MatchScreen() {
         setScoreSubmitState("idle");
         setMatchEventsSubmitState("idle");
         setMvpVoteSubmitState("idle");
+        setOpponentRatingsSubmitState("idle");
         setScoreDraft(createScoreDraft(null));
         setLoadState("noGroup");
         return;
@@ -176,6 +192,7 @@ export default function MatchScreen() {
       setScoreSubmitState("idle");
       setMatchEventsSubmitState("idle");
       setMvpVoteSubmitState("idle");
+      setOpponentRatingsSubmitState("idle");
       setPlayers(rosterResponse.data.players);
       setTeamGenerations(savedGenerations);
       setTeamGeneration(selectPrimaryTeamGeneration(savedGenerations));
@@ -338,6 +355,7 @@ export default function MatchScreen() {
       setScoreSubmitState("idle");
       setMatchEventsSubmitState("idle");
       setMvpVoteSubmitState("idle");
+      setOpponentRatingsSubmitState("idle");
       setTeamGenerations((currentGenerations) =>
         currentGenerations.map((generation) =>
           generation.id === updatedGeneration.id ? updatedGeneration : generation
@@ -381,6 +399,7 @@ export default function MatchScreen() {
       setScoreDraft(createScoreDraft(response.data.match));
       setMatchEventsSubmitState("idle");
       setMvpVoteSubmitState("idle");
+      setOpponentRatingsSubmitState("idle");
       setScoreSubmitState("saved");
       setActionMessage(strings.matches.finalScoreSaved);
     } catch (error) {
@@ -456,6 +475,71 @@ export default function MatchScreen() {
     }
   }
 
+  async function handleSubmitOpponentRatings(input: SubmitOpponentRatingsInput) {
+    if (!activeGroup || !nextMatch) {
+      setActionMessage(strings.generation.noMatchForGeneration);
+      return;
+    }
+
+    setOpponentRatingsSubmitState("submitting");
+    setActionMessage(null);
+
+    try {
+      const token = await getToken();
+
+      if (!token) {
+        throw new Error("Missing auth token.");
+      }
+
+      const response = await submitOpponentRatings(
+        token,
+        activeGroup.id,
+        nextMatch.id,
+        input
+      );
+
+      setNextMatch(response.data.match);
+      setOpponentRatingsSubmitState("saved");
+      setActionMessage(strings.matches.opponentRatingsSaved);
+    } catch (error) {
+      console.warn("Unable to submit opponent ratings", error);
+      setOpponentRatingsSubmitState("error");
+      setActionMessage(strings.matches.opponentRatingsError);
+    }
+  }
+
+  async function handleSkipOpponentRatings() {
+    if (!activeGroup || !nextMatch) {
+      setActionMessage(strings.generation.noMatchForGeneration);
+      return;
+    }
+
+    setOpponentRatingsSubmitState("submitting");
+    setActionMessage(null);
+
+    try {
+      const token = await getToken();
+
+      if (!token) {
+        throw new Error("Missing auth token.");
+      }
+
+      const response = await skipOpponentRatings(
+        token,
+        activeGroup.id,
+        nextMatch.id
+      );
+
+      setNextMatch(response.data.match);
+      setOpponentRatingsSubmitState("saved");
+      setActionMessage(strings.matches.opponentRatingsSkipped);
+    } catch (error) {
+      console.warn("Unable to skip opponent ratings", error);
+      setOpponentRatingsSubmitState("error");
+      setActionMessage(strings.matches.opponentRatingsError);
+    }
+  }
+
   async function handleCreateMatch() {
     if (!activeGroup) {
       return;
@@ -499,6 +583,7 @@ export default function MatchScreen() {
       setScoreSubmitState("idle");
       setMatchEventsSubmitState("idle");
       setMvpVoteSubmitState("idle");
+      setOpponentRatingsSubmitState("idle");
       setScoreDraft(createScoreDraft(response.data.match));
       setCreateState("created");
     } catch (error) {
@@ -541,6 +626,7 @@ export default function MatchScreen() {
       setScoreSubmitState("idle");
       setMatchEventsSubmitState("idle");
       setMvpVoteSubmitState("idle");
+      setOpponentRatingsSubmitState("idle");
       setScoreDraft(createScoreDraft(attendanceResponse.data.match));
       setAttendanceState("idle");
     } catch (error) {
@@ -708,6 +794,18 @@ export default function MatchScreen() {
                 onSubmit={handleSubmitMvpVote}
                 players={players}
                 submitState={mvpVoteSubmitState}
+                teamPlayers={getLockedTeamPlayers(teamGeneration)}
+              />
+            ) : null}
+
+            {nextMatch?.status === "locked" &&
+            teamGeneration?.status === "locked" ? (
+              <OpponentRatingsCard
+                match={nextMatch}
+                onSkip={handleSkipOpponentRatings}
+                onSubmit={handleSubmitOpponentRatings}
+                players={players}
+                submitState={opponentRatingsSubmitState}
                 teamPlayers={getLockedTeamPlayers(teamGeneration)}
               />
             ) : null}
@@ -1597,6 +1695,222 @@ function MvpVoteCard({
   );
 }
 
+function OpponentRatingsCard({
+  match,
+  onSkip,
+  onSubmit,
+  players,
+  submitState,
+  teamPlayers,
+}: {
+  match: FootballMatch;
+  onSkip: () => void;
+  onSubmit: (input: SubmitOpponentRatingsInput) => void;
+  players: PlayerProfile[];
+  submitState: OpponentRatingsSubmitState;
+  teamPlayers: ReturnType<typeof getLockedTeamPlayers>;
+}) {
+  const { strings } = usePreferences();
+  const playersById = new Map(players.map((player) => [player.id, player]));
+  const opponentPlayers = getOpponentTeamPlayers(match, teamPlayers);
+  const [draft, setDraft] = useState<OpponentRatingsDraft>(() =>
+    createOpponentRatingsDraft(opponentPlayers)
+  );
+  const parsedInput = parseOpponentRatingsDraft(draft, opponentPlayers);
+  const isSubmitting = submitState === "submitting";
+  const completion = match.myOpponentRatingCompletion;
+  const hasCompleted = Boolean(completion);
+  const opponentPlayerKey = opponentPlayers
+    .map((player) => player.playerId)
+    .join("|");
+  const canSubmit =
+    opponentPlayers.length > 0 &&
+    !hasCompleted &&
+    !isSubmitting &&
+    parsedInput !== null;
+  const canSkip = opponentPlayers.length > 0 && !hasCompleted && !isSubmitting;
+
+  useEffect(() => {
+    setDraft(createOpponentRatingsDraft(opponentPlayers));
+  }, [match.id, opponentPlayerKey]);
+
+  function updateRating(playerId: string, rating: string) {
+    setDraft((currentDraft) => ({
+      ...currentDraft,
+      [playerId]: {
+        rating,
+        tags: currentDraft[playerId]?.tags ?? [],
+      },
+    }));
+  }
+
+  function toggleTag(playerId: string, tag: OpponentRatingTag) {
+    setDraft((currentDraft) => {
+      const currentTags = currentDraft[playerId]?.tags ?? [];
+      const nextTags = currentTags.includes(tag)
+        ? currentTags.filter((currentTag) => currentTag !== tag)
+        : [...currentTags, tag];
+
+      return {
+        ...currentDraft,
+        [playerId]: {
+          rating: currentDraft[playerId]?.rating ?? "",
+          tags: nextTags,
+        },
+      };
+    });
+  }
+
+  return (
+    <View style={styles.opponentRatingsCard}>
+      <View style={styles.attendanceHeader}>
+        <View style={styles.attendanceHeaderCopy}>
+          <Text style={styles.cardTitle}>
+            {strings.matches.opponentRatingsTitle}
+          </Text>
+          <Text style={styles.helperText}>
+            {strings.matches.opponentRatingsSubtitle}
+          </Text>
+        </View>
+        {completion ? (
+          <Text style={styles.lockBadge}>
+            {completion.status === "submitted"
+              ? strings.matches.opponentRatingsSubmittedBadge
+              : strings.matches.opponentRatingsSkippedBadge}
+          </Text>
+        ) : null}
+      </View>
+
+      {opponentPlayers.length === 0 ? (
+        <Text style={styles.helperText}>
+          {strings.matches.opponentRatingsNotConfirmed}
+        </Text>
+      ) : null}
+
+      {completion?.status === "skipped" ? (
+        <Text style={styles.opponentRatingsReminder}>
+          {strings.matches.opponentRatingsSkipReminder}
+        </Text>
+      ) : null}
+
+      {completion?.status === "submitted" ? (
+        <Text style={styles.opponentRatingsReminder}>
+          {strings.matches.opponentRatingsAlreadySubmitted}
+        </Text>
+      ) : null}
+
+      {!completion && opponentPlayers.length > 0 ? (
+        <>
+          <View style={styles.opponentRatingRows}>
+            {opponentPlayers.map((teamPlayer) => {
+              const player = playersById.get(teamPlayer.playerId) ?? null;
+              const displayName = getPlayerDisplayName(
+                player,
+                strings.profile.fallbackName
+              );
+              const rowDraft = draft[teamPlayer.playerId] ?? {
+                rating: "",
+                tags: [],
+              };
+
+              return (
+                <View key={teamPlayer.playerId} style={styles.opponentRatingRow}>
+                  <View style={styles.opponentRatingTopRow}>
+                    <View style={styles.mvpPlayerCopy}>
+                      <Text style={styles.mvpPlayerName}>{displayName}</Text>
+                      <Text style={styles.mvpPlayerMeta}>
+                        {strings.generation.teamLabel} {teamPlayer.teamLabel}
+                      </Text>
+                    </View>
+                    <TextInput
+                      accessibilityLabel={`${displayName} ${strings.matches.opponentRatingInputLabel}`}
+                      keyboardType="number-pad"
+                      maxLength={3}
+                      onChangeText={(rating) =>
+                        updateRating(teamPlayer.playerId, rating)
+                      }
+                      placeholder="0"
+                      placeholderTextColor="#6B7482"
+                      style={styles.opponentRatingInput}
+                      value={rowDraft.rating}
+                    />
+                  </View>
+
+                  <View style={styles.opponentTagRow}>
+                    {opponentRatingTags.map((tag) => {
+                      const selected = rowDraft.tags.includes(tag);
+
+                      return (
+                        <Pressable
+                          accessibilityRole="button"
+                          key={tag}
+                          onPress={() => toggleTag(teamPlayer.playerId, tag)}
+                          style={[
+                            styles.opponentTagChip,
+                            selected && styles.opponentTagChipSelected,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.opponentTagText,
+                              selected && styles.opponentTagTextSelected,
+                            ]}
+                          >
+                            {strings.matches.opponentRatingTags[tag]}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+
+          <View style={styles.opponentRatingActions}>
+            <Pressable
+              accessibilityRole="button"
+              disabled={!canSkip}
+              onPress={onSkip}
+              style={[
+                styles.secondaryButton,
+                !canSkip && styles.submitButtonDisabled,
+              ]}
+            >
+              <Text style={styles.secondaryButtonText}>
+                {strings.matches.skipOpponentRatings}
+              </Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              disabled={!canSubmit}
+              onPress={() => {
+                if (parsedInput) {
+                  onSubmit(parsedInput);
+                }
+              }}
+              style={[
+                styles.submitButton,
+                !canSubmit && styles.submitButtonDisabled,
+              ]}
+            >
+              <Text style={styles.submitButtonText}>
+                {isSubmitting
+                  ? strings.matches.savingOpponentRatings
+                  : strings.matches.saveOpponentRatings}
+              </Text>
+            </Pressable>
+          </View>
+        </>
+      ) : null}
+
+      {submitState === "error" ? (
+        <Text style={styles.errorText}>{strings.matches.opponentRatingsError}</Text>
+      ) : null}
+    </View>
+  );
+}
+
 function GeneratedTeamsCard({
   generation,
   generations,
@@ -2260,6 +2574,76 @@ function getMvpVoteCounts(match: FootballMatch) {
   }, new Map<string, number>());
 }
 
+function getOpponentTeamPlayers(
+  match: FootballMatch,
+  teamPlayers: ReturnType<typeof getLockedTeamPlayers>
+) {
+  const currentPlayerId =
+    match.myAttendance?.status === "confirmed"
+      ? match.myAttendance.playerId
+      : null;
+
+  if (!currentPlayerId) {
+    return [];
+  }
+
+  const currentTeam = teamPlayers.find(
+    (teamPlayer) => teamPlayer.playerId === currentPlayerId
+  )?.teamLabel;
+
+  if (!currentTeam) {
+    return [];
+  }
+
+  return teamPlayers.filter((teamPlayer) => teamPlayer.teamLabel !== currentTeam);
+}
+
+function createOpponentRatingsDraft(
+  opponentPlayers: ReturnType<typeof getLockedTeamPlayers>
+): OpponentRatingsDraft {
+  return opponentPlayers.reduce<OpponentRatingsDraft>((draft, opponent) => {
+    draft[opponent.playerId] = {
+      rating: "",
+      tags: [],
+    };
+
+    return draft;
+  }, {});
+}
+
+function parseOpponentRatingsDraft(
+  draft: OpponentRatingsDraft,
+  opponentPlayers: ReturnType<typeof getLockedTeamPlayers>
+): SubmitOpponentRatingsInput | null {
+  const validIntegerPattern = /^\d{1,3}$/;
+  const ratings: SubmitOpponentRatingsInput["ratings"] = [];
+
+  for (const opponent of opponentPlayers) {
+    const rowDraft = draft[opponent.playerId] ?? {
+      rating: "",
+      tags: [],
+    };
+
+    if (!validIntegerPattern.test(rowDraft.rating)) {
+      return null;
+    }
+
+    const rating = Number(rowDraft.rating);
+
+    if (rating < 0 || rating > 100) {
+      return null;
+    }
+
+    ratings.push({
+      ratedPlayerId: opponent.playerId,
+      rating,
+      tags: rowDraft.tags,
+    });
+  }
+
+  return { ratings };
+}
+
 function parseScoreDraft(draft: ScoreDraft): SubmitFinalScoreInput | null {
   const validIntegerPattern = /^\d{1,2}$/;
 
@@ -2869,6 +3253,85 @@ const styles = StyleSheet.create({
     color: "#72E6A4",
     fontSize: 12,
     fontWeight: "900",
+  },
+  opponentRatingsCard: {
+    gap: 15,
+    borderWidth: 1,
+    borderColor: "#27435D",
+    borderRadius: 26,
+    backgroundColor: "#101923",
+    padding: 18,
+  },
+  opponentRatingsReminder: {
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#27435D",
+    borderRadius: 16,
+    backgroundColor: "#142638",
+    color: "#8EC9FF",
+    fontSize: 13,
+    fontWeight: "900",
+    lineHeight: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  opponentRatingRows: {
+    gap: 10,
+  },
+  opponentRatingRow: {
+    gap: 10,
+    borderWidth: 1,
+    borderColor: "#25313D",
+    borderRadius: 18,
+    backgroundColor: "#0B1118",
+    padding: 12,
+  },
+  opponentRatingTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  opponentRatingInput: {
+    width: 68,
+    borderWidth: 1,
+    borderColor: "#27435D",
+    borderRadius: 14,
+    backgroundColor: "#141A22",
+    color: "#F4F7F2",
+    fontSize: 15,
+    fontWeight: "900",
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    textAlign: "center",
+  },
+  opponentTagRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 7,
+  },
+  opponentTagChip: {
+    borderWidth: 1,
+    borderColor: "#25313D",
+    borderRadius: 999,
+    backgroundColor: "#141A22",
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+  },
+  opponentTagChipSelected: {
+    borderColor: "#8EC9FF",
+    backgroundColor: "#142638",
+  },
+  opponentTagText: {
+    color: "#AEB8C7",
+    fontSize: 11,
+    fontWeight: "900",
+  },
+  opponentTagTextSelected: {
+    color: "#8EC9FF",
+  },
+  opponentRatingActions: {
+    flexDirection: "row",
+    gap: 10,
   },
   scoreBoard: {
     flexDirection: "row",

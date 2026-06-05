@@ -20,12 +20,15 @@ import type {
   ManualTeamAdjustmentInput,
   ManualTeamAdjustmentResponse,
   NextFootballMatchResponse,
+  SkipOpponentRatingsResponse,
   SubmitFinalScoreInput,
   SubmitFinalScoreResponse,
   SubmitMatchAttendanceInput,
   SubmitMatchAttendanceResponse,
   SubmitMvpVoteInput,
   SubmitMvpVoteResponse,
+  SubmitOpponentRatingsInput,
+  SubmitOpponentRatingsResponse,
   TeamGenerationVersionsResponse,
   UpsertMatchPlayerEventsInput,
   UpsertMatchPlayerEventsResponse,
@@ -36,10 +39,15 @@ import {
   isSupportedGroupGeneratorStyle,
   isSupportedGroupGoalkeeperMode,
 } from '../groups/group-options';
-import { isSupportedAttendanceResponse } from './match-options';
+import {
+  isSupportedAttendanceResponse,
+  isSupportedOpponentRatingTag,
+} from './match-options';
 import {
   serializeFootballMatch,
   serializeMvpVote,
+  serializeOpponentRating,
+  serializeOpponentRatingCompletion,
   serializeTeamGenerationVersion,
 } from './match.presenter';
 import {
@@ -203,6 +211,61 @@ export class MatchesController {
     return {
       data: {
         vote: serializeMvpVote(result.vote),
+        match: serializeFootballMatch(result.match),
+      },
+    };
+  }
+
+  @Post(':matchId/opponent-ratings/skip')
+  @UseGuards(ClerkAuthGuard)
+  async skipOpponentRatings(
+    @Req() request: AuthenticatedRequest,
+    @Param('groupId') groupId: string,
+    @Param('matchId') matchId: string,
+  ): Promise<SkipOpponentRatingsResponse> {
+    if (!request.auth) {
+      throw new InternalServerErrorException('Authenticated user missing.');
+    }
+
+    const result = await this.matchesService.skipOpponentRatings(
+      request.auth.clerkUserId,
+      groupId,
+      matchId,
+    );
+
+    return {
+      data: {
+        completion: serializeOpponentRatingCompletion(result.completion),
+        match: serializeFootballMatch(result.match),
+      },
+    };
+  }
+
+  @Post(':matchId/opponent-ratings')
+  @UseGuards(ClerkAuthGuard)
+  async submitOpponentRatings(
+    @Req() request: AuthenticatedRequest,
+    @Param('groupId') groupId: string,
+    @Param('matchId') matchId: string,
+    @Body() body: Partial<SubmitOpponentRatingsInput>,
+  ): Promise<SubmitOpponentRatingsResponse> {
+    if (!request.auth) {
+      throw new InternalServerErrorException('Authenticated user missing.');
+    }
+
+    const result = await this.matchesService.submitOpponentRatings(
+      request.auth.clerkUserId,
+      groupId,
+      matchId,
+      this.parseSubmitOpponentRatingsInput(body),
+    );
+
+    return {
+      data: {
+        ratings: result.ratings.map((rating) =>
+          serializeOpponentRating(rating),
+        ),
+        completion: serializeOpponentRatingCompletion(result.completion),
         match: serializeFootballMatch(result.match),
       },
     };
@@ -503,6 +566,42 @@ export class MatchesController {
 
     return {
       votedPlayerId,
+    };
+  }
+
+  private parseSubmitOpponentRatingsInput(
+    body: Partial<SubmitOpponentRatingsInput>,
+  ): SubmitOpponentRatingsInput {
+    if (!Array.isArray(body.ratings) || body.ratings.length === 0) {
+      throw new BadRequestException('Opponent ratings are required.');
+    }
+
+    return {
+      ratings: body.ratings.map((rating) => {
+        const ratedPlayerId =
+          typeof rating.ratedPlayerId === 'string'
+            ? rating.ratedPlayerId.trim()
+            : '';
+        const tags = Array.isArray(rating.tags) ? rating.tags : [];
+
+        if (
+          !ratedPlayerId ||
+          !Number.isInteger(rating.rating) ||
+          rating.rating < 0 ||
+          rating.rating > 100 ||
+          tags.some((tag) => !isSupportedOpponentRatingTag(tag))
+        ) {
+          throw new BadRequestException(
+            'Opponent ratings need player id, 0-100 rating, and supported tags.',
+          );
+        }
+
+        return {
+          ratedPlayerId,
+          rating: rating.rating,
+          tags: [...new Set(tags)],
+        };
+      }),
     };
   }
 }

@@ -863,6 +863,274 @@ describe('MatchesService', () => {
     expect(mvpVoteCreate).not.toHaveBeenCalled();
   });
 
+  it('saves quick ratings for every opponent', async () => {
+    const completion = createOpponentRatingCompletionRow({
+      status: 'submitted',
+    });
+    const opponentRatingUpsert = jest
+      .fn()
+      .mockResolvedValueOnce(
+        createOpponentRatingRow({
+          ratedPlayerId: 'ply_b_1',
+          rating: 82,
+          tags: ['fast'],
+        }),
+      )
+      .mockResolvedValueOnce(
+        createOpponentRatingRow({
+          id: 'opponent_rating_2',
+          ratedPlayerId: 'ply_b_2',
+          rating: 76,
+          tags: ['technical'],
+        }),
+      );
+    const opponentRatingCompletionUpsert = jest
+      .fn()
+      .mockResolvedValue(completion);
+    const transaction = jest.fn(async (operations: Array<Promise<unknown>>) =>
+      Promise.all(operations),
+    );
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'member',
+        playerFindUnique: jest.fn().mockResolvedValue({
+          id: 'ply_a_1',
+        }),
+        findFirst: jest
+          .fn()
+          .mockResolvedValue(createMatchRow({ status: 'locked' })),
+        attendanceFindUnique: jest.fn().mockResolvedValue(
+          createAttendanceRow({
+            playerId: 'ply_a_1',
+            status: 'confirmed',
+          }),
+        ),
+        generationFindFirst: jest
+          .fn()
+          .mockResolvedValue(createTeamGenerationRow(createSwappableTeams())),
+        opponentRatingCompletionFindUnique: jest
+          .fn()
+          .mockResolvedValue(completion),
+        opponentRatingCompletionUpsert,
+        opponentRatingUpsert,
+        transaction,
+      }),
+    );
+
+    await expect(
+      service.submitOpponentRatings('user_123', 'grp_123', 'match_123', {
+        ratings: [
+          {
+            ratedPlayerId: 'ply_b_1',
+            rating: 82,
+            tags: ['fast'],
+          },
+          {
+            ratedPlayerId: 'ply_b_2',
+            rating: 76,
+            tags: ['technical'],
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({
+      ratings: [
+        {
+          ratedPlayerId: 'ply_b_1',
+          rating: 82,
+          tags: ['fast'],
+        },
+        {
+          ratedPlayerId: 'ply_b_2',
+          rating: 76,
+          tags: ['technical'],
+        },
+      ],
+      completion: {
+        status: 'submitted',
+      },
+      match: {
+        myOpponentRatingCompletion: {
+          status: 'submitted',
+        },
+      },
+    });
+
+    expect(opponentRatingUpsert).toHaveBeenCalledWith({
+      where: {
+        matchId_raterPlayerId_ratedPlayerId: {
+          matchId: 'match_123',
+          raterPlayerId: 'ply_a_1',
+          ratedPlayerId: 'ply_b_1',
+        },
+      },
+      create: expect.objectContaining({
+        rating: 82,
+        tags: ['fast'],
+      }) as object,
+      update: {
+        rating: 82,
+        tags: ['fast'],
+      },
+    });
+    expect(opponentRatingCompletionUpsert).toHaveBeenCalledWith({
+      where: {
+        matchId_playerId: {
+          matchId: 'match_123',
+          playerId: 'ply_a_1',
+        },
+      },
+      create: expect.objectContaining({
+        status: 'submitted',
+      }) as object,
+      update: {
+        status: 'submitted',
+      },
+    });
+    expect(transaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects quick ratings when not every opponent is rated', async () => {
+    const opponentRatingUpsert = jest.fn();
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'member',
+        playerFindUnique: jest.fn().mockResolvedValue({
+          id: 'ply_a_1',
+        }),
+        findFirst: jest
+          .fn()
+          .mockResolvedValue(createMatchRow({ status: 'locked' })),
+        attendanceFindUnique: jest.fn().mockResolvedValue(
+          createAttendanceRow({
+            playerId: 'ply_a_1',
+            status: 'confirmed',
+          }),
+        ),
+        generationFindFirst: jest
+          .fn()
+          .mockResolvedValue(createTeamGenerationRow(createSwappableTeams())),
+        opponentRatingUpsert,
+      }),
+    );
+
+    await expect(
+      service.submitOpponentRatings('user_123', 'grp_123', 'match_123', {
+        ratings: [
+          {
+            ratedPlayerId: 'ply_b_1',
+            rating: 82,
+            tags: [],
+          },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(opponentRatingUpsert).not.toHaveBeenCalled();
+  });
+
+  it('rejects quick ratings for teammates and self', async () => {
+    const opponentRatingUpsert = jest.fn();
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'member',
+        playerFindUnique: jest.fn().mockResolvedValue({
+          id: 'ply_a_1',
+        }),
+        findFirst: jest
+          .fn()
+          .mockResolvedValue(createMatchRow({ status: 'locked' })),
+        attendanceFindUnique: jest.fn().mockResolvedValue(
+          createAttendanceRow({
+            playerId: 'ply_a_1',
+            status: 'confirmed',
+          }),
+        ),
+        generationFindFirst: jest
+          .fn()
+          .mockResolvedValue(createTeamGenerationRow(createSwappableTeams())),
+        opponentRatingUpsert,
+      }),
+    );
+
+    await expect(
+      service.submitOpponentRatings('user_123', 'grp_123', 'match_123', {
+        ratings: [
+          {
+            ratedPlayerId: 'ply_a_1',
+            rating: 82,
+            tags: [],
+          },
+          {
+            ratedPlayerId: 'ply_a_2',
+            rating: 76,
+            tags: [],
+          },
+        ],
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(opponentRatingUpsert).not.toHaveBeenCalled();
+  });
+
+  it('allows confirmed players to skip quick opponent ratings', async () => {
+    const completion = createOpponentRatingCompletionRow({
+      status: 'skipped',
+    });
+    const opponentRatingCompletionUpsert = jest
+      .fn()
+      .mockResolvedValue(completion);
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'member',
+        playerFindUnique: jest.fn().mockResolvedValue({
+          id: 'ply_a_1',
+        }),
+        findFirst: jest
+          .fn()
+          .mockResolvedValue(createMatchRow({ status: 'locked' })),
+        attendanceFindUnique: jest.fn().mockResolvedValue(
+          createAttendanceRow({
+            playerId: 'ply_a_1',
+            status: 'confirmed',
+          }),
+        ),
+        generationFindFirst: jest
+          .fn()
+          .mockResolvedValue(createTeamGenerationRow(createSwappableTeams())),
+        opponentRatingCompletionFindUnique: jest
+          .fn()
+          .mockResolvedValue(completion),
+        opponentRatingCompletionUpsert,
+      }),
+    );
+
+    await expect(
+      service.skipOpponentRatings('user_123', 'grp_123', 'match_123'),
+    ).resolves.toMatchObject({
+      completion: {
+        status: 'skipped',
+      },
+      match: {
+        myOpponentRatingCompletion: {
+          status: 'skipped',
+        },
+      },
+    });
+
+    expect(opponentRatingCompletionUpsert).toHaveBeenCalledWith({
+      where: {
+        matchId_playerId: {
+          matchId: 'match_123',
+          playerId: 'ply_a_1',
+        },
+      },
+      create: expect.objectContaining({
+        status: 'skipped',
+      }) as object,
+      update: {
+        status: 'skipped',
+      },
+    });
+  });
+
   it('generates and saves a team version from a ready confirmed pool', async () => {
     const attendanceFindMany = jest.fn().mockResolvedValue(
       createConfirmedAttendances([
@@ -1495,6 +1763,9 @@ function createPrismaMock({
   mvpVoteCreate = jest.fn(),
   mvpVoteFindMany = jest.fn().mockResolvedValue([]),
   mvpVoteFindUnique = jest.fn().mockResolvedValue(null),
+  opponentRatingCompletionFindUnique = jest.fn().mockResolvedValue(null),
+  opponentRatingCompletionUpsert = jest.fn(),
+  opponentRatingUpsert = jest.fn(),
   transaction = jest.fn(async (operations: Array<Promise<unknown>>) =>
     Promise.all(operations),
   ),
@@ -1523,6 +1794,9 @@ function createPrismaMock({
   mvpVoteCreate?: jest.Mock;
   mvpVoteFindMany?: jest.Mock;
   mvpVoteFindUnique?: jest.Mock;
+  opponentRatingCompletionFindUnique?: jest.Mock;
+  opponentRatingCompletionUpsert?: jest.Mock;
+  opponentRatingUpsert?: jest.Mock;
   transaction?: jest.Mock;
 }) {
   return {
@@ -1574,6 +1848,13 @@ function createPrismaMock({
       create: mvpVoteCreate,
       findMany: mvpVoteFindMany,
       findUnique: mvpVoteFindUnique,
+    },
+    matchOpponentRating: {
+      upsert: opponentRatingUpsert,
+    },
+    matchOpponentRatingCompletion: {
+      findUnique: opponentRatingCompletionFindUnique,
+      upsert: opponentRatingCompletionUpsert,
     },
   } as unknown as PrismaService;
 }
@@ -1676,6 +1957,46 @@ function createMvpVoteRow(
     votedPlayerId: overrides.votedPlayerId ?? 'ply_b_1',
     createdAt: new Date('2026-06-10T21:20:00.000Z'),
     updatedAt: new Date('2026-06-10T21:20:00.000Z'),
+  };
+}
+
+function createOpponentRatingRow(
+  overrides: Partial<{
+    id: string;
+    matchId: string;
+    raterPlayerId: string;
+    ratedPlayerId: string;
+    rating: number;
+    tags: string[];
+  }> = {},
+) {
+  return {
+    id: overrides.id ?? 'opponent_rating_1',
+    matchId: overrides.matchId ?? 'match_123',
+    raterPlayerId: overrides.raterPlayerId ?? 'ply_a_1',
+    ratedPlayerId: overrides.ratedPlayerId ?? 'ply_b_1',
+    rating: overrides.rating ?? 80,
+    tags: overrides.tags ?? [],
+    createdAt: new Date('2026-06-10T21:25:00.000Z'),
+    updatedAt: new Date('2026-06-10T21:25:00.000Z'),
+  };
+}
+
+function createOpponentRatingCompletionRow(
+  overrides: Partial<{
+    id: string;
+    matchId: string;
+    playerId: string;
+    status: string;
+  }> = {},
+) {
+  return {
+    id: overrides.id ?? 'opponent_rating_completion_1',
+    matchId: overrides.matchId ?? 'match_123',
+    playerId: overrides.playerId ?? 'ply_a_1',
+    status: overrides.status ?? 'submitted',
+    createdAt: new Date('2026-06-10T21:26:00.000Z'),
+    updatedAt: new Date('2026-06-10T21:26:00.000Z'),
   };
 }
 

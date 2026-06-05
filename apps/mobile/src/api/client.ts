@@ -20,6 +20,7 @@ import type {
   PlayerProfileResponse,
   PlayerRosterResponse,
   RemoveFootballGroupMemberResponse,
+  SkipOpponentRatingsResponse,
   SubmitFinalScoreInput,
   SubmitFinalScoreResponse,
   SubmitInitialPeerRatingInput,
@@ -28,6 +29,8 @@ import type {
   SubmitMatchAttendanceResponse,
   SubmitMvpVoteInput,
   SubmitMvpVoteResponse,
+  SubmitOpponentRatingsInput,
+  SubmitOpponentRatingsResponse,
   SyncCurrentUserInput,
   TeamGenerationVersionsResponse,
   UpdateInitialPeerRatingInput,
@@ -399,6 +402,36 @@ export async function submitMvpVote(
       method: "POST",
       token,
       body: JSON.stringify(input),
+    }
+  );
+}
+
+export async function submitOpponentRatings(
+  token: string,
+  groupId: string,
+  matchId: string,
+  input: SubmitOpponentRatingsInput
+): Promise<SubmitOpponentRatingsResponse> {
+  return apiFetch<SubmitOpponentRatingsResponse>(
+    `/groups/${groupId}/matches/${matchId}/opponent-ratings`,
+    {
+      method: "POST",
+      token,
+      body: JSON.stringify(input),
+    }
+  );
+}
+
+export async function skipOpponentRatings(
+  token: string,
+  groupId: string,
+  matchId: string
+): Promise<SkipOpponentRatingsResponse> {
+  return apiFetch<SkipOpponentRatingsResponse>(
+    `/groups/${groupId}/matches/${matchId}/opponent-ratings/skip`,
+    {
+      method: "POST",
+      token,
     }
   );
 }
