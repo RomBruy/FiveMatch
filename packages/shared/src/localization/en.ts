@@ -338,6 +338,7 @@ export const en = {
     temporaryPoolNote:
       "Until real matches exist, this block uses the group roster as the baseline pool.",
     generateTeams: "Generate teams",
+    regenerateTeams: "Regenerate teams",
     generatingTeams: "Generating...",
     generateLocked: "Generation locked",
     generatedTitle: "Generated teams",
@@ -358,6 +359,12 @@ export const en = {
     detailPerfect: "Perfectly balanced",
     detailGood: "Balanced",
     detailWatch: "Needs review",
+    versionCountLabel: "versions used",
+    versionHistoryTitle: "Saved versions",
+    versionHistoryHint:
+      "Tap a previous version to compare it before locking teams.",
+    versionLimitExplanation:
+      "MVP limit reached: this match already has 5 saved team versions.",
     noMatchForGeneration: "Create a match before generating teams.",
     confirmedPoolBlocked:
       "Generation needs the confirmed player pool to be full",

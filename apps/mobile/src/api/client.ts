@@ -22,6 +22,7 @@ import type {
   SubmitMatchAttendanceInput,
   SubmitMatchAttendanceResponse,
   SyncCurrentUserInput,
+  TeamGenerationVersionsResponse,
   UpdateInitialPeerRatingInput,
   UpdateInitialPeerRatingResponse,
   UpdateFootballGroupMemberRoleInput,
@@ -366,6 +367,19 @@ export async function getLatestTeamGeneration(
 ): Promise<LatestTeamGenerationResponse> {
   return apiFetch<LatestTeamGenerationResponse>(
     `/groups/${groupId}/matches/${matchId}/team-generations/latest`,
+    {
+      token,
+    }
+  );
+}
+
+export async function listTeamGenerations(
+  token: string,
+  groupId: string,
+  matchId: string
+): Promise<TeamGenerationVersionsResponse> {
+  return apiFetch<TeamGenerationVersionsResponse>(
+    `/groups/${groupId}/matches/${matchId}/team-generations`,
     {
       token,
     }

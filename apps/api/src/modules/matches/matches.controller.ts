@@ -17,6 +17,7 @@ import type {
   NextFootballMatchResponse,
   SubmitMatchAttendanceInput,
   SubmitMatchAttendanceResponse,
+  TeamGenerationVersionsResponse,
 } from '@fit-five/shared';
 import { ClerkAuthGuard } from '../auth/clerk-auth.guard';
 import type { AuthenticatedRequest } from '../auth/auth.types';
@@ -29,7 +30,10 @@ import {
   serializeFootballMatch,
   serializeTeamGenerationVersion,
 } from './match.presenter';
-import { MatchesService } from './matches.service';
+import {
+  MatchesService,
+  TEAM_GENERATION_VERSION_LIMIT,
+} from './matches.service';
 
 @Controller('groups/:groupId/matches')
 export class MatchesController {
@@ -133,6 +137,37 @@ export class MatchesController {
     return {
       data: {
         generation: serializeTeamGenerationVersion(generation),
+      },
+    };
+  }
+
+  @Get(':matchId/team-generations')
+  @UseGuards(ClerkAuthGuard)
+  async listTeamGenerations(
+    @Req() request: AuthenticatedRequest,
+    @Param('groupId') groupId: string,
+    @Param('matchId') matchId: string,
+  ): Promise<TeamGenerationVersionsResponse> {
+    if (!request.auth) {
+      throw new InternalServerErrorException('Authenticated user missing.');
+    }
+
+    const generations = await this.matchesService.listTeamGenerations(
+      request.auth.clerkUserId,
+      groupId,
+      matchId,
+    );
+
+    return {
+      data: {
+        generations: generations.map((generation) =>
+          serializeTeamGenerationVersion(generation),
+        ),
+        limit: TEAM_GENERATION_VERSION_LIMIT,
+        remaining: Math.max(
+          TEAM_GENERATION_VERSION_LIMIT - generations.length,
+          0,
+        ),
       },
     };
   }

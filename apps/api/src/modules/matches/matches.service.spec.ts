@@ -442,6 +442,115 @@ describe('MatchesService', () => {
     });
   });
 
+  it('regenerates as the next saved version while keeping prior versions', async () => {
+    const generationCreate = jest
+      .fn()
+      .mockImplementation(({ data }: { data: TeamGenerationRowOverrides }) =>
+        Promise.resolve(createTeamGenerationRow({ ...data })),
+      );
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'admin',
+        findFirst: jest.fn().mockResolvedValue(
+          createMatchRow({
+            group: {
+              settings: {
+                generatorStyle: 'more_variety',
+                goalkeeperMode: 'rotating_goalkeeper',
+              },
+            },
+          }),
+        ),
+        attendanceFindMany: jest.fn().mockResolvedValue(
+          createConfirmedAttendances([
+            ['ply_1', 'attacker'],
+            ['ply_2', 'goalkeeper'],
+            ['ply_3', 'defender'],
+            ['ply_4', 'midfielder'],
+            ['ply_5', 'attacker'],
+            ['ply_6', 'goalkeeper'],
+            ['ply_7', 'defender'],
+            ['ply_8', 'midfielder'],
+            ['ply_9', 'all_rounder'],
+            ['ply_10', 'attacker'],
+          ]),
+        ),
+        ratingFindMany: jest.fn().mockResolvedValue(createInitialRatingRows()),
+        generationCount: jest.fn().mockResolvedValue(1),
+        generationCreate,
+      }),
+    );
+
+    await expect(
+      service.generateTeamVersion('user_123', 'grp_123', 'match_123'),
+    ).resolves.toMatchObject({
+      versionNumber: 2,
+      seed: 'match_123:v2',
+    });
+
+    expect(generationCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        versionNumber: 2,
+        seed: 'match_123:v2',
+      }) as object,
+    });
+  });
+
+  it('blocks regeneration after five saved versions', async () => {
+    const generationCreate = jest.fn();
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'admin',
+        findFirst: jest.fn().mockResolvedValue(
+          createMatchRow({
+            group: {
+              settings: {
+                generatorStyle: 'max_fairness',
+                goalkeeperMode: 'fixed_goalkeeper',
+              },
+            },
+          }),
+        ),
+        generationCount: jest.fn().mockResolvedValue(5),
+        generationCreate,
+      }),
+    );
+
+    await expect(
+      service.generateTeamVersion('user_123', 'grp_123', 'match_123'),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(generationCreate).not.toHaveBeenCalled();
+  });
+
+  it('blocks regeneration once a team version is locked', async () => {
+    const generationCreate = jest.fn();
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'admin',
+        findFirst: jest.fn().mockResolvedValue(
+          createMatchRow({
+            group: {
+              settings: {
+                generatorStyle: 'max_fairness',
+                goalkeeperMode: 'fixed_goalkeeper',
+              },
+            },
+          }),
+        ),
+        generationFindFirst: jest.fn().mockResolvedValue({
+          id: 'generation_locked',
+        }),
+        generationCount: jest.fn().mockResolvedValue(1),
+        generationCreate,
+      }),
+    );
+
+    await expect(
+      service.generateTeamVersion('user_123', 'grp_123', 'match_123'),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(generationCreate).not.toHaveBeenCalled();
+  });
+
   it('returns the latest saved team generation for group members', async () => {
     const generationFindFirst = jest
       .fn()
@@ -485,6 +594,44 @@ describe('MatchesService', () => {
     await expect(
       service.getLatestTeamGeneration('user_123', 'grp_123', 'match_123'),
     ).resolves.toBeNull();
+  });
+
+  it('lists saved team generations for group members newest first', async () => {
+    const generationFindMany = jest
+      .fn()
+      .mockResolvedValue([
+        createTeamGenerationRow({ id: 'generation_2', versionNumber: 2 }),
+        createTeamGenerationRow({ id: 'generation_1', versionNumber: 1 }),
+      ]);
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'member',
+        findFirst: jest.fn().mockResolvedValue(createMatchRow()),
+        generationFindMany,
+      }),
+    );
+
+    await expect(
+      service.listTeamGenerations('user_123', 'grp_123', 'match_123'),
+    ).resolves.toMatchObject([
+      {
+        id: 'generation_2',
+        versionNumber: 2,
+      },
+      {
+        id: 'generation_1',
+        versionNumber: 1,
+      },
+    ]);
+
+    expect(generationFindMany).toHaveBeenCalledWith({
+      where: {
+        matchId: 'match_123',
+      },
+      orderBy: {
+        versionNumber: 'desc',
+      },
+    });
   });
 
   it('blocks generation when confirmed players are below the rating threshold', async () => {
@@ -545,6 +692,7 @@ function createPrismaMock({
   generationCount = jest.fn().mockResolvedValue(0),
   generationCreate = jest.fn(),
   generationFindFirst = jest.fn().mockResolvedValue(null),
+  generationFindMany = jest.fn().mockResolvedValue([]),
 }: {
   role: string;
   create?: jest.Mock;
@@ -559,6 +707,7 @@ function createPrismaMock({
   generationCount?: jest.Mock;
   generationCreate?: jest.Mock;
   generationFindFirst?: jest.Mock;
+  generationFindMany?: jest.Mock;
 }) {
   return {
     user: {
@@ -596,6 +745,7 @@ function createPrismaMock({
       count: generationCount,
       create: generationCreate,
       findFirst: generationFindFirst,
+      findMany: generationFindMany,
     },
   } as unknown as PrismaService;
 }

@@ -217,6 +217,53 @@ describe('MatchesController', () => {
     );
   });
 
+  it('lists and serializes saved team generations with the MVP limit', async () => {
+    const listTeamGenerations = jest.fn().mockResolvedValue([
+      {
+        ...createInternalTeamGenerationVersion(),
+        id: 'generation_2',
+        versionNumber: 2,
+      },
+      createInternalTeamGenerationVersion(),
+    ]);
+    const controller = new MatchesController({
+      listTeamGenerations,
+    } as unknown as MatchesService);
+
+    await expect(
+      controller.listTeamGenerations(
+        {
+          auth: {
+            clerkUserId: 'user_123',
+          },
+        } as AuthenticatedRequest,
+        'grp_123',
+        'match_123',
+      ),
+    ).resolves.toMatchObject({
+      data: {
+        generations: [
+          {
+            id: 'generation_2',
+            versionNumber: 2,
+          },
+          {
+            id: 'generation_123',
+            versionNumber: 1,
+          },
+        ],
+        limit: 5,
+        remaining: 3,
+      },
+    });
+
+    expect(listTeamGenerations).toHaveBeenCalledWith(
+      'user_123',
+      'grp_123',
+      'match_123',
+    );
+  });
+
   it('serializes the latest saved team generation', async () => {
     const getLatestTeamGeneration = jest
       .fn()

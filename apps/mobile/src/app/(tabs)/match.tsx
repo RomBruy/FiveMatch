@@ -3,6 +3,7 @@ import { useRouter } from "expo-router";
 import {
   groupGeneratorStyles,
   groupGoalkeeperModes,
+  teamGenerationVersionLimit,
   type FootballGroup,
   type FootballMatch,
   type FootballMatchAttendance,
@@ -31,8 +32,8 @@ import {
   createFootballMatch,
   generateTeamVersion,
   getInitialPeerRatingReadiness,
-  getLatestTeamGeneration,
   getNextFootballMatch,
+  listTeamGenerations,
   listCurrentUserGroups,
   listGroupPlayers,
   submitMatchAttendance,
@@ -75,6 +76,9 @@ export default function MatchScreen() {
   >("idle");
   const [generationState, setGenerationState] =
     useState<GenerationState>("idle");
+  const [teamGenerations, setTeamGenerations] = useState<
+    TeamGenerationVersion[]
+  >([]);
   const [teamGeneration, setTeamGeneration] =
     useState<TeamGenerationVersion | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
@@ -98,6 +102,7 @@ export default function MatchScreen() {
         setReadiness(null);
         setNextMatch(null);
         setPlayers([]);
+        setTeamGenerations([]);
         setTeamGeneration(null);
         setGenerationState("idle");
         setLoadState("noGroup");
@@ -110,22 +115,23 @@ export default function MatchScreen() {
           listGroupPlayers(token, firstGroup.id),
           getNextFootballMatch(token, firstGroup.id),
         ]);
-      const latestGeneration = nextMatchResponse.data.match
+      const savedGenerations = nextMatchResponse.data.match
         ? (
-            await getLatestTeamGeneration(
+            await listTeamGenerations(
               token,
               firstGroup.id,
               nextMatchResponse.data.match.id
             )
-          ).data.generation
-        : null;
+          ).data.generations
+        : [];
 
       setActiveGroup(firstGroup);
       setReadiness(readinessResponse.data.readiness);
       setNextMatch(nextMatchResponse.data.match);
       setPlayers(rosterResponse.data.players);
-      setTeamGeneration(latestGeneration);
-      setGenerationState(latestGeneration ? "generated" : "idle");
+      setTeamGenerations(savedGenerations);
+      setTeamGeneration(savedGenerations[0] ?? null);
+      setGenerationState(savedGenerations.length > 0 ? "generated" : "idle");
       setLoadState("ready");
     } catch (error) {
       console.warn("Unable to load generation gate", error);
@@ -153,6 +159,11 @@ export default function MatchScreen() {
       return;
     }
 
+    if (teamGenerations.length >= teamGenerationVersionLimit) {
+      setActionMessage(strings.generation.versionLimitExplanation);
+      return;
+    }
+
     setGenerationState("generating");
     setActionMessage(null);
 
@@ -168,13 +179,28 @@ export default function MatchScreen() {
         activeGroup.id,
         nextMatch.id
       );
+      const generationsResponse = await listTeamGenerations(
+        token,
+        activeGroup.id,
+        nextMatch.id
+      );
+      const savedGenerations = generationsResponse.data.generations;
 
-      setTeamGeneration(response.data.generation);
+      setTeamGenerations(savedGenerations);
+      setTeamGeneration(
+        savedGenerations.find(
+          (generation) => generation.id === response.data.generation.id
+        ) ?? response.data.generation
+      );
       setGenerationState("generated");
     } catch (error) {
       console.warn("Unable to generate teams", error);
       setGenerationState("error");
-      setActionMessage(strings.generation.generateError);
+      setActionMessage(
+        teamGenerations.length >= teamGenerationVersionLimit
+          ? strings.generation.versionLimitExplanation
+          : strings.generation.generateError
+      );
     }
   }
 
@@ -214,6 +240,7 @@ export default function MatchScreen() {
       });
 
       setNextMatch(response.data.match);
+      setTeamGenerations([]);
       setTeamGeneration(null);
       setCreateState("created");
     } catch (error) {
@@ -248,6 +275,7 @@ export default function MatchScreen() {
       );
 
       setNextMatch(attendanceResponse.data.match);
+      setTeamGenerations([]);
       setTeamGeneration(null);
       setGenerationState("idle");
       setAttendanceState("idle");
@@ -261,12 +289,16 @@ export default function MatchScreen() {
     activeGroup?.currentUserRole === "owner" ||
     activeGroup?.currentUserRole === "admin";
   const missingPlayers = getMissingPlayers(readiness, players);
+  const generationLimitReached =
+    teamGenerations.length >= teamGenerationVersionLimit;
   const generationPoolReady =
     Boolean(readiness?.ready) &&
-    (nextMatch ? nextMatch.confirmedCount === nextMatch.maxPlayers : false);
+    (nextMatch ? nextMatch.confirmedCount === nextMatch.maxPlayers : false) &&
+    !generationLimitReached;
   const generationBlockedReason = getGenerationBlockedReason(
     readiness,
     nextMatch,
+    generationLimitReached,
     strings
   );
 
@@ -350,7 +382,10 @@ export default function MatchScreen() {
             <GenerationGateCard
               canGenerate={generationPoolReady}
               disabledReason={generationBlockedReason}
+              generationCount={teamGenerations.length}
+              generationLimit={teamGenerationVersionLimit}
               generationState={generationState}
+              hasGeneratedVersion={teamGenerations.length > 0}
               readiness={readiness}
               onGenerate={handleGenerateTeamVersion}
             />
@@ -362,6 +397,8 @@ export default function MatchScreen() {
             {teamGeneration ? (
               <GeneratedTeamsCard
                 generation={teamGeneration}
+                generations={teamGenerations}
+                onSelectGeneration={setTeamGeneration}
                 players={players}
               />
             ) : null}
@@ -430,13 +467,19 @@ export default function MatchScreen() {
 function GenerationGateCard({
   canGenerate,
   disabledReason,
+  generationCount,
+  generationLimit,
   generationState,
+  hasGeneratedVersion,
   readiness,
   onGenerate,
 }: {
   canGenerate: boolean;
   disabledReason: string | null;
+  generationCount: number;
+  generationLimit: number;
   generationState: GenerationState;
+  hasGeneratedVersion: boolean;
   readiness: InitialPeerRatingReadiness;
   onGenerate: () => void;
 }) {
@@ -477,6 +520,10 @@ function GenerationGateCard({
         <Text style={styles.statPill}>
           {readiness.incompletePlayers} {strings.generation.missingRatingsLabel}
         </Text>
+        <Text style={styles.statPill}>
+          {generationCount}/{generationLimit}{" "}
+          {strings.generation.versionCountLabel}
+        </Text>
       </View>
 
       <Text style={styles.helperText}>
@@ -500,7 +547,9 @@ function GenerationGateCard({
           {isGenerating
             ? strings.generation.generatingTeams
             : canGenerate
-              ? strings.generation.generateTeams
+              ? hasGeneratedVersion
+                ? strings.generation.regenerateTeams
+                : strings.generation.generateTeams
               : strings.generation.generateLocked}
         </Text>
       </Pressable>
@@ -826,9 +875,13 @@ function AttendancePlayerRow({
 
 function GeneratedTeamsCard({
   generation,
+  generations,
+  onSelectGeneration,
   players,
 }: {
   generation: TeamGenerationVersion;
+  generations: TeamGenerationVersion[];
+  onSelectGeneration: (generation: TeamGenerationVersion) => void;
   players: PlayerProfile[];
 }) {
   const { strings } = usePreferences();
@@ -854,6 +907,50 @@ function GeneratedTeamsCard({
           {generation.fairnessPercentage}% {strings.generation.fairnessLabel}
         </Text>
       </View>
+
+      {generations.length > 1 ? (
+        <View style={styles.versionHistory}>
+          <Text style={styles.versionHistoryTitle}>
+            {strings.generation.versionHistoryTitle}
+          </Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.versionPillsRow}
+          >
+            {generations.map((savedGeneration) => {
+              const active = savedGeneration.id === generation.id;
+
+              return (
+                <Pressable
+                  key={savedGeneration.id}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  onPress={() => onSelectGeneration(savedGeneration)}
+                  style={[
+                    styles.versionPill,
+                    active && styles.versionPillActive,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.versionPillText,
+                      active && styles.versionPillTextActive,
+                    ]}
+                  >
+                    {strings.generation.versionLabel} #
+                    {savedGeneration.versionNumber} ·{" "}
+                    {savedGeneration.fairnessPercentage}%
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+          <Text style={styles.versionHistoryHint}>
+            {strings.generation.versionHistoryHint}
+          </Text>
+        </View>
+      ) : null}
 
       <View style={styles.generatedTeamsGrid}>
         <GeneratedTeamColumn
@@ -1048,6 +1145,7 @@ function getSortedAttendances(
 function getGenerationBlockedReason(
   readiness: InitialPeerRatingReadiness | null,
   match: FootballMatch | null,
+  generationLimitReached: boolean,
   strings: ReturnType<typeof usePreferences>["strings"]
 ) {
   if (!readiness?.ready) {
@@ -1060,6 +1158,10 @@ function getGenerationBlockedReason(
 
   if (match.confirmedCount !== match.maxPlayers) {
     return `${strings.generation.confirmedPoolBlocked}: ${match.confirmedCount}/${match.maxPlayers}`;
+  }
+
+  if (generationLimitReached) {
+    return strings.generation.versionLimitExplanation;
   }
 
   return null;
@@ -1530,6 +1632,51 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     paddingHorizontal: 10,
     paddingVertical: 7,
+  },
+  versionHistory: {
+    gap: 9,
+    borderWidth: 1,
+    borderColor: "#2D2A1E",
+    borderRadius: 20,
+    backgroundColor: "#10161D",
+    padding: 12,
+  },
+  versionHistoryTitle: {
+    color: "#F4F7F2",
+    fontSize: 13,
+    fontWeight: "900",
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+  },
+  versionPillsRow: {
+    gap: 8,
+    paddingRight: 8,
+  },
+  versionPill: {
+    borderWidth: 1,
+    borderColor: "#25313D",
+    borderRadius: 999,
+    backgroundColor: "#171E27",
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+  },
+  versionPillActive: {
+    borderColor: "#F9C846",
+    backgroundColor: "#332711",
+  },
+  versionPillText: {
+    color: "#AEB8C7",
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  versionPillTextActive: {
+    color: "#F9C846",
+  },
+  versionHistoryHint: {
+    color: "#8D96A5",
+    fontSize: 12,
+    fontWeight: "800",
+    lineHeight: 17,
   },
   generatedTeamsGrid: {
     flexDirection: "row",

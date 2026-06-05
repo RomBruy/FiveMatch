@@ -14,6 +14,7 @@ export const footballMatchAttendanceStatuses = [
   "out",
   "maybe",
 ] as const;
+export const teamGenerationVersionLimit = 5;
 
 export type FootballMatchStatus = (typeof footballMatchStatuses)[number];
 export type FootballMatchAttendanceResponse =
@@ -147,4 +148,10 @@ export type GenerateTeamVersionResponse = ApiSuccessResponse<{
 
 export type LatestTeamGenerationResponse = ApiSuccessResponse<{
   generation: TeamGenerationVersion | null;
+}>;
+
+export type TeamGenerationVersionsResponse = ApiSuccessResponse<{
+  generations: TeamGenerationVersion[];
+  limit: number;
+  remaining: number;
 }>;

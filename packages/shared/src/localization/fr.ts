@@ -340,6 +340,7 @@ export const fr = {
     temporaryPoolNote:
       "En attendant les vrais matchs, ce bloc utilise le roster du groupe comme pool de base.",
     generateTeams: "Generer les equipes",
+    regenerateTeams: "Regenerer les equipes",
     generatingTeams: "Generation...",
     generateLocked: "Generation verrouillee",
     generatedTitle: "Equipes generees",
@@ -360,6 +361,12 @@ export const fr = {
     detailPerfect: "Parfaitement equilibre",
     detailGood: "Equilibre",
     detailWatch: "A verifier",
+    versionCountLabel: "versions utilisees",
+    versionHistoryTitle: "Versions sauvegardees",
+    versionHistoryHint:
+      "Touche une ancienne version pour la comparer avant de verrouiller les equipes.",
+    versionLimitExplanation:
+      "Limite MVP atteinte: ce match a deja 5 versions d'equipes sauvegardees.",
     noMatchForGeneration: "Cree un match avant de generer les equipes.",
     confirmedPoolBlocked:
       "La generation demande une liste de joueurs confirmes complete",

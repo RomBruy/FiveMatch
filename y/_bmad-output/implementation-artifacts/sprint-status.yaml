@@ -1,5 +1,5 @@
 # generated: 2026-05-31T16:16:37+0200
-# last_updated: 2026-06-05T08:50:51+0200
+# last_updated: 2026-06-05T09:07:44+0200
 # project: fit_five
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review with fresh context.
 
 generated: 2026-05-31T16:16:37+0200
-last_updated: 2026-06-05T08:50:51+0200
+last_updated: 2026-06-05T09:07:44+0200
 project: fit_five
 project_key: NOKEY
 tracking_system: file-system
@@ -70,7 +70,7 @@ development_status:
   epic-4: in-progress
   4-1-generate-saved-team-version: review
   4-2-show-team-generator-detail: review
-  4-3-regenerate-up-to-five-versions: backlog
+  4-3-regenerate-up-to-five-versions: review
   4-4-perform-one-manual-adjustment: backlog
   4-5-confirm-and-lock-teams: backlog
   epic-4-retrospective: optional

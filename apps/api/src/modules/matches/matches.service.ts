@@ -40,6 +40,7 @@ import {
 } from './match-options';
 
 const INITIAL_PEER_RATING_READINESS_THRESHOLD = 3;
+export const TEAM_GENERATION_VERSION_LIMIT = 5;
 
 export type InternalFootballMatchAttendance = {
   id: string;
@@ -258,6 +259,31 @@ export class MatchesService {
       throw new ForbiddenException('Organizer role required.');
     }
 
+    const lockedGeneration = await this.prisma.teamGenerationVersion.findFirst({
+      where: {
+        matchId: match.id,
+        status: 'locked',
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (lockedGeneration) {
+      throw new ConflictException('Locked team generation cannot regenerate.');
+    }
+
+    const existingGenerationCount =
+      await this.prisma.teamGenerationVersion.count({
+        where: {
+          matchId: match.id,
+        },
+      });
+
+    if (existingGenerationCount >= TEAM_GENERATION_VERSION_LIMIT) {
+      throw new ConflictException('Team generation version limit reached.');
+    }
+
     const confirmedAttendances = await this.prisma.matchAttendance.findMany({
       where: {
         matchId: match.id,
@@ -313,12 +339,7 @@ export class MatchesService {
     const goalkeeperMode =
       normalizeGoalkeeperModeOverride(match.goalkeeperModeOverride) ??
       normalizeGroupGoalkeeperMode(match.group.settings?.goalkeeperMode);
-    const versionNumber =
-      (await this.prisma.teamGenerationVersion.count({
-        where: {
-          matchId: match.id,
-        },
-      })) + 1;
+    const versionNumber = existingGenerationCount + 1;
     const seed = `${match.id}:v${versionNumber}`;
     const algorithmInputPlayers = confirmedAttendances.map((attendance) => {
       const rating = ratingByPlayerId.get(attendance.playerId);
@@ -373,6 +394,41 @@ export class MatchesService {
     });
 
     return this.toInternalTeamGenerationVersion(generation);
+  }
+
+  async listTeamGenerations(
+    clerkUserId: string,
+    groupId: string,
+    matchId: string,
+  ): Promise<InternalTeamGenerationVersion[]> {
+    await this.requireGroupMembership(clerkUserId, groupId);
+
+    const match = await this.prisma.match.findFirst({
+      where: {
+        id: matchId,
+        groupId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!match) {
+      throw new ForbiddenException('Match required.');
+    }
+
+    const generations = await this.prisma.teamGenerationVersion.findMany({
+      where: {
+        matchId,
+      },
+      orderBy: {
+        versionNumber: 'desc',
+      },
+    });
+
+    return generations.map((generation) =>
+      this.toInternalTeamGenerationVersion(generation),
+    );
   }
 
   async getLatestTeamGeneration(
