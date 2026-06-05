@@ -1131,6 +1131,243 @@ describe('MatchesService', () => {
     });
   });
 
+  it('finalizes a locked match and evolves ratings slower than form', async () => {
+    const finalizedAt = new Date('2026-06-10T21:45:00.000Z');
+    const matchUpdate = jest.fn().mockResolvedValue(
+      createMatchRow({
+        status: 'completed',
+        teamAScore: 7,
+        teamBScore: 5,
+        scoreSubmittedByUserId: 'usr_123',
+        scoreSubmittedAt: new Date('2026-06-10T21:10:00.000Z'),
+        finalizedByUserId: 'usr_123',
+        finalizedAt,
+      }),
+    );
+    const playerRatingStateUpsert = jest.fn().mockResolvedValue({});
+    const matchPlayerStatUpsert = jest.fn().mockResolvedValue({});
+    const playerRatingHistoryUpsert = jest.fn().mockResolvedValue({});
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'admin',
+        findFirst: jest.fn().mockResolvedValue(
+          createMatchRow({
+            status: 'locked',
+            teamAScore: 7,
+            teamBScore: 5,
+            scoreSubmittedByUserId: 'usr_123',
+            scoreSubmittedAt: new Date('2026-06-10T21:10:00.000Z'),
+          }),
+        ),
+        generationFindFirst: jest.fn().mockResolvedValue(
+          createTeamGenerationRow({
+            ...createSwappableTeams(),
+            status: 'locked',
+          }),
+        ),
+        ratingFindMany: jest.fn().mockResolvedValue(
+          createInitialRatingRowsForPlayers([
+            ['ply_a_1', 80],
+            ['ply_a_2', 70],
+            ['ply_b_1', 84],
+            ['ply_b_2', 64],
+          ]),
+        ),
+        ratingStateFindMany: jest.fn().mockResolvedValue([
+          createPlayerRatingStateRow({
+            playerId: 'ply_a_1',
+            overallRating: 80,
+            formRating: 70,
+          }),
+        ]),
+        eventFindMany: jest.fn().mockResolvedValue([
+          createMatchEventRow({
+            playerId: 'ply_a_1',
+            kind: 'goal',
+            count: 2,
+          }),
+          createMatchEventRow({
+            id: 'event_assist_1',
+            playerId: 'ply_a_1',
+            kind: 'assist',
+            count: 1,
+          }),
+        ]),
+        mvpVoteFindMany: jest.fn().mockResolvedValue([
+          createMvpVoteRow({
+            id: 'mvp_vote_1',
+            voterPlayerId: 'ply_b_1',
+            votedPlayerId: 'ply_a_1',
+          }),
+          createMvpVoteRow({
+            id: 'mvp_vote_2',
+            voterPlayerId: 'ply_b_2',
+            votedPlayerId: 'ply_a_1',
+          }),
+        ]),
+        opponentRatingFindMany: jest.fn().mockResolvedValue([
+          createOpponentRatingRow({
+            id: 'rating_good_1',
+            raterPlayerId: 'ply_b_1',
+            ratedPlayerId: 'ply_a_1',
+            rating: 90,
+          }),
+          createOpponentRatingRow({
+            id: 'rating_good_2',
+            raterPlayerId: 'ply_b_2',
+            ratedPlayerId: 'ply_a_1',
+            rating: 92,
+          }),
+          createOpponentRatingRow({
+            id: 'rating_extreme_1',
+            raterPlayerId: 'ply_b_3',
+            ratedPlayerId: 'ply_a_1',
+            rating: 1,
+          }),
+        ]),
+        playerRatingStateUpsert,
+        matchPlayerStatUpsert,
+        playerRatingHistoryUpsert,
+        matchUpdate,
+      }),
+    );
+
+    await expect(
+      service.finalizeMatch('user_123', 'grp_123', 'match_123'),
+    ).resolves.toMatchObject({
+      status: 'completed',
+      finalization: {
+        finalizedByUserId: 'usr_123',
+        finalizedAt,
+      },
+    });
+
+    expect(playerRatingStateUpsert).toHaveBeenCalledWith({
+      where: {
+        playerId: 'ply_a_1',
+      },
+      create: expect.objectContaining({
+        overallRating: 82.4,
+        formRating: 80.5,
+      }) as object,
+      update: expect.objectContaining({
+        overallRating: 82.4,
+        formRating: 80.5,
+      }) as object,
+    });
+    expect(matchPlayerStatUpsert).toHaveBeenCalledWith({
+      where: {
+        matchId_playerId: {
+          matchId: 'match_123',
+          playerId: 'ply_a_1',
+        },
+      },
+      create: expect.objectContaining({
+        result: 'win',
+        goals: 2,
+        assists: 1,
+        mvpVotes: 2,
+        mvpAwarded: true,
+        opponentAverageRating: 91,
+        performanceScore: 100,
+        overallBefore: 80,
+        overallAfter: 82.4,
+        formBefore: 70,
+        formAfter: 80.5,
+      }) as object,
+      update: expect.objectContaining({
+        overallAfter: 82.4,
+        formAfter: 80.5,
+      }) as object,
+    });
+    expect(playerRatingHistoryUpsert).toHaveBeenCalledWith({
+      where: {
+        matchId_playerId: {
+          matchId: 'match_123',
+          playerId: 'ply_a_1',
+        },
+      },
+      create: expect.objectContaining({
+        overallDelta: 2.4,
+        formDelta: 10.5,
+        reason: expect.objectContaining({
+          antiAbuse: expect.objectContaining({
+            method: 'median-distance-filter',
+          }) as object,
+          opponentRatings: expect.objectContaining({
+            ignoredExtremeRatings: 1,
+            average: 91,
+          }) as object,
+        }) as object,
+      }) as object,
+      update: expect.objectContaining({
+        overallDelta: 2.4,
+        formDelta: 10.5,
+      }) as object,
+    });
+    expect(matchUpdate).toHaveBeenCalledWith({
+      where: {
+        id: 'match_123',
+      },
+      data: {
+        status: 'completed',
+        finalizedByUserId: 'usr_123',
+        finalizedAt: expect.any(Date) as Date,
+      },
+    });
+  });
+
+  it('blocks finalization before a final score is submitted', async () => {
+    const transaction = jest.fn();
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'admin',
+        findFirst: jest
+          .fn()
+          .mockResolvedValue(createMatchRow({ status: 'locked' })),
+        transaction,
+      }),
+    );
+
+    await expect(
+      service.finalizeMatch('user_123', 'grp_123', 'match_123'),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('returns an already completed match without applying evolution again', async () => {
+    const transaction = jest.fn();
+    const finalizedAt = new Date('2026-06-10T21:45:00.000Z');
+    const service = new MatchesService(
+      createPrismaMock({
+        role: 'admin',
+        findFirst: jest.fn().mockResolvedValue(
+          createMatchRow({
+            status: 'completed',
+            teamAScore: 7,
+            teamBScore: 5,
+            scoreSubmittedByUserId: 'usr_123',
+            scoreSubmittedAt: new Date('2026-06-10T21:10:00.000Z'),
+            finalizedByUserId: 'usr_123',
+            finalizedAt,
+          }),
+        ),
+        transaction,
+      }),
+    );
+
+    await expect(
+      service.finalizeMatch('user_123', 'grp_123', 'match_123'),
+    ).resolves.toMatchObject({
+      status: 'completed',
+      finalization: {
+        finalizedByUserId: 'usr_123',
+        finalizedAt,
+      },
+    });
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
   it('generates and saves a team version from a ready confirmed pool', async () => {
     const attendanceFindMany = jest.fn().mockResolvedValue(
       createConfirmedAttendances([
@@ -1765,7 +2002,12 @@ function createPrismaMock({
   mvpVoteFindUnique = jest.fn().mockResolvedValue(null),
   opponentRatingCompletionFindUnique = jest.fn().mockResolvedValue(null),
   opponentRatingCompletionUpsert = jest.fn(),
+  opponentRatingFindMany = jest.fn().mockResolvedValue([]),
   opponentRatingUpsert = jest.fn(),
+  ratingStateFindMany = jest.fn().mockResolvedValue([]),
+  playerRatingStateUpsert = jest.fn().mockResolvedValue({}),
+  matchPlayerStatUpsert = jest.fn().mockResolvedValue({}),
+  playerRatingHistoryUpsert = jest.fn().mockResolvedValue({}),
   transaction = jest.fn(async (operations: Array<Promise<unknown>>) =>
     Promise.all(operations),
   ),
@@ -1796,7 +2038,12 @@ function createPrismaMock({
   mvpVoteFindUnique?: jest.Mock;
   opponentRatingCompletionFindUnique?: jest.Mock;
   opponentRatingCompletionUpsert?: jest.Mock;
+  opponentRatingFindMany?: jest.Mock;
   opponentRatingUpsert?: jest.Mock;
+  ratingStateFindMany?: jest.Mock;
+  playerRatingStateUpsert?: jest.Mock;
+  matchPlayerStatUpsert?: jest.Mock;
+  playerRatingHistoryUpsert?: jest.Mock;
   transaction?: jest.Mock;
 }) {
   return {
@@ -1850,11 +2097,22 @@ function createPrismaMock({
       findUnique: mvpVoteFindUnique,
     },
     matchOpponentRating: {
+      findMany: opponentRatingFindMany,
       upsert: opponentRatingUpsert,
     },
     matchOpponentRatingCompletion: {
       findUnique: opponentRatingCompletionFindUnique,
       upsert: opponentRatingCompletionUpsert,
+    },
+    playerRatingState: {
+      findMany: ratingStateFindMany,
+      upsert: playerRatingStateUpsert,
+    },
+    matchPlayerStat: {
+      upsert: matchPlayerStatUpsert,
+    },
+    playerRatingHistory: {
+      upsert: playerRatingHistoryUpsert,
     },
   } as unknown as PrismaService;
 }
@@ -1866,6 +2124,8 @@ function createMatchRow(
     teamBScore: number | null;
     scoreSubmittedByUserId: string | null;
     scoreSubmittedAt: Date | null;
+    finalizedByUserId: string | null;
+    finalizedAt: Date | null;
     group: {
       settings: {
         generatorStyle: string;
@@ -1891,6 +2151,8 @@ function createMatchRow(
     teamBScore: overrides.teamBScore ?? null,
     scoreSubmittedByUserId: overrides.scoreSubmittedByUserId ?? null,
     scoreSubmittedAt: overrides.scoreSubmittedAt ?? null,
+    finalizedByUserId: overrides.finalizedByUserId ?? null,
+    finalizedAt: overrides.finalizedAt ?? null,
     group: overrides.group,
     createdAt: new Date('2026-06-03T00:00:00.000Z'),
     updatedAt: new Date('2026-06-03T01:00:00.000Z'),
@@ -2058,6 +2320,70 @@ function createInitialRatingRows() {
       updatedAt: new Date('2026-06-03T01:00:00.000Z'),
     })),
   );
+}
+
+function createInitialRatingRowsForPlayers(
+  players: Array<[ratedPlayerId: string, overall: number]>,
+) {
+  return players.flatMap(([ratedPlayerId, overall]) =>
+    [1, 2, 3].map((index) => ({
+      id: `rating_${ratedPlayerId}_${index}`,
+      groupId: 'grp_123',
+      raterPlayerId: `rater_${index}`,
+      ratedPlayerId,
+      attributeSet: 'standard',
+      overall,
+      speed: overall,
+      attack: overall,
+      technique: overall,
+      defense: overall,
+      reflexes: null,
+      positioning: null,
+      handling: null,
+      distribution: null,
+      communication: null,
+      physical: overall,
+      stamina: overall,
+      fun: overall,
+      lockedAt: null,
+      createdAt: new Date('2026-06-03T01:00:00.000Z'),
+      updatedAt: new Date('2026-06-03T01:00:00.000Z'),
+    })),
+  );
+}
+
+function createPlayerRatingStateRow(
+  overrides: Partial<{
+    id: string;
+    playerId: string;
+    overallRating: number;
+    formRating: number;
+    gamesPlayed: number;
+    wins: number;
+    losses: number;
+    draws: number;
+    goals: number;
+    assists: number;
+    mvpAwards: number;
+    mvpVotes: number;
+  }> = {},
+) {
+  return {
+    id: overrides.id ?? `rating_state_${overrides.playerId ?? 'ply_123'}`,
+    playerId: overrides.playerId ?? 'ply_123',
+    overallRating: overrides.overallRating ?? 50,
+    formRating: overrides.formRating ?? 50,
+    gamesPlayed: overrides.gamesPlayed ?? 0,
+    wins: overrides.wins ?? 0,
+    losses: overrides.losses ?? 0,
+    draws: overrides.draws ?? 0,
+    goals: overrides.goals ?? 0,
+    assists: overrides.assists ?? 0,
+    mvpAwards: overrides.mvpAwards ?? 0,
+    mvpVotes: overrides.mvpVotes ?? 0,
+    createdAt: new Date('2026-06-03T01:00:00.000Z'),
+    updatedAt: new Date('2026-06-03T01:00:00.000Z'),
+  };
 }
 
 type TeamGenerationRowOverrides = Partial<{

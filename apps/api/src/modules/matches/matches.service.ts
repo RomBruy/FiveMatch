@@ -12,6 +12,7 @@ import {
   type MatchMvpVote as PrismaMatchMvpVote,
   type MatchOpponentRating as PrismaMatchOpponentRating,
   type MatchOpponentRatingCompletion as PrismaMatchOpponentRatingCompletion,
+  type PlayerRatingState as PrismaPlayerRatingState,
   type TeamGenerationVersion as PrismaTeamGenerationVersion,
 } from '@prisma/client';
 import type {
@@ -54,6 +55,10 @@ import {
 } from './match-options';
 
 const INITIAL_PEER_RATING_READINESS_THRESHOLD = 3;
+const DEFAULT_PLAYER_RATING = 50;
+const OVERALL_RATING_EVOLUTION_WEIGHT = 0.12;
+const FORM_RATING_EVOLUTION_WEIGHT = 0.35;
+const EXTREME_OPPONENT_RATING_DISTANCE = 35;
 export const TEAM_GENERATION_VERSION_LIMIT = 5;
 const MANUAL_ADJUSTMENT_SCORE_WEIGHTS = {
   fair_fresh: {
@@ -153,6 +158,10 @@ export type InternalFootballMatch = {
     submittedByUserId: string;
     submittedAt: Date;
   } | null;
+  finalization: {
+    finalizedByUserId: string;
+    finalizedAt: Date;
+  } | null;
   events: InternalFootballMatchEvent[];
   mvpVotes: InternalFootballMatchMvpVote[];
   myMvpVote: InternalFootballMatchMvpVote | null;
@@ -182,6 +191,39 @@ export type InternalTeamGenerationVersion = {
   manualAdjustment: TeamManualAdjustment | null;
   createdAt: Date;
   updatedAt: Date;
+};
+
+type FinalizationTeamPlayer = {
+  playerId: string;
+  teamLabel: 'A' | 'B';
+  generationRating: number;
+};
+
+type OpponentRatingSignal = {
+  average: number | null;
+  rawRatings: number[];
+  ignoredExtremeRatings: number;
+};
+
+type FinalizedPlayerRatingUpdate = {
+  playerId: string;
+  teamLabel: 'A' | 'B';
+  result: 'win' | 'loss' | 'draw';
+  goals: number;
+  assists: number;
+  mvpVotes: number;
+  mvpAwarded: boolean;
+  opponentAverageRating: number | null;
+  performanceScore: number;
+  overallBefore: number;
+  overallAfter: number;
+  formBefore: number;
+  formAfter: number;
+  overallDelta: number;
+  formDelta: number;
+  initialRating: number | null;
+  ignoredExtremeRatings: number;
+  rawOpponentRatings: number[];
 };
 
 @Injectable()
@@ -721,6 +763,206 @@ export class MatchesService {
       completion: this.toInternalOpponentRatingCompletion(completion),
       match: await this.toInternalMatch(match, actor.playerId),
     };
+  }
+
+  async finalizeMatch(
+    clerkUserId: string,
+    groupId: string,
+    matchId: string,
+  ): Promise<InternalFootballMatch> {
+    const actorMembership = await this.requireGroupMembership(
+      clerkUserId,
+      groupId,
+    );
+    const match = await this.prisma.match.findFirst({
+      where: {
+        id: matchId,
+        groupId,
+      },
+    });
+
+    if (!match) {
+      throw new ForbiddenException('Match required.');
+    }
+
+    if (
+      !canUpdateGroupSettings(actorMembership.role) &&
+      match.organizerUserId !== actorMembership.userId
+    ) {
+      throw new ForbiddenException('Organizer role required.');
+    }
+
+    const actorPlayer = await this.findGroupPlayer(
+      actorMembership.userId,
+      groupId,
+    );
+
+    if (normalizeMatchStatus(match.status) === 'completed') {
+      return this.toInternalMatch(match, actorPlayer?.id);
+    }
+
+    if (normalizeMatchStatus(match.status) !== 'locked') {
+      throw new ConflictException('Locked match required for finalization.');
+    }
+
+    if (
+      match.teamAScore === null ||
+      match.teamBScore === null ||
+      !match.scoreSubmittedByUserId ||
+      !match.scoreSubmittedAt
+    ) {
+      throw new ConflictException('Final score required before finalization.');
+    }
+
+    const lockedGeneration = await this.prisma.teamGenerationVersion.findFirst({
+      where: {
+        matchId: match.id,
+        status: 'locked',
+      },
+    });
+
+    if (!lockedGeneration) {
+      throw new ConflictException('Locked team generation required.');
+    }
+
+    const finalizedAt = new Date();
+    const playerUpdates = await this.buildFinalizedPlayerRatingUpdates(
+      groupId,
+      match,
+      lockedGeneration,
+    );
+    const operations = playerUpdates.flatMap((update) => [
+      this.prisma.playerRatingState.upsert({
+        where: {
+          playerId: update.playerId,
+        },
+        create: {
+          playerId: update.playerId,
+          overallRating: update.overallAfter,
+          formRating: update.formAfter,
+          gamesPlayed: 1,
+          wins: update.result === 'win' ? 1 : 0,
+          losses: update.result === 'loss' ? 1 : 0,
+          draws: update.result === 'draw' ? 1 : 0,
+          goals: update.goals,
+          assists: update.assists,
+          mvpAwards: update.mvpAwarded ? 1 : 0,
+          mvpVotes: update.mvpVotes,
+        },
+        update: {
+          overallRating: update.overallAfter,
+          formRating: update.formAfter,
+          gamesPlayed: {
+            increment: 1,
+          },
+          wins: {
+            increment: update.result === 'win' ? 1 : 0,
+          },
+          losses: {
+            increment: update.result === 'loss' ? 1 : 0,
+          },
+          draws: {
+            increment: update.result === 'draw' ? 1 : 0,
+          },
+          goals: {
+            increment: update.goals,
+          },
+          assists: {
+            increment: update.assists,
+          },
+          mvpAwards: {
+            increment: update.mvpAwarded ? 1 : 0,
+          },
+          mvpVotes: {
+            increment: update.mvpVotes,
+          },
+        },
+      }),
+      this.prisma.matchPlayerStat.upsert({
+        where: {
+          matchId_playerId: {
+            matchId: match.id,
+            playerId: update.playerId,
+          },
+        },
+        create: {
+          matchId: match.id,
+          playerId: update.playerId,
+          teamLabel: update.teamLabel,
+          result: update.result,
+          goals: update.goals,
+          assists: update.assists,
+          mvpVotes: update.mvpVotes,
+          mvpAwarded: update.mvpAwarded,
+          opponentAverageRating: update.opponentAverageRating,
+          performanceScore: update.performanceScore,
+          overallBefore: update.overallBefore,
+          overallAfter: update.overallAfter,
+          formBefore: update.formBefore,
+          formAfter: update.formAfter,
+        },
+        update: {
+          teamLabel: update.teamLabel,
+          result: update.result,
+          goals: update.goals,
+          assists: update.assists,
+          mvpVotes: update.mvpVotes,
+          mvpAwarded: update.mvpAwarded,
+          opponentAverageRating: update.opponentAverageRating,
+          performanceScore: update.performanceScore,
+          overallBefore: update.overallBefore,
+          overallAfter: update.overallAfter,
+          formBefore: update.formBefore,
+          formAfter: update.formAfter,
+        },
+      }),
+      this.prisma.playerRatingHistory.upsert({
+        where: {
+          matchId_playerId: {
+            matchId: match.id,
+            playerId: update.playerId,
+          },
+        },
+        create: {
+          playerId: update.playerId,
+          matchId: match.id,
+          overallBefore: update.overallBefore,
+          overallAfter: update.overallAfter,
+          formBefore: update.formBefore,
+          formAfter: update.formAfter,
+          overallDelta: update.overallDelta,
+          formDelta: update.formDelta,
+          reason: this.buildRatingHistoryReason(update, match),
+        },
+        update: {
+          overallBefore: update.overallBefore,
+          overallAfter: update.overallAfter,
+          formBefore: update.formBefore,
+          formAfter: update.formAfter,
+          overallDelta: update.overallDelta,
+          formDelta: update.formDelta,
+          reason: this.buildRatingHistoryReason(update, match),
+        },
+      }),
+    ]);
+    const transactionResults = await this.prisma.$transaction([
+      ...operations,
+      this.prisma.match.update({
+        where: {
+          id: match.id,
+        },
+        data: {
+          status: 'completed',
+          finalizedByUserId: actorMembership.userId,
+          finalizedAt,
+        },
+      }),
+    ]);
+    const updatedMatch = transactionResults[
+      transactionResults.length - 1
+    ] as PrismaMatch;
+
+    return this.toInternalMatch(updatedMatch, actorPlayer?.id);
   }
 
   async generateTeamVersion(
@@ -1518,6 +1760,165 @@ export class MatchesService {
     }
   }
 
+  private async buildFinalizedPlayerRatingUpdates(
+    groupId: string,
+    match: PrismaMatch,
+    generation: PrismaTeamGenerationVersion,
+  ): Promise<FinalizedPlayerRatingUpdate[]> {
+    const teamPlayers = getLockedGenerationPlayers(generation);
+    const playerIds = teamPlayers.map((player) => player.playerId);
+    const [
+      matchEvents,
+      mvpVotes,
+      opponentRatings,
+      ratingStates,
+      initialRatings,
+    ] = await Promise.all([
+      this.prisma.matchEvent.findMany({
+        where: {
+          matchId: match.id,
+          playerId: {
+            in: playerIds,
+          },
+        },
+      }),
+      this.prisma.matchMvpVote.findMany({
+        where: {
+          matchId: match.id,
+        },
+      }),
+      this.prisma.matchOpponentRating.findMany({
+        where: {
+          matchId: match.id,
+          ratedPlayerId: {
+            in: playerIds,
+          },
+        },
+      }),
+      this.prisma.playerRatingState.findMany({
+        where: {
+          playerId: {
+            in: playerIds,
+          },
+        },
+      }),
+      this.getGenerationPlayerRatings(groupId, playerIds),
+    ]);
+    const initialRatingByPlayerId = new Map(
+      initialRatings.map((rating) => [rating.playerId, rating]),
+    );
+    const ratingStateByPlayerId = new Map(
+      ratingStates.map((state) => [state.playerId, state]),
+    );
+    const goalsByPlayerId = getEventCountsByPlayer(matchEvents, 'goal');
+    const assistsByPlayerId = getEventCountsByPlayer(matchEvents, 'assist');
+    const mvpVotesByPlayerId = getMvpVotesByPlayer(mvpVotes);
+    const maxMvpVotes = Math.max(0, ...mvpVotesByPlayerId.values());
+    const opponentRatingsByPlayerId =
+      getOpponentRatingsByPlayer(opponentRatings);
+
+    return teamPlayers.map((player) => {
+      const initialRating = initialRatingByPlayerId.get(player.playerId);
+      const ratingState = ratingStateByPlayerId.get(player.playerId);
+      const baselineRating =
+        initialRating && initialRating.ratingsReceived > 0
+          ? initialRating.rating
+          : null;
+      const overallBefore = getCurrentOverallRating(
+        ratingState,
+        baselineRating,
+        player.generationRating,
+      );
+      const formBefore = getCurrentFormRating(ratingState, overallBefore);
+      const goals = goalsByPlayerId.get(player.playerId) ?? 0;
+      const assists = assistsByPlayerId.get(player.playerId) ?? 0;
+      const playerMvpVotes = mvpVotesByPlayerId.get(player.playerId) ?? 0;
+      const mvpAwarded = maxMvpVotes > 0 && playerMvpVotes === maxMvpVotes;
+      const result = getPlayerMatchResult(match, player.teamLabel);
+      const opponentRatingSignal = getOpponentRatingSignal(
+        opponentRatingsByPlayerId.get(player.playerId) ?? [],
+      );
+      const performanceScore = getPerformanceScore({
+        assists,
+        baselineRating,
+        formBefore,
+        generationRating: player.generationRating,
+        goals,
+        mvpAwarded,
+        mvpVotes: playerMvpVotes,
+        opponentAverageRating: opponentRatingSignal.average,
+        overallBefore,
+        result,
+      });
+      const overallAfter = evolveRating(
+        overallBefore,
+        performanceScore,
+        OVERALL_RATING_EVOLUTION_WEIGHT,
+      );
+      const formAfter = evolveRating(
+        formBefore,
+        performanceScore,
+        FORM_RATING_EVOLUTION_WEIGHT,
+      );
+
+      return {
+        playerId: player.playerId,
+        teamLabel: player.teamLabel,
+        result,
+        goals,
+        assists,
+        mvpVotes: playerMvpVotes,
+        mvpAwarded,
+        opponentAverageRating: opponentRatingSignal.average,
+        performanceScore,
+        overallBefore,
+        overallAfter,
+        formBefore,
+        formAfter,
+        overallDelta: roundToOneDecimal(overallAfter - overallBefore),
+        formDelta: roundToOneDecimal(formAfter - formBefore),
+        initialRating: baselineRating,
+        ignoredExtremeRatings: opponentRatingSignal.ignoredExtremeRatings,
+        rawOpponentRatings: opponentRatingSignal.rawRatings,
+      };
+    });
+  }
+
+  private buildRatingHistoryReason(
+    update: FinalizedPlayerRatingUpdate,
+    match: PrismaMatch,
+  ) {
+    return {
+      algorithmVersion: 'rating-evolution-v1',
+      result: update.result,
+      teamLabel: update.teamLabel,
+      score: {
+        teamA: match.teamAScore,
+        teamB: match.teamBScore,
+      },
+      performanceScore: update.performanceScore,
+      goals: update.goals,
+      assists: update.assists,
+      mvpVotes: update.mvpVotes,
+      mvpAwarded: update.mvpAwarded,
+      initialRating: update.initialRating,
+      opponentRatings: {
+        average: update.opponentAverageRating,
+        rawCount: update.rawOpponentRatings.length,
+        ignoredExtremeRatings: update.ignoredExtremeRatings,
+        rawRatings: update.rawOpponentRatings,
+      },
+      antiAbuse: {
+        method: 'median-distance-filter',
+        threshold: EXTREME_OPPONENT_RATING_DISTANCE,
+      },
+      weights: {
+        overall: OVERALL_RATING_EVOLUTION_WEIGHT,
+        form: FORM_RATING_EVOLUTION_WEIGHT,
+      },
+    };
+  }
+
   private async toInternalMatch(
     match: PrismaMatch,
     currentPlayerId?: string,
@@ -1638,6 +2039,13 @@ export class MatchesService {
               teamBScore: match.teamBScore,
               submittedByUserId: match.scoreSubmittedByUserId,
               submittedAt: match.scoreSubmittedAt,
+            }
+          : null,
+      finalization:
+        match.finalizedByUserId && match.finalizedAt
+          ? {
+              finalizedByUserId: match.finalizedByUserId,
+              finalizedAt: match.finalizedAt,
             }
           : null,
       events: events.map((event) => this.toInternalMatchEvent(event)),
@@ -1762,6 +2170,205 @@ export class MatchesService {
       updatedAt: generation.updatedAt,
     };
   }
+}
+
+function getLockedGenerationPlayers(
+  generation: PrismaTeamGenerationVersion,
+): FinalizationTeamPlayer[] {
+  const teamA = generation.teamA as unknown as TeamGenerationTeam;
+  const teamB = generation.teamB as unknown as TeamGenerationTeam;
+
+  return [
+    ...teamA.players.map((player) => ({
+      playerId: player.playerId,
+      teamLabel: 'A' as const,
+      generationRating: player.rating,
+    })),
+    ...teamB.players.map((player) => ({
+      playerId: player.playerId,
+      teamLabel: 'B' as const,
+      generationRating: player.rating,
+    })),
+  ];
+}
+
+function getEventCountsByPlayer(
+  events: PrismaMatchEvent[],
+  kind: InternalFootballMatchEvent['kind'],
+) {
+  return events.reduce((counts, event) => {
+    if (event.kind !== kind) {
+      return counts;
+    }
+
+    counts.set(event.playerId, (counts.get(event.playerId) ?? 0) + event.count);
+
+    return counts;
+  }, new Map<string, number>());
+}
+
+function getMvpVotesByPlayer(votes: PrismaMatchMvpVote[]) {
+  return votes.reduce((counts, vote) => {
+    counts.set(vote.votedPlayerId, (counts.get(vote.votedPlayerId) ?? 0) + 1);
+
+    return counts;
+  }, new Map<string, number>());
+}
+
+function getOpponentRatingsByPlayer(ratings: PrismaMatchOpponentRating[]) {
+  return ratings.reduce((ratingsByPlayerId, rating) => {
+    const currentRatings = ratingsByPlayerId.get(rating.ratedPlayerId) ?? [];
+    currentRatings.push(rating.rating);
+    ratingsByPlayerId.set(rating.ratedPlayerId, currentRatings);
+
+    return ratingsByPlayerId;
+  }, new Map<string, number[]>());
+}
+
+function getOpponentRatingSignal(ratings: number[]): OpponentRatingSignal {
+  if (ratings.length === 0) {
+    return {
+      average: null,
+      rawRatings: [],
+      ignoredExtremeRatings: 0,
+    };
+  }
+
+  const median = getMedian(ratings);
+  const filteredRatings = ratings.filter(
+    (rating) => Math.abs(rating - median) <= EXTREME_OPPONENT_RATING_DISTANCE,
+  );
+  const effectiveRatings =
+    filteredRatings.length > 0 ? filteredRatings : [median];
+  const ignoredExtremeRatings =
+    filteredRatings.length > 0
+      ? ratings.length - filteredRatings.length
+      : ratings.length;
+
+  return {
+    average: roundToOneDecimal(getAverage(effectiveRatings)),
+    rawRatings: ratings,
+    ignoredExtremeRatings,
+  };
+}
+
+function getCurrentOverallRating(
+  ratingState: PrismaPlayerRatingState | undefined,
+  baselineRating: number | null,
+  generationRating: number,
+) {
+  return roundToOneDecimal(
+    ratingState?.overallRating ??
+      baselineRating ??
+      generationRating ??
+      DEFAULT_PLAYER_RATING,
+  );
+}
+
+function getCurrentFormRating(
+  ratingState: PrismaPlayerRatingState | undefined,
+  overallBefore: number,
+) {
+  return roundToOneDecimal(ratingState?.formRating ?? overallBefore);
+}
+
+function getPlayerMatchResult(
+  match: PrismaMatch,
+  teamLabel: FinalizationTeamPlayer['teamLabel'],
+): FinalizedPlayerRatingUpdate['result'] {
+  const teamAScore = match.teamAScore ?? 0;
+  const teamBScore = match.teamBScore ?? 0;
+
+  if (teamAScore === teamBScore) {
+    return 'draw';
+  }
+
+  const teamAWon = teamAScore > teamBScore;
+
+  if (teamLabel === 'A') {
+    return teamAWon ? 'win' : 'loss';
+  }
+
+  return teamAWon ? 'loss' : 'win';
+}
+
+function getPerformanceScore({
+  assists,
+  baselineRating,
+  formBefore,
+  generationRating,
+  goals,
+  mvpAwarded,
+  mvpVotes,
+  opponentAverageRating,
+  overallBefore,
+  result,
+}: {
+  assists: number;
+  baselineRating: number | null;
+  formBefore: number;
+  generationRating: number;
+  goals: number;
+  mvpAwarded: boolean;
+  mvpVotes: number;
+  opponentAverageRating: number | null;
+  overallBefore: number;
+  result: FinalizedPlayerRatingUpdate['result'];
+}) {
+  const ratingSignal =
+    opponentAverageRating ?? baselineRating ?? generationRating;
+  const blendedMatchSignal =
+    ratingSignal * 0.55 + overallBefore * 0.3 + formBefore * 0.15;
+  const score =
+    blendedMatchSignal +
+    getResultAdjustment(result) +
+    goals * 3 +
+    assists * 2 +
+    Math.min(mvpVotes, 5) * 1.2 +
+    (mvpAwarded ? 4 : 0);
+
+  return roundToOneDecimal(clampRating(score));
+}
+
+function getResultAdjustment(result: FinalizedPlayerRatingUpdate['result']) {
+  if (result === 'win') {
+    return 3;
+  }
+
+  if (result === 'loss') {
+    return -2;
+  }
+
+  return 0;
+}
+
+function evolveRating(
+  currentRating: number,
+  performanceScore: number,
+  weight: number,
+) {
+  return roundToOneDecimal(
+    clampRating(currentRating + (performanceScore - currentRating) * weight),
+  );
+}
+
+function getMedian(values: number[]) {
+  const sortedValues = [...values].sort((left, right) => left - right);
+  const middleIndex = Math.floor(sortedValues.length / 2);
+
+  if (sortedValues.length % 2 === 0) {
+    return (sortedValues[middleIndex - 1] + sortedValues[middleIndex]) / 2;
+  }
+
+  return sortedValues[middleIndex];
+}
+
+function getAverage(values: number[]) {
+  return values.reduce((total, value) => total + value, 0) / values.length;
+}
+
+function clampRating(value: number) {
+  return Math.max(0, Math.min(100, value));
 }
 
 function swapTeamPlayers(

@@ -502,6 +502,21 @@ export const fr = {
       "Notes adversaires passees. Tu pourras aider l'algo au prochain match.",
     opponentRatingsError:
       "Impossible d'enregistrer les notes adversaires. Verifie que tu etais confirme et que tu notes seulement les adversaires.",
+    finalizeTitle: "Finaliser le match",
+    finalizeSubtitle:
+      "Ferme le match et met a jour stats, forme, OVR, votes MVP et historique des notes.",
+    finalizeCompletedSubtitle:
+      "Match termine. Les classements et l'historique des notes sont a jour.",
+    finalizeAlgorithmHint:
+      "L'algo fait bouger la forme vite, l'OVR lentement, et adoucit les notes extremes suspectes.",
+    finalizeViewerHint:
+      "Seuls l'organisateur ou les admins peuvent finaliser le match.",
+    finalizeMatch: "Finaliser le match",
+    finalizingMatch: "Finalisation...",
+    finalizeBadge: "Termine",
+    finalizeSaved: "Match finalise. Classements mis a jour.",
+    finalizeError:
+      "Impossible de finaliser le match. Verifie le score, les equipes et les droits.",
     opponentRatingTags: {
       fast: "Rapide",
       technical: "Technique",

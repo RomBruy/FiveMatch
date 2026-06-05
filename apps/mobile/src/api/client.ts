@@ -7,6 +7,7 @@ import type {
   CreateFootballMatchResponse,
   ConfirmTeamGenerationResponse,
   CurrentUserResponse,
+  FinalizeMatchResponse,
   FootballGroupMembersResponse,
   FootballGroupsResponse,
   GenerateTeamVersionResponse,
@@ -429,6 +430,20 @@ export async function skipOpponentRatings(
 ): Promise<SkipOpponentRatingsResponse> {
   return apiFetch<SkipOpponentRatingsResponse>(
     `/groups/${groupId}/matches/${matchId}/opponent-ratings/skip`,
+    {
+      method: "POST",
+      token,
+    }
+  );
+}
+
+export async function finalizeMatch(
+  token: string,
+  groupId: string,
+  matchId: string
+): Promise<FinalizeMatchResponse> {
+  return apiFetch<FinalizeMatchResponse>(
+    `/groups/${groupId}/matches/${matchId}/finalize`,
     {
       method: "POST",
       token,

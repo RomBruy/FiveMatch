@@ -15,6 +15,7 @@ import type {
   ConfirmTeamGenerationResponse,
   CreateFootballMatchInput,
   CreateFootballMatchResponse,
+  FinalizeMatchResponse,
   GenerateTeamVersionResponse,
   LatestTeamGenerationResponse,
   ManualTeamAdjustmentInput,
@@ -267,6 +268,30 @@ export class MatchesController {
         ),
         completion: serializeOpponentRatingCompletion(result.completion),
         match: serializeFootballMatch(result.match),
+      },
+    };
+  }
+
+  @Post(':matchId/finalize')
+  @UseGuards(ClerkAuthGuard)
+  async finalizeMatch(
+    @Req() request: AuthenticatedRequest,
+    @Param('groupId') groupId: string,
+    @Param('matchId') matchId: string,
+  ): Promise<FinalizeMatchResponse> {
+    if (!request.auth) {
+      throw new InternalServerErrorException('Authenticated user missing.');
+    }
+
+    const match = await this.matchesService.finalizeMatch(
+      request.auth.clerkUserId,
+      groupId,
+      matchId,
+    );
+
+    return {
+      data: {
+        match: serializeFootballMatch(match),
       },
     };
   }

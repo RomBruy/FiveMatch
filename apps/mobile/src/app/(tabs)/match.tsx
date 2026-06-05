@@ -39,6 +39,7 @@ import {
   applyManualTeamAdjustment,
   confirmTeamGeneration,
   createFootballMatch,
+  finalizeMatch,
   generateTeamVersion,
   getInitialPeerRatingReadiness,
   getNextFootballMatch,
@@ -64,6 +65,7 @@ type ScoreSubmitState = "idle" | "submitting" | "saved" | "error";
 type MatchEventsSubmitState = "idle" | "submitting" | "saved" | "error";
 type MvpVoteSubmitState = "idle" | "submitting" | "saved" | "error";
 type OpponentRatingsSubmitState = "idle" | "submitting" | "saved" | "error";
+type MatchFinalizeState = "idle" | "finalizing" | "completed" | "error";
 type ScoreDraft = {
   teamAScore: string;
   teamBScore: string;
@@ -125,6 +127,8 @@ export default function MatchScreen() {
     useState<MvpVoteSubmitState>("idle");
   const [opponentRatingsSubmitState, setOpponentRatingsSubmitState] =
     useState<OpponentRatingsSubmitState>("idle");
+  const [matchFinalizeState, setMatchFinalizeState] =
+    useState<MatchFinalizeState>("idle");
   const [scoreDraft, setScoreDraft] = useState<ScoreDraft>({
     teamAScore: "",
     teamBScore: "",
@@ -164,6 +168,7 @@ export default function MatchScreen() {
         setMatchEventsSubmitState("idle");
         setMvpVoteSubmitState("idle");
         setOpponentRatingsSubmitState("idle");
+        setMatchFinalizeState("idle");
         setScoreDraft(createScoreDraft(null));
         setLoadState("noGroup");
         return;
@@ -193,6 +198,11 @@ export default function MatchScreen() {
       setMatchEventsSubmitState("idle");
       setMvpVoteSubmitState("idle");
       setOpponentRatingsSubmitState("idle");
+      setMatchFinalizeState(
+        nextMatchResponse.data.match?.status === "completed"
+          ? "completed"
+          : "idle"
+      );
       setPlayers(rosterResponse.data.players);
       setTeamGenerations(savedGenerations);
       setTeamGeneration(selectPrimaryTeamGeneration(savedGenerations));
@@ -356,6 +366,7 @@ export default function MatchScreen() {
       setMatchEventsSubmitState("idle");
       setMvpVoteSubmitState("idle");
       setOpponentRatingsSubmitState("idle");
+      setMatchFinalizeState("idle");
       setTeamGenerations((currentGenerations) =>
         currentGenerations.map((generation) =>
           generation.id === updatedGeneration.id ? updatedGeneration : generation
@@ -400,6 +411,7 @@ export default function MatchScreen() {
       setMatchEventsSubmitState("idle");
       setMvpVoteSubmitState("idle");
       setOpponentRatingsSubmitState("idle");
+      setMatchFinalizeState("idle");
       setScoreSubmitState("saved");
       setActionMessage(strings.matches.finalScoreSaved);
     } catch (error) {
@@ -540,6 +552,39 @@ export default function MatchScreen() {
     }
   }
 
+  async function handleFinalizeMatch() {
+    if (!activeGroup || !nextMatch) {
+      setActionMessage(strings.generation.noMatchForGeneration);
+      return;
+    }
+
+    setMatchFinalizeState("finalizing");
+    setActionMessage(null);
+
+    try {
+      const token = await getToken();
+
+      if (!token) {
+        throw new Error("Missing auth token.");
+      }
+
+      const response = await finalizeMatch(
+        token,
+        activeGroup.id,
+        nextMatch.id
+      );
+
+      setNextMatch(response.data.match);
+      setScoreDraft(createScoreDraft(response.data.match));
+      setMatchFinalizeState("completed");
+      setActionMessage(strings.matches.finalizeSaved);
+    } catch (error) {
+      console.warn("Unable to finalize match", error);
+      setMatchFinalizeState("error");
+      setActionMessage(strings.matches.finalizeError);
+    }
+  }
+
   async function handleCreateMatch() {
     if (!activeGroup) {
       return;
@@ -584,6 +629,7 @@ export default function MatchScreen() {
       setMatchEventsSubmitState("idle");
       setMvpVoteSubmitState("idle");
       setOpponentRatingsSubmitState("idle");
+      setMatchFinalizeState("idle");
       setScoreDraft(createScoreDraft(response.data.match));
       setCreateState("created");
     } catch (error) {
@@ -763,9 +809,9 @@ export default function MatchScreen() {
               />
             ) : null}
 
-            {nextMatch?.status === "locked" ? (
+            {nextMatch?.status === "locked" || nextMatch?.status === "completed" ? (
               <FinalScoreCard
-                canEditScore={canCreateMatch}
+                canEditScore={canCreateMatch && nextMatch.status === "locked"}
                 draft={scoreDraft}
                 match={nextMatch}
                 onChange={setScoreDraft}
@@ -807,6 +853,18 @@ export default function MatchScreen() {
                 players={players}
                 submitState={opponentRatingsSubmitState}
                 teamPlayers={getLockedTeamPlayers(teamGeneration)}
+              />
+            ) : null}
+
+            {(nextMatch?.status === "locked" ||
+              nextMatch?.status === "completed") &&
+            nextMatch.score &&
+            teamGeneration?.status === "locked" ? (
+              <FinalizeMatchCard
+                canFinalize={canCreateMatch && nextMatch.status === "locked"}
+                match={nextMatch}
+                onFinalize={handleFinalizeMatch}
+                state={matchFinalizeState}
               />
             ) : null}
 
@@ -1906,6 +1964,77 @@ function OpponentRatingsCard({
 
       {submitState === "error" ? (
         <Text style={styles.errorText}>{strings.matches.opponentRatingsError}</Text>
+      ) : null}
+    </View>
+  );
+}
+
+function FinalizeMatchCard({
+  canFinalize,
+  match,
+  onFinalize,
+  state,
+}: {
+  canFinalize: boolean;
+  match: FootballMatch;
+  onFinalize: () => void;
+  state: MatchFinalizeState;
+}) {
+  const { strings } = usePreferences();
+  const isCompleted = match.status === "completed";
+  const isFinalizing = state === "finalizing";
+  const disabled = !canFinalize || isCompleted || isFinalizing;
+
+  return (
+    <View style={styles.finalizeCard}>
+      <View style={styles.attendanceHeader}>
+        <View style={styles.attendanceHeaderCopy}>
+          <Text style={styles.cardTitle}>{strings.matches.finalizeTitle}</Text>
+          <Text style={styles.helperText}>
+            {isCompleted
+              ? strings.matches.finalizeCompletedSubtitle
+              : strings.matches.finalizeSubtitle}
+          </Text>
+        </View>
+        {isCompleted ? (
+          <Text style={styles.lockBadge}>{strings.matches.finalizeBadge}</Text>
+        ) : null}
+      </View>
+
+      <View style={styles.finalizeSummary}>
+        <Text style={styles.finalizeSummaryText}>
+          {strings.generation.teamLabel} A {match.score?.teamAScore ?? "-"} -{" "}
+          {match.score?.teamBScore ?? "-"} {strings.generation.teamLabel} B
+        </Text>
+        <Text style={styles.finalizeSummaryHint}>
+          {strings.matches.finalizeAlgorithmHint}
+        </Text>
+      </View>
+
+      {!isCompleted ? (
+        <Pressable
+          accessibilityRole="button"
+          disabled={disabled}
+          onPress={onFinalize}
+          style={[
+            styles.submitButton,
+            disabled && styles.submitButtonDisabled,
+          ]}
+        >
+          <Text style={styles.submitButtonText}>
+            {isFinalizing
+              ? strings.matches.finalizingMatch
+              : strings.matches.finalizeMatch}
+          </Text>
+        </Pressable>
+      ) : null}
+
+      {!canFinalize && !isCompleted ? (
+        <Text style={styles.helperText}>{strings.matches.finalizeViewerHint}</Text>
+      ) : null}
+
+      {state === "error" ? (
+        <Text style={styles.errorText}>{strings.matches.finalizeError}</Text>
       ) : null}
     </View>
   );
@@ -3332,6 +3461,33 @@ const styles = StyleSheet.create({
   opponentRatingActions: {
     flexDirection: "row",
     gap: 10,
+  },
+  finalizeCard: {
+    gap: 15,
+    borderWidth: 1,
+    borderColor: "#35C77B",
+    borderRadius: 26,
+    backgroundColor: "#0B1B15",
+    padding: 18,
+  },
+  finalizeSummary: {
+    gap: 6,
+    borderWidth: 1,
+    borderColor: "#1F513A",
+    borderRadius: 18,
+    backgroundColor: "#101A16",
+    padding: 13,
+  },
+  finalizeSummaryText: {
+    color: "#F4F7F2",
+    fontSize: 18,
+    fontWeight: "900",
+  },
+  finalizeSummaryHint: {
+    color: "#AEB8C7",
+    fontSize: 12,
+    fontWeight: "800",
+    lineHeight: 17,
   },
   scoreBoard: {
     flexDirection: "row",

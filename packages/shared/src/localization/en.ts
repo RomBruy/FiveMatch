@@ -498,6 +498,21 @@ export const en = {
       "Opponent ratings skipped. You can help the algorithm next match.",
     opponentRatingsError:
       "Unable to save opponent ratings. Check you were confirmed and only rated opponents.",
+    finalizeTitle: "Finalize match",
+    finalizeSubtitle:
+      "Close the match and update stats, form, OVR, MVP counts, and rating history.",
+    finalizeCompletedSubtitle:
+      "Match completed. Rankings and rating history have been updated.",
+    finalizeAlgorithmHint:
+      "The algorithm moves form quickly, OVR slowly, and softens suspicious extreme ratings.",
+    finalizeViewerHint:
+      "Only the organizer or admins can finalize the match.",
+    finalizeMatch: "Finalize match",
+    finalizingMatch: "Finalizing...",
+    finalizeBadge: "Completed",
+    finalizeSaved: "Match finalized. Rankings updated.",
+    finalizeError:
+      "Unable to finalize the match. Check score, teams, and permissions.",
     opponentRatingTags: {
       fast: "Fast",
       technical: "Technical",

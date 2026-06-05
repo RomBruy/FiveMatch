@@ -41,6 +41,12 @@ export function serializeFootballMatch(
           submittedAt: match.score.submittedAt.toISOString(),
         }
       : null,
+    finalization: match.finalization
+      ? {
+          finalizedByUserId: match.finalization.finalizedByUserId,
+          finalizedAt: match.finalization.finalizedAt.toISOString(),
+        }
+      : null,
     events: match.events.map((event) => ({
       id: event.id,
       matchId: event.matchId,

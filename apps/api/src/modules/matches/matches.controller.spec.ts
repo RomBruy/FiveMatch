@@ -604,6 +604,56 @@ describe('MatchesController', () => {
     );
   });
 
+  it('finalizes and serializes match completion', async () => {
+    const finalizedAt = new Date('2026-06-10T21:45:00.000Z');
+    const finalizeMatch = jest.fn().mockResolvedValue(
+      createInternalMatch({
+        status: 'completed',
+        score: {
+          teamAScore: 7,
+          teamBScore: 5,
+          submittedByUserId: 'usr_123',
+          submittedAt: new Date('2026-06-10T21:10:00.000Z'),
+        },
+        finalization: {
+          finalizedByUserId: 'usr_123',
+          finalizedAt,
+        },
+      }),
+    );
+    const controller = new MatchesController({
+      finalizeMatch,
+    } as unknown as MatchesService);
+
+    await expect(
+      controller.finalizeMatch(
+        {
+          auth: {
+            clerkUserId: 'user_123',
+          },
+        } as AuthenticatedRequest,
+        'grp_123',
+        'match_123',
+      ),
+    ).resolves.toMatchObject({
+      data: {
+        match: {
+          status: 'completed',
+          finalization: {
+            finalizedByUserId: 'usr_123',
+            finalizedAt: '2026-06-10T21:45:00.000Z',
+          },
+        },
+      },
+    });
+
+    expect(finalizeMatch).toHaveBeenCalledWith(
+      'user_123',
+      'grp_123',
+      'match_123',
+    );
+  });
+
   it('generates and serializes a team version', async () => {
     const generateTeamVersion = jest
       .fn()
@@ -883,6 +933,10 @@ function createInternalMatch(
       submittedByUserId: string;
       submittedAt: Date;
     } | null;
+    finalization: {
+      finalizedByUserId: string;
+      finalizedAt: Date;
+    } | null;
     events: ReturnType<typeof createInternalMatchEvent>[];
     attendances: {
       id: string;
@@ -929,6 +983,7 @@ function createInternalMatch(
     confirmedCount: 0,
     waitlistCount: 0,
     score: overrides.score ?? null,
+    finalization: overrides.finalization ?? null,
     events: overrides.events ?? [],
     mvpVotes: overrides.mvpVotes ?? [],
     myMvpVote: overrides.myMvpVote ?? null,

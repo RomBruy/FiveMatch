@@ -21,6 +21,7 @@ model User {
   createdInvitations  Invitation[]            @relation("InvitationCreator")
   organizedMatches    Match[]                 @relation("MatchOrganizer")
   submittedScores     Match[]                 @relation("MatchScoreSubmitter")
+  finalizedMatches    Match[]                 @relation("MatchFinalizer")
   recordedMatchEvents MatchEvent[]            @relation("MatchEventRecorder")
   teamGenerations     TeamGenerationVersion[] @relation("TeamGenerationCreator")
   createdAt           DateTime                @default(now()) @map("created_at")
@@ -103,35 +104,38 @@ model Player {
   group                  Group               @relation(fields: [groupId], references: [id], onDelete: Cascade)
   userId                 String              @map("user_id")
   user                   User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  initialRatingsGiven    InitialPeerRating[] @relation("InitialPeerRatingsGiven")
-  initialRatingsReceived InitialPeerRating[] @relation("InitialPeerRatingsReceived")
-  matchAttendances       MatchAttendance[]
-  matchEvents            MatchEvent[]
-  opponentRatingsGiven   MatchOpponentRating[] @relation("MatchOpponentRatingGiven")
-  opponentRatingsReceived MatchOpponentRating[] @relation("MatchOpponentRatingReceived")
+  initialRatingsGiven       InitialPeerRating[]              @relation("InitialPeerRatingsGiven")
+  initialRatingsReceived    InitialPeerRating[]              @relation("InitialPeerRatingsReceived")
+  matchAttendances          MatchAttendance[]
+  matchEvents               MatchEvent[]
+  opponentRatingsGiven      MatchOpponentRating[]            @relation("MatchOpponentRatingGiven")
+  opponentRatingsReceived   MatchOpponentRating[]            @relation("MatchOpponentRatingReceived")
   opponentRatingCompletions MatchOpponentRatingCompletion[]
-  mvpVotesCast           MatchMvpVote[]      @relation("MatchMvpVoteVoter")
-  mvpVotesReceived       MatchMvpVote[]      @relation("MatchMvpVoteTarget")
-  firstName              String?             @map("first_name")
-  lastName               String?             @map("last_name")
-  nickname               String?
-  photoUrl               String?             @map("photo_url")
-  bio                    String?
-  dominantFoot           String?             @map("dominant_foot")
-  jerseyNumber           Int?                @map("jersey_number")
-  preferredStyle         String?             @map("preferred_style")
-  clubDeFormation        String?             @map("club_de_formation")
-  specialty              String?
-  favoriteExcuse         String?             @map("favorite_excuse")
-  badFaithLevel          Int?                @map("bad_faith_level")
-  lockerRoomStyle        String?             @map("locker_room_style")
-  thirdHalfProfile       String?             @map("third_half_profile")
-  warCry                 String?             @map("war_cry")
-  signatureCelebration   String?             @map("signature_celebration")
-  worstOnPitchHabit      String?             @map("worst_on_pitch_habit")
-  legendaryPhrase        String?             @map("legendary_phrase")
-  createdAt              DateTime            @default(now()) @map("created_at")
-  updatedAt              DateTime            @updatedAt @map("updated_at")
+  mvpVotesCast              MatchMvpVote[]                   @relation("MatchMvpVoteVoter")
+  mvpVotesReceived          MatchMvpVote[]                   @relation("MatchMvpVoteTarget")
+  ratingState               PlayerRatingState?
+  matchStats                MatchPlayerStat[]
+  ratingHistory             PlayerRatingHistory[]
+  firstName                 String?                          @map("first_name")
+  lastName                  String?                          @map("last_name")
+  nickname                  String?
+  photoUrl                  String?                          @map("photo_url")
+  bio                       String?
+  dominantFoot              String?                          @map("dominant_foot")
+  jerseyNumber              Int?                             @map("jersey_number")
+  preferredStyle            String?                          @map("preferred_style")
+  clubDeFormation           String?                          @map("club_de_formation")
+  specialty                 String?
+  favoriteExcuse            String?                          @map("favorite_excuse")
+  badFaithLevel             Int?                             @map("bad_faith_level")
+  lockerRoomStyle           String?                          @map("locker_room_style")
+  thirdHalfProfile          String?                          @map("third_half_profile")
+  warCry                    String?                          @map("war_cry")
+  signatureCelebration      String?                          @map("signature_celebration")
+  worstOnPitchHabit         String?                          @map("worst_on_pitch_habit")
+  legendaryPhrase           String?                          @map("legendary_phrase")
+  createdAt                 DateTime                         @default(now()) @map("created_at")
+  updatedAt                 DateTime                         @updatedAt @map("updated_at")
 
   @@unique([groupId, userId], map: "uq_players_group_id_user_id")
   @@index([userId], map: "idx_players_user_id")
@@ -190,11 +194,16 @@ model Match {
   scoreSubmittedByUserId String?                 @map("score_submitted_by_user_id")
   scoreSubmittedBy       User?                   @relation("MatchScoreSubmitter", fields: [scoreSubmittedByUserId], references: [id], onDelete: SetNull)
   scoreSubmittedAt       DateTime?               @map("score_submitted_at")
+  finalizedByUserId      String?                 @map("finalized_by_user_id")
+  finalizedBy            User?                   @relation("MatchFinalizer", fields: [finalizedByUserId], references: [id], onDelete: SetNull)
+  finalizedAt            DateTime?               @map("finalized_at")
   attendances            MatchAttendance[]
   events                 MatchEvent[]
   opponentRatings        MatchOpponentRating[]
   opponentRatingCompletions MatchOpponentRatingCompletion[]
   mvpVotes               MatchMvpVote[]
+  playerStats            MatchPlayerStat[]
+  ratingHistory          PlayerRatingHistory[]
   teamGenerations        TeamGenerationVersion[]
   createdAt              DateTime                @default(now()) @map("created_at")
   updatedAt              DateTime                @updatedAt @map("updated_at")
@@ -202,6 +211,7 @@ model Match {
   @@index([groupId, startsAt], map: "idx_matches_group_id_starts_at")
   @@index([organizerUserId], map: "idx_matches_organizer_user_id")
   @@index([scoreSubmittedByUserId], map: "idx_matches_score_submitted_by_user_id")
+  @@index([finalizedByUserId], map: "idx_matches_finalized_by_user_id")
   @@map("matches")
 }
 
@@ -296,6 +306,74 @@ model MatchOpponentRatingCompletion {
   @@index([matchId, status], map: "idx_match_opponent_rating_completions_match_status")
   @@index([playerId], map: "idx_match_opponent_rating_completions_player_id")
   @@map("match_opponent_rating_completions")
+}
+
+model PlayerRatingState {
+  id            String   @id @default(cuid())
+  playerId      String   @unique @map("player_id")
+  player        Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  overallRating Float    @default(50) @map("overall_rating")
+  formRating    Float    @default(50) @map("form_rating")
+  gamesPlayed   Int      @default(0) @map("games_played")
+  wins          Int      @default(0)
+  losses        Int      @default(0)
+  draws         Int      @default(0)
+  goals         Int      @default(0)
+  assists       Int      @default(0)
+  mvpAwards     Int      @default(0) @map("mvp_awards")
+  mvpVotes      Int      @default(0) @map("mvp_votes")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("player_rating_states")
+}
+
+model MatchPlayerStat {
+  id                    String   @id @default(cuid())
+  matchId               String   @map("match_id")
+  match                 Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  playerId              String   @map("player_id")
+  player                Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  teamLabel             String   @map("team_label")
+  result                String
+  goals                 Int      @default(0)
+  assists               Int      @default(0)
+  mvpVotes              Int      @default(0) @map("mvp_votes")
+  mvpAwarded            Boolean  @default(false) @map("mvp_awarded")
+  opponentAverageRating Float?   @map("opponent_average_rating")
+  performanceScore      Float    @map("performance_score")
+  overallBefore         Float    @map("overall_before")
+  overallAfter          Float    @map("overall_after")
+  formBefore            Float    @map("form_before")
+  formAfter             Float    @map("form_after")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  @@unique([matchId, playerId], map: "uq_match_player_stats_match_player")
+  @@index([playerId], map: "idx_match_player_stats_player_id")
+  @@index([matchId, teamLabel], map: "idx_match_player_stats_match_team")
+  @@map("match_player_stats")
+}
+
+model PlayerRatingHistory {
+  id            String   @id @default(cuid())
+  playerId      String   @map("player_id")
+  player        Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  matchId       String   @map("match_id")
+  match         Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  overallBefore Float    @map("overall_before")
+  overallAfter  Float    @map("overall_after")
+  formBefore    Float    @map("form_before")
+  formAfter     Float    @map("form_after")
+  overallDelta  Float    @map("overall_delta")
+  formDelta     Float    @map("form_delta")
+  reason        Json
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@unique([matchId, playerId], map: "uq_player_rating_history_match_player")
+  @@index([playerId, createdAt], map: "idx_player_rating_history_player_created_at")
+  @@index([matchId], map: "idx_player_rating_history_match_id")
+  @@map("player_rating_history")
 }
 
 model TeamGenerationVersion {

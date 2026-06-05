@@ -57,6 +57,11 @@ export type FootballMatchScore = {
   submittedAt: string;
 };
 
+export type FootballMatchFinalization = {
+  finalizedByUserId: string;
+  finalizedAt: string;
+};
+
 export type FootballMatchEvent = {
   id: string;
   matchId: string;
@@ -102,6 +107,7 @@ export type FootballMatch = {
   confirmedCount: number;
   waitlistCount: number;
   score: FootballMatchScore | null;
+  finalization: FootballMatchFinalization | null;
   events: FootballMatchEvent[];
   mvpVotes: FootballMatchMvpVote[];
   myMvpVote: FootballMatchMvpVote | null;
@@ -265,6 +271,10 @@ export type SubmitOpponentRatingsResponse = ApiSuccessResponse<{
 
 export type SkipOpponentRatingsResponse = ApiSuccessResponse<{
   completion: FootballMatchOpponentRatingCompletion;
+  match: FootballMatch;
+}>;
+
+export type FinalizeMatchResponse = ApiSuccessResponse<{
   match: FootballMatch;
 }>;
 
