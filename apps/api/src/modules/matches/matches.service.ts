@@ -12,7 +12,10 @@ import {
   type MatchMvpVote as PrismaMatchMvpVote,
   type MatchOpponentRating as PrismaMatchOpponentRating,
   type MatchOpponentRatingCompletion as PrismaMatchOpponentRatingCompletion,
+  type MatchPlayerStat as PrismaMatchPlayerStat,
+  type PlayerRatingHistory as PrismaPlayerRatingHistory,
   type PlayerRatingState as PrismaPlayerRatingState,
+  type Prisma,
   type TeamGenerationVersion as PrismaTeamGenerationVersion,
 } from '@prisma/client';
 import type {
@@ -161,6 +164,10 @@ export type InternalFootballMatch = {
   finalization: {
     finalizedByUserId: string;
     finalizedAt: Date;
+  } | null;
+  voiding: {
+    voidedByUserId: string;
+    voidedAt: Date;
   } | null;
   events: InternalFootballMatchEvent[];
   mvpVotes: InternalFootballMatchMvpVote[];
@@ -955,6 +962,97 @@ export class MatchesService {
           status: 'completed',
           finalizedByUserId: actorMembership.userId,
           finalizedAt,
+        },
+      }),
+    ]);
+    const updatedMatch = transactionResults[
+      transactionResults.length - 1
+    ] as PrismaMatch;
+
+    return this.toInternalMatch(updatedMatch, actorPlayer?.id);
+  }
+
+  async voidFinalizedMatch(
+    clerkUserId: string,
+    groupId: string,
+    matchId: string,
+  ): Promise<InternalFootballMatch> {
+    const actorMembership = await this.requireGroupMembership(
+      clerkUserId,
+      groupId,
+    );
+
+    if (!canUpdateGroupSettings(actorMembership.role)) {
+      throw new ForbiddenException('Owner or admin role required.');
+    }
+
+    const match = await this.prisma.match.findFirst({
+      where: {
+        id: matchId,
+        groupId,
+      },
+    });
+
+    if (!match) {
+      throw new ForbiddenException('Match required.');
+    }
+
+    const actorPlayer = await this.findGroupPlayer(
+      actorMembership.userId,
+      groupId,
+    );
+
+    if (normalizeMatchStatus(match.status) === 'voided') {
+      return this.toInternalMatch(match, actorPlayer?.id);
+    }
+
+    if (
+      normalizeMatchStatus(match.status) !== 'completed' ||
+      !match.finalizedAt
+    ) {
+      throw new ConflictException('Finalized match required for voiding.');
+    }
+
+    const matchPlayerStats = await this.prisma.matchPlayerStat.findMany({
+      where: {
+        matchId: match.id,
+      },
+    });
+    const affectedPlayerIds = [
+      ...new Set(matchPlayerStats.map((stat) => stat.playerId)),
+    ];
+    const recomputeOperations =
+      await this.buildPlayerRatingStateRecomputeOperations(
+        affectedPlayerIds,
+        match.id,
+      );
+    const voidedAt = new Date();
+    const transactionResults = await this.prisma.$transaction([
+      this.prisma.matchPlayerStat.updateMany({
+        where: {
+          matchId: match.id,
+        },
+        data: {
+          voidedAt,
+        },
+      }),
+      this.prisma.playerRatingHistory.updateMany({
+        where: {
+          matchId: match.id,
+        },
+        data: {
+          voidedAt,
+        },
+      }),
+      ...recomputeOperations,
+      this.prisma.match.update({
+        where: {
+          id: match.id,
+        },
+        data: {
+          status: 'voided',
+          voidedByUserId: actorMembership.userId,
+          voidedAt,
         },
       }),
     ]);
@@ -1919,6 +2017,165 @@ export class MatchesService {
     };
   }
 
+  private async buildPlayerRatingStateRecomputeOperations(
+    playerIds: string[],
+    voidedMatchId: string,
+  ) {
+    const operations: Prisma.PrismaPromise<unknown>[] = [];
+
+    for (const playerId of playerIds) {
+      const [earliestHistory, activeStats] = await Promise.all([
+        this.prisma.playerRatingHistory.findFirst({
+          where: {
+            playerId,
+          },
+          orderBy: [
+            {
+              createdAt: 'asc',
+            },
+            {
+              id: 'asc',
+            },
+          ],
+        }),
+        this.prisma.matchPlayerStat.findMany({
+          where: {
+            playerId,
+            matchId: {
+              not: voidedMatchId,
+            },
+            voidedAt: null,
+            match: {
+              status: 'completed',
+              voidedAt: null,
+            },
+          },
+          orderBy: [
+            {
+              createdAt: 'asc',
+            },
+            {
+              id: 'asc',
+            },
+          ],
+        }),
+      ]);
+      const recomputed = this.recomputePlayerRatingState(
+        playerId,
+        earliestHistory,
+        activeStats,
+      );
+
+      operations.push(...recomputed.historyOperations);
+      operations.push(
+        this.prisma.playerRatingState.upsert({
+          where: {
+            playerId,
+          },
+          create: recomputed.ratingStateCreateData,
+          update: recomputed.ratingStateUpdateData,
+        }),
+      );
+    }
+
+    return operations;
+  }
+
+  private recomputePlayerRatingState(
+    playerId: string,
+    earliestHistory: PrismaPlayerRatingHistory | null,
+    activeStats: PrismaMatchPlayerStat[],
+  ) {
+    let currentOverall = roundToOneDecimal(
+      earliestHistory?.overallBefore ?? DEFAULT_PLAYER_RATING,
+    );
+    let currentForm = roundToOneDecimal(
+      earliestHistory?.formBefore ?? currentOverall,
+    );
+    const totals = {
+      gamesPlayed: 0,
+      wins: 0,
+      losses: 0,
+      draws: 0,
+      goals: 0,
+      assists: 0,
+      mvpAwards: 0,
+      mvpVotes: 0,
+    };
+    const historyOperations: Prisma.PrismaPromise<unknown>[] = [];
+
+    for (const stat of activeStats) {
+      const overallBefore = currentOverall;
+      const formBefore = currentForm;
+      const overallAfter = evolveRating(
+        overallBefore,
+        stat.performanceScore,
+        OVERALL_RATING_EVOLUTION_WEIGHT,
+      );
+      const formAfter = evolveRating(
+        formBefore,
+        stat.performanceScore,
+        FORM_RATING_EVOLUTION_WEIGHT,
+      );
+
+      totals.gamesPlayed += 1;
+      totals.wins += stat.result === 'win' ? 1 : 0;
+      totals.losses += stat.result === 'loss' ? 1 : 0;
+      totals.draws += stat.result === 'draw' ? 1 : 0;
+      totals.goals += stat.goals;
+      totals.assists += stat.assists;
+      totals.mvpAwards += stat.mvpAwarded ? 1 : 0;
+      totals.mvpVotes += stat.mvpVotes;
+      historyOperations.push(
+        this.prisma.matchPlayerStat.update({
+          where: {
+            id: stat.id,
+          },
+          data: {
+            overallBefore,
+            overallAfter,
+            formBefore,
+            formAfter,
+          },
+        }),
+        this.prisma.playerRatingHistory.update({
+          where: {
+            matchId_playerId: {
+              matchId: stat.matchId,
+              playerId,
+            },
+          },
+          data: {
+            overallBefore,
+            overallAfter,
+            formBefore,
+            formAfter,
+            overallDelta: roundToOneDecimal(overallAfter - overallBefore),
+            formDelta: roundToOneDecimal(formAfter - formBefore),
+            voidedAt: null,
+          },
+        }),
+      );
+      currentOverall = overallAfter;
+      currentForm = formAfter;
+    }
+
+    return {
+      historyOperations,
+      ratingStateCreateData: {
+        playerId,
+        overallRating: currentOverall,
+        formRating: currentForm,
+        ...totals,
+      },
+      ratingStateUpdateData: {
+        overallRating: currentOverall,
+        formRating: currentForm,
+        ...totals,
+      },
+    };
+  }
+
   private async toInternalMatch(
     match: PrismaMatch,
     currentPlayerId?: string,
@@ -2046,6 +2303,13 @@ export class MatchesService {
           ? {
               finalizedByUserId: match.finalizedByUserId,
               finalizedAt: match.finalizedAt,
+            }
+          : null,
+      voiding:
+        match.voidedByUserId && match.voidedAt
+          ? {
+              voidedByUserId: match.voidedByUserId,
+              voidedAt: match.voidedAt,
             }
           : null,
       events: events.map((event) => this.toInternalMatchEvent(event)),

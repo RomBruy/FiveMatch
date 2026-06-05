@@ -654,6 +654,60 @@ describe('MatchesController', () => {
     );
   });
 
+  it('voids and serializes a finalized match', async () => {
+    const voidedAt = new Date('2026-06-10T22:00:00.000Z');
+    const voidFinalizedMatch = jest.fn().mockResolvedValue(
+      createInternalMatch({
+        status: 'voided',
+        score: {
+          teamAScore: 7,
+          teamBScore: 5,
+          submittedByUserId: 'usr_123',
+          submittedAt: new Date('2026-06-10T21:10:00.000Z'),
+        },
+        finalization: {
+          finalizedByUserId: 'usr_123',
+          finalizedAt: new Date('2026-06-10T21:45:00.000Z'),
+        },
+        voiding: {
+          voidedByUserId: 'usr_123',
+          voidedAt,
+        },
+      }),
+    );
+    const controller = new MatchesController({
+      voidFinalizedMatch,
+    } as unknown as MatchesService);
+
+    await expect(
+      controller.voidFinalizedMatch(
+        {
+          auth: {
+            clerkUserId: 'user_123',
+          },
+        } as AuthenticatedRequest,
+        'grp_123',
+        'match_123',
+      ),
+    ).resolves.toMatchObject({
+      data: {
+        match: {
+          status: 'voided',
+          voiding: {
+            voidedByUserId: 'usr_123',
+            voidedAt: '2026-06-10T22:00:00.000Z',
+          },
+        },
+      },
+    });
+
+    expect(voidFinalizedMatch).toHaveBeenCalledWith(
+      'user_123',
+      'grp_123',
+      'match_123',
+    );
+  });
+
   it('generates and serializes a team version', async () => {
     const generateTeamVersion = jest
       .fn()
@@ -926,7 +980,7 @@ describe('MatchesController', () => {
 
 function createInternalMatch(
   overrides: Partial<{
-    status: 'open' | 'cancelled' | 'locked' | 'completed';
+    status: 'open' | 'cancelled' | 'locked' | 'completed' | 'voided';
     score: {
       teamAScore: number;
       teamBScore: number;
@@ -936,6 +990,10 @@ function createInternalMatch(
     finalization: {
       finalizedByUserId: string;
       finalizedAt: Date;
+    } | null;
+    voiding: {
+      voidedByUserId: string;
+      voidedAt: Date;
     } | null;
     events: ReturnType<typeof createInternalMatchEvent>[];
     attendances: {
@@ -984,6 +1042,7 @@ function createInternalMatch(
     waitlistCount: 0,
     score: overrides.score ?? null,
     finalization: overrides.finalization ?? null,
+    voiding: overrides.voiding ?? null,
     events: overrides.events ?? [],
     mvpVotes: overrides.mvpVotes ?? [],
     myMvpVote: overrides.myMvpVote ?? null,

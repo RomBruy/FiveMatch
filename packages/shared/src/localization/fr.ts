@@ -517,6 +517,19 @@ export const fr = {
     finalizeSaved: "Match finalise. Classements mis a jour.",
     finalizeError:
       "Impossible de finaliser le match. Verifie le score, les equipes et les droits.",
+    voidTitle: "Match annule",
+    voidedSubtitle:
+      "Ce resultat reste visible dans l'historique, mais ne compte plus dans les classements ni l'evolution des notes.",
+    voidBadge: "Annule",
+    voidExternalShareNotice:
+      "Les recaps dans l'app sont marques annules. Les images deja partagees ailleurs ne peuvent pas etre retirees.",
+    voidViewerHint:
+      "Seuls les owners ou admins peuvent annuler un match finalise.",
+    voidMatch: "Annuler le match finalise",
+    voidingMatch: "Annulation...",
+    voidSaved: "Match annule. Les classements ne le comptent plus.",
+    voidError:
+      "Impossible d'annuler le match. Verifie qu'il est finalise et que tu as les droits owner/admin.",
     opponentRatingTags: {
       fast: "Rapide",
       technical: "Technique",

@@ -52,6 +52,7 @@ import {
   submitMvpVote,
   submitOpponentRatings,
   upsertMatchPlayerEvents,
+  voidFinalizedMatch,
 } from "@/api/client";
 import { NextMatchCard } from "@/features/matches/next-match-card";
 import { usePreferences } from "@/features/preferences/preferences-context";
@@ -66,6 +67,7 @@ type MatchEventsSubmitState = "idle" | "submitting" | "saved" | "error";
 type MvpVoteSubmitState = "idle" | "submitting" | "saved" | "error";
 type OpponentRatingsSubmitState = "idle" | "submitting" | "saved" | "error";
 type MatchFinalizeState = "idle" | "finalizing" | "completed" | "error";
+type MatchVoidState = "idle" | "voiding" | "voided" | "error";
 type ScoreDraft = {
   teamAScore: string;
   teamBScore: string;
@@ -129,6 +131,7 @@ export default function MatchScreen() {
     useState<OpponentRatingsSubmitState>("idle");
   const [matchFinalizeState, setMatchFinalizeState] =
     useState<MatchFinalizeState>("idle");
+  const [matchVoidState, setMatchVoidState] = useState<MatchVoidState>("idle");
   const [scoreDraft, setScoreDraft] = useState<ScoreDraft>({
     teamAScore: "",
     teamBScore: "",
@@ -169,6 +172,7 @@ export default function MatchScreen() {
         setMvpVoteSubmitState("idle");
         setOpponentRatingsSubmitState("idle");
         setMatchFinalizeState("idle");
+        setMatchVoidState("idle");
         setScoreDraft(createScoreDraft(null));
         setLoadState("noGroup");
         return;
@@ -202,6 +206,9 @@ export default function MatchScreen() {
         nextMatchResponse.data.match?.status === "completed"
           ? "completed"
           : "idle"
+      );
+      setMatchVoidState(
+        nextMatchResponse.data.match?.status === "voided" ? "voided" : "idle"
       );
       setPlayers(rosterResponse.data.players);
       setTeamGenerations(savedGenerations);
@@ -367,6 +374,7 @@ export default function MatchScreen() {
       setMvpVoteSubmitState("idle");
       setOpponentRatingsSubmitState("idle");
       setMatchFinalizeState("idle");
+      setMatchVoidState("idle");
       setTeamGenerations((currentGenerations) =>
         currentGenerations.map((generation) =>
           generation.id === updatedGeneration.id ? updatedGeneration : generation
@@ -412,6 +420,7 @@ export default function MatchScreen() {
       setMvpVoteSubmitState("idle");
       setOpponentRatingsSubmitState("idle");
       setMatchFinalizeState("idle");
+      setMatchVoidState("idle");
       setScoreSubmitState("saved");
       setActionMessage(strings.matches.finalScoreSaved);
     } catch (error) {
@@ -577,11 +586,46 @@ export default function MatchScreen() {
       setNextMatch(response.data.match);
       setScoreDraft(createScoreDraft(response.data.match));
       setMatchFinalizeState("completed");
+      setMatchVoidState("idle");
       setActionMessage(strings.matches.finalizeSaved);
     } catch (error) {
       console.warn("Unable to finalize match", error);
       setMatchFinalizeState("error");
       setActionMessage(strings.matches.finalizeError);
+    }
+  }
+
+  async function handleVoidFinalizedMatch() {
+    if (!activeGroup || !nextMatch) {
+      setActionMessage(strings.generation.noMatchForGeneration);
+      return;
+    }
+
+    setMatchVoidState("voiding");
+    setActionMessage(null);
+
+    try {
+      const token = await getToken();
+
+      if (!token) {
+        throw new Error("Missing auth token.");
+      }
+
+      const response = await voidFinalizedMatch(
+        token,
+        activeGroup.id,
+        nextMatch.id
+      );
+
+      setNextMatch(response.data.match);
+      setScoreDraft(createScoreDraft(response.data.match));
+      setMatchFinalizeState("completed");
+      setMatchVoidState("voided");
+      setActionMessage(strings.matches.voidSaved);
+    } catch (error) {
+      console.warn("Unable to void finalized match", error);
+      setMatchVoidState("error");
+      setActionMessage(strings.matches.voidError);
     }
   }
 
@@ -630,6 +674,7 @@ export default function MatchScreen() {
       setMvpVoteSubmitState("idle");
       setOpponentRatingsSubmitState("idle");
       setMatchFinalizeState("idle");
+      setMatchVoidState("idle");
       setScoreDraft(createScoreDraft(response.data.match));
       setCreateState("created");
     } catch (error) {
@@ -673,6 +718,8 @@ export default function MatchScreen() {
       setMatchEventsSubmitState("idle");
       setMvpVoteSubmitState("idle");
       setOpponentRatingsSubmitState("idle");
+      setMatchFinalizeState("idle");
+      setMatchVoidState("idle");
       setScoreDraft(createScoreDraft(attendanceResponse.data.match));
       setAttendanceState("idle");
     } catch (error) {
@@ -809,7 +856,9 @@ export default function MatchScreen() {
               />
             ) : null}
 
-            {nextMatch?.status === "locked" || nextMatch?.status === "completed" ? (
+            {nextMatch?.status === "locked" ||
+            nextMatch?.status === "completed" ||
+            nextMatch?.status === "voided" ? (
               <FinalScoreCard
                 canEditScore={canCreateMatch && nextMatch.status === "locked"}
                 draft={scoreDraft}
@@ -857,14 +906,18 @@ export default function MatchScreen() {
             ) : null}
 
             {(nextMatch?.status === "locked" ||
-              nextMatch?.status === "completed") &&
+              nextMatch?.status === "completed" ||
+              nextMatch?.status === "voided") &&
             nextMatch.score &&
             teamGeneration?.status === "locked" ? (
               <FinalizeMatchCard
                 canFinalize={canCreateMatch && nextMatch.status === "locked"}
+                canVoid={canCreateMatch && nextMatch.status === "completed"}
                 match={nextMatch}
                 onFinalize={handleFinalizeMatch}
+                onVoid={handleVoidFinalizedMatch}
                 state={matchFinalizeState}
+                voidState={matchVoidState}
               />
             ) : null}
 
@@ -1971,33 +2024,48 @@ function OpponentRatingsCard({
 
 function FinalizeMatchCard({
   canFinalize,
+  canVoid,
   match,
   onFinalize,
+  onVoid,
   state,
+  voidState,
 }: {
   canFinalize: boolean;
+  canVoid: boolean;
   match: FootballMatch;
   onFinalize: () => void;
+  onVoid: () => void;
   state: MatchFinalizeState;
+  voidState: MatchVoidState;
 }) {
   const { strings } = usePreferences();
   const isCompleted = match.status === "completed";
+  const isVoided = match.status === "voided";
   const isFinalizing = state === "finalizing";
-  const disabled = !canFinalize || isCompleted || isFinalizing;
+  const isVoiding = voidState === "voiding";
+  const finalizeDisabled = !canFinalize || isCompleted || isVoided || isFinalizing;
+  const voidDisabled = !canVoid || isVoiding;
 
   return (
-    <View style={styles.finalizeCard}>
+    <View style={[styles.finalizeCard, isVoided && styles.voidedCard]}>
       <View style={styles.attendanceHeader}>
         <View style={styles.attendanceHeaderCopy}>
-          <Text style={styles.cardTitle}>{strings.matches.finalizeTitle}</Text>
+          <Text style={styles.cardTitle}>
+            {isVoided ? strings.matches.voidTitle : strings.matches.finalizeTitle}
+          </Text>
           <Text style={styles.helperText}>
-            {isCompleted
-              ? strings.matches.finalizeCompletedSubtitle
-              : strings.matches.finalizeSubtitle}
+            {isVoided
+              ? strings.matches.voidedSubtitle
+              : isCompleted
+                ? strings.matches.finalizeCompletedSubtitle
+                : strings.matches.finalizeSubtitle}
           </Text>
         </View>
-        {isCompleted ? (
-          <Text style={styles.lockBadge}>{strings.matches.finalizeBadge}</Text>
+        {isCompleted || isVoided ? (
+          <Text style={[styles.lockBadge, isVoided && styles.voidBadge]}>
+            {isVoided ? strings.matches.voidBadge : strings.matches.finalizeBadge}
+          </Text>
         ) : null}
       </View>
 
@@ -2007,18 +2075,20 @@ function FinalizeMatchCard({
           {match.score?.teamBScore ?? "-"} {strings.generation.teamLabel} B
         </Text>
         <Text style={styles.finalizeSummaryHint}>
-          {strings.matches.finalizeAlgorithmHint}
+          {isVoided
+            ? strings.matches.voidExternalShareNotice
+            : strings.matches.finalizeAlgorithmHint}
         </Text>
       </View>
 
-      {!isCompleted ? (
+      {!isCompleted && !isVoided ? (
         <Pressable
           accessibilityRole="button"
-          disabled={disabled}
+          disabled={finalizeDisabled}
           onPress={onFinalize}
           style={[
             styles.submitButton,
-            disabled && styles.submitButtonDisabled,
+            finalizeDisabled && styles.submitButtonDisabled,
           ]}
         >
           <Text style={styles.submitButtonText}>
@@ -2029,12 +2099,36 @@ function FinalizeMatchCard({
         </Pressable>
       ) : null}
 
-      {!canFinalize && !isCompleted ? (
+      {isCompleted ? (
+        <Pressable
+          accessibilityRole="button"
+          disabled={voidDisabled}
+          onPress={onVoid}
+          style={[
+            styles.voidButton,
+            voidDisabled && styles.submitButtonDisabled,
+          ]}
+        >
+          <Text style={styles.voidButtonText}>
+            {isVoiding ? strings.matches.voidingMatch : strings.matches.voidMatch}
+          </Text>
+        </Pressable>
+      ) : null}
+
+      {!canFinalize && !isCompleted && !isVoided ? (
         <Text style={styles.helperText}>{strings.matches.finalizeViewerHint}</Text>
+      ) : null}
+
+      {!canVoid && isCompleted ? (
+        <Text style={styles.helperText}>{strings.matches.voidViewerHint}</Text>
       ) : null}
 
       {state === "error" ? (
         <Text style={styles.errorText}>{strings.matches.finalizeError}</Text>
+      ) : null}
+
+      {voidState === "error" ? (
+        <Text style={styles.errorText}>{strings.matches.voidError}</Text>
       ) : null}
     </View>
   );
@@ -3470,6 +3564,10 @@ const styles = StyleSheet.create({
     backgroundColor: "#0B1B15",
     padding: 18,
   },
+  voidedCard: {
+    borderColor: "#602126",
+    backgroundColor: "#1A1013",
+  },
   finalizeSummary: {
     gap: 6,
     borderWidth: 1,
@@ -3488,6 +3586,25 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "800",
     lineHeight: 17,
+  },
+  voidBadge: {
+    borderColor: "#7F2C32",
+    backgroundColor: "#351717",
+    color: "#FF8E8E",
+  },
+  voidButton: {
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "#7F2C32",
+    borderRadius: 18,
+    backgroundColor: "#351717",
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+  },
+  voidButtonText: {
+    color: "#FF8E8E",
+    fontSize: 14,
+    fontWeight: "900",
   },
   scoreBoard: {
     flexDirection: "row",

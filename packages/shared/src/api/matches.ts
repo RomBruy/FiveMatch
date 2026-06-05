@@ -6,6 +6,7 @@ export const footballMatchStatuses = [
   "cancelled",
   "locked",
   "completed",
+  "voided",
 ] as const;
 export const footballMatchAttendanceResponses = ["in", "out", "maybe"] as const;
 export const footballMatchAttendanceStatuses = [
@@ -62,6 +63,11 @@ export type FootballMatchFinalization = {
   finalizedAt: string;
 };
 
+export type FootballMatchVoiding = {
+  voidedByUserId: string;
+  voidedAt: string;
+};
+
 export type FootballMatchEvent = {
   id: string;
   matchId: string;
@@ -108,6 +114,7 @@ export type FootballMatch = {
   waitlistCount: number;
   score: FootballMatchScore | null;
   finalization: FootballMatchFinalization | null;
+  voiding: FootballMatchVoiding | null;
   events: FootballMatchEvent[];
   mvpVotes: FootballMatchMvpVote[];
   myMvpVote: FootballMatchMvpVote | null;
@@ -275,6 +282,10 @@ export type SkipOpponentRatingsResponse = ApiSuccessResponse<{
 }>;
 
 export type FinalizeMatchResponse = ApiSuccessResponse<{
+  match: FootballMatch;
+}>;
+
+export type VoidFinalizedMatchResponse = ApiSuccessResponse<{
   match: FootballMatch;
 }>;
 

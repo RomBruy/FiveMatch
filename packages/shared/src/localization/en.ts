@@ -513,6 +513,18 @@ export const en = {
     finalizeSaved: "Match finalized. Rankings updated.",
     finalizeError:
       "Unable to finalize the match. Check score, teams, and permissions.",
+    voidTitle: "Voided match",
+    voidedSubtitle:
+      "This result stays visible in history, but no longer counts in rankings or rating evolution.",
+    voidBadge: "Voided",
+    voidExternalShareNotice:
+      "In-app recap assets are marked voided. Already shared external images cannot be retracted.",
+    voidViewerHint: "Only owners or admins can void a finalized match.",
+    voidMatch: "Void finalized match",
+    voidingMatch: "Voiding...",
+    voidSaved: "Match voided. Rankings no longer include it.",
+    voidError:
+      "Unable to void the match. Check it is finalized and you have owner/admin rights.",
     opponentRatingTags: {
       fast: "Fast",
       technical: "Technical",

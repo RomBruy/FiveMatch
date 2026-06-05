@@ -22,6 +22,7 @@ model User {
   organizedMatches    Match[]                 @relation("MatchOrganizer")
   submittedScores     Match[]                 @relation("MatchScoreSubmitter")
   finalizedMatches    Match[]                 @relation("MatchFinalizer")
+  voidedMatches       Match[]                 @relation("MatchVoider")
   recordedMatchEvents MatchEvent[]            @relation("MatchEventRecorder")
   teamGenerations     TeamGenerationVersion[] @relation("TeamGenerationCreator")
   createdAt           DateTime                @default(now()) @map("created_at")
@@ -197,6 +198,9 @@ model Match {
   finalizedByUserId      String?                 @map("finalized_by_user_id")
   finalizedBy            User?                   @relation("MatchFinalizer", fields: [finalizedByUserId], references: [id], onDelete: SetNull)
   finalizedAt            DateTime?               @map("finalized_at")
+  voidedByUserId         String?                 @map("voided_by_user_id")
+  voidedBy               User?                   @relation("MatchVoider", fields: [voidedByUserId], references: [id], onDelete: SetNull)
+  voidedAt               DateTime?               @map("voided_at")
   attendances            MatchAttendance[]
   events                 MatchEvent[]
   opponentRatings        MatchOpponentRating[]
@@ -212,6 +216,8 @@ model Match {
   @@index([organizerUserId], map: "idx_matches_organizer_user_id")
   @@index([scoreSubmittedByUserId], map: "idx_matches_score_submitted_by_user_id")
   @@index([finalizedByUserId], map: "idx_matches_finalized_by_user_id")
+  @@index([voidedByUserId], map: "idx_matches_voided_by_user_id")
+  @@index([status, voidedAt], map: "idx_matches_status_voided_at")
   @@map("matches")
 }
 
@@ -346,11 +352,13 @@ model MatchPlayerStat {
   overallAfter          Float    @map("overall_after")
   formBefore            Float    @map("form_before")
   formAfter             Float    @map("form_after")
+  voidedAt              DateTime? @map("voided_at")
   createdAt             DateTime @default(now()) @map("created_at")
   updatedAt             DateTime @updatedAt @map("updated_at")
 
   @@unique([matchId, playerId], map: "uq_match_player_stats_match_player")
   @@index([playerId], map: "idx_match_player_stats_player_id")
+  @@index([playerId, voidedAt], map: "idx_match_player_stats_player_voided_at")
   @@index([matchId, teamLabel], map: "idx_match_player_stats_match_team")
   @@map("match_player_stats")
 }
@@ -368,10 +376,12 @@ model PlayerRatingHistory {
   overallDelta  Float    @map("overall_delta")
   formDelta     Float    @map("form_delta")
   reason        Json
+  voidedAt      DateTime? @map("voided_at")
   createdAt     DateTime @default(now()) @map("created_at")
 
   @@unique([matchId, playerId], map: "uq_player_rating_history_match_player")
   @@index([playerId, createdAt], map: "idx_player_rating_history_player_created_at")
+  @@index([playerId, voidedAt], map: "idx_player_rating_history_player_voided_at")
   @@index([matchId], map: "idx_player_rating_history_match_id")
   @@map("player_rating_history")
 }

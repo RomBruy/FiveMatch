@@ -33,6 +33,7 @@ import type {
   TeamGenerationVersionsResponse,
   UpsertMatchPlayerEventsInput,
   UpsertMatchPlayerEventsResponse,
+  VoidFinalizedMatchResponse,
 } from '@fit-five/shared';
 import { ClerkAuthGuard } from '../auth/clerk-auth.guard';
 import type { AuthenticatedRequest } from '../auth/auth.types';
@@ -284,6 +285,30 @@ export class MatchesController {
     }
 
     const match = await this.matchesService.finalizeMatch(
+      request.auth.clerkUserId,
+      groupId,
+      matchId,
+    );
+
+    return {
+      data: {
+        match: serializeFootballMatch(match),
+      },
+    };
+  }
+
+  @Post(':matchId/void')
+  @UseGuards(ClerkAuthGuard)
+  async voidFinalizedMatch(
+    @Req() request: AuthenticatedRequest,
+    @Param('groupId') groupId: string,
+    @Param('matchId') matchId: string,
+  ): Promise<VoidFinalizedMatchResponse> {
+    if (!request.auth) {
+      throw new InternalServerErrorException('Authenticated user missing.');
+    }
+
+    const match = await this.matchesService.voidFinalizedMatch(
       request.auth.clerkUserId,
       groupId,
       matchId,

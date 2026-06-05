@@ -47,6 +47,12 @@ export function serializeFootballMatch(
           finalizedAt: match.finalization.finalizedAt.toISOString(),
         }
       : null,
+    voiding: match.voiding
+      ? {
+          voidedByUserId: match.voiding.voidedByUserId,
+          voidedAt: match.voiding.voidedAt.toISOString(),
+        }
+      : null,
     events: match.events.map((event) => ({
       id: event.id,
       matchId: event.matchId,

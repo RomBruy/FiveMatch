@@ -53,6 +53,7 @@ export {
   type FootballMatchOpponentRatingCompletion,
   type FootballMatchScore,
   type FootballMatchStatus,
+  type FootballMatchVoiding,
   type FinalizeMatchResponse,
   type GenerateTeamVersionResponse,
   type LatestTeamGenerationResponse,
@@ -80,6 +81,7 @@ export {
   type TeamManualAdjustment,
   type UpsertMatchPlayerEventsInput,
   type UpsertMatchPlayerEventsResponse,
+  type VoidFinalizedMatchResponse,
 } from "./api/matches.js";
 export {
   playerDominantFeet,

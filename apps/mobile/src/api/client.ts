@@ -47,6 +47,7 @@ import type {
   UpdateFootballGroupSettingsResponse,
   UpsertMatchPlayerEventsInput,
   UpsertMatchPlayerEventsResponse,
+  VoidFinalizedMatchResponse,
 } from "@fit-five/shared";
 import Constants from "expo-constants";
 
@@ -444,6 +445,20 @@ export async function finalizeMatch(
 ): Promise<FinalizeMatchResponse> {
   return apiFetch<FinalizeMatchResponse>(
     `/groups/${groupId}/matches/${matchId}/finalize`,
+    {
+      method: "POST",
+      token,
+    }
+  );
+}
+
+export async function voidFinalizedMatch(
+  token: string,
+  groupId: string,
+  matchId: string
+): Promise<VoidFinalizedMatchResponse> {
+  return apiFetch<VoidFinalizedMatchResponse>(
+    `/groups/${groupId}/matches/${matchId}/void`,
     {
       method: "POST",
       token,

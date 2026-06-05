@@ -16,6 +16,7 @@ const supportedMatchStatuses = [
   'cancelled',
   'locked',
   'completed',
+  'voided',
 ] as const satisfies readonly FootballMatchStatus[];
 const supportedAttendanceResponses = [
   'in',
