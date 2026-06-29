@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@fivematch/types": ["../types/src/index.ts"],
+      "@fivematch/types/*": ["../types/src/*"]
+    }
+  },
+  "include": ["src/**/*"]
+}

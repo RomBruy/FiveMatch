@@ -1,0 +1,1 @@
+ALTER TABLE "players" ADD COLUMN "last_match_at" timestamp with time zone;

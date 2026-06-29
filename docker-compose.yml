@@ -1,0 +1,97 @@
+services:
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    mem_limit: 1g
+    cpus: "1.5"
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://fivematch:${POSTGRES_PASSWORD}@pgbouncer:5432/fivematch_prod
+    depends_on:
+      - pgbouncer
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    mem_limit: 2g
+    cpus: "1.0"
+    environment:
+      POSTGRES_DB: fivematch_prod
+      POSTGRES_USER: fivematch
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fivematch -d fivematch_prod"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  pgbouncer:
+    image: bitnami/pgbouncer:1.23.1
+    restart: unless-stopped
+    mem_limit: 128m
+    cpus: "0.25"
+    environment:
+      - POSTGRESQL_HOST=postgres
+      - POSTGRESQL_PORT=5432
+      - POSTGRESQL_DATABASE=fivematch_prod
+      - POSTGRESQL_USERNAME=fivematch
+      - POSTGRESQL_PASSWORD=${POSTGRES_PASSWORD}
+      - PGBOUNCER_DATABASE=fivematch_prod
+      - PGBOUNCER_POOL_MODE=transaction
+      - PGBOUNCER_MAX_CLIENT_CONN=100
+      - PGBOUNCER_DEFAULT_POOL_SIZE=20
+    depends_on:
+      - postgres
+    healthcheck:
+      test: ["CMD", "/bin/sh", "-c", "nc -z localhost 5432"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    mem_limit: 128m
+    cpus: "0.25"
+    volumes:
+      - ./scripts/backup-pg.sh:/usr/local/bin/backup-pg.sh:ro
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_DB=fivematch_prod
+      - POSTGRES_USER=fivematch
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - B2_BUCKET_NAME=${B2_BUCKET_NAME}
+      - B2_KEY_ID=${B2_KEY_ID}
+      - B2_APPLICATION_KEY=${B2_APPLICATION_KEY}
+      - SENTRY_DSN=${SENTRY_DSN}
+    depends_on:
+      - postgres
+    entrypoint: >
+      sh -c "apk add --no-cache curl py3-pip && pip3 install b2 --break-system-packages --quiet &&
+             echo '0 3 * * * /usr/local/bin/backup-pg.sh >> /var/log/backup.log 2>&1' |
+             crontab - && crond -f"
+    healthcheck:
+      test: ["CMD", "pgrep", "crond"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  postgres_prod_data:

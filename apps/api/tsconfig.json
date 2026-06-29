@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "outDir": "dist",
+    "paths": {
+      "@fivematch/types": ["../../packages/types/src/index.ts"],
+      "@fivematch/types/*": ["../../packages/types/src/*"],
+      "@fivematch/test-utils": ["../../packages/test-utils/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}

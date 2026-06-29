@@ -1,0 +1,30 @@
+{
+  "cli": {
+    "version": ">= 5.0.0"
+  },
+  "build": {
+    "dev": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "APP_ENV": "development"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "env": {
+        "APP_ENV": "preview"
+      }
+    },
+    "prod": {
+      "distribution": "store",
+      "env": {
+        "APP_ENV": "production",
+        "EXPO_PUBLIC_POSTHOG_API_KEY": "YOUR_POSTHOG_PROJECT_API_KEY"
+      }
+    }
+  },
+  "submit": {
+    "prod": {}
+  }
+}

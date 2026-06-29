@@ -1,0 +1,50 @@
+services:
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: "0.5"
+    ports:
+      - "3001:3000"
+    environment:
+      - NODE_ENV=staging
+      - DATABASE_URL=postgresql://fivematch:${POSTGRES_PASSWORD}@pgbouncer:5432/fivematch_staging
+    depends_on:
+      - pgbouncer
+    env_file:
+      - .env.staging
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    mem_limit: 1g
+    cpus: "1.0"
+    environment:
+      POSTGRES_DB: fivematch_staging
+      POSTGRES_USER: fivematch
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_staging_data:/var/lib/postgresql/data
+
+  pgbouncer:
+    image: bitnami/pgbouncer:1.23.1
+    restart: unless-stopped
+    mem_limit: 64m
+    cpus: "0.25"
+    environment:
+      - POSTGRESQL_HOST=postgres
+      - POSTGRESQL_PORT=5432
+      - POSTGRESQL_DATABASE=fivematch_staging
+      - POSTGRESQL_USERNAME=fivematch
+      - POSTGRESQL_PASSWORD=${POSTGRES_PASSWORD}
+      - PGBOUNCER_DATABASE=fivematch_staging
+      - PGBOUNCER_POOL_MODE=transaction
+      - PGBOUNCER_MAX_CLIENT_CONN=50
+      - PGBOUNCER_DEFAULT_POOL_SIZE=10
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_staging_data:

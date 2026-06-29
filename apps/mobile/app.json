@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "FiveMatch",
+    "slug": "fivematch",
+    "version": "1.0.0",
+    "scheme": "fivematch",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#111111"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.fivematch.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#111111"
+      },
+      "package": "com.fivematch.app"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      [
+        "@sentry/react-native/expo",
+        {
+          "url": "https://sentry.io/",
+          "project": "apple-ios",
+          "organization": "fivematch"
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "ios": { "newArchEnabled": true },
+          "android": { "newArchEnabled": true }
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
