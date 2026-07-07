@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, integer, boolean, pgEnum, jsonb } from 'drizzle-orm/pg-core'
+import { pgTable, uuid, text, timestamp, integer, boolean, pgEnum, jsonb, numeric } from 'drizzle-orm/pg-core'
 import { users } from './users'
 import { groups } from './groups'
 import { formatPresetEnum, goalkeeperModeEnum, generatorStyleEnum } from './groups'
@@ -30,6 +30,11 @@ export const matches = pgTable('matches', {
   teamAdjustments: jsonb('team_adjustments').$type<Array<{ playerId: string; fromTeam: 'A' | 'B'; toTeam: 'A' | 'B' }>>(),
   scoreA: integer('score_a'),
   scoreB: integer('score_b'),
+  // OVR averages snapshotted at the moment teams are locked (teams_generated transition).
+  // Used by the post-match pipeline for reproducible outcome adjustment (fix #3).
+  // NULL until the first team generation for this match.
+  teamAOvrAtLock: numeric('team_a_ovr_at_lock', { precision: 5, scale: 2 }),
+  teamBOvrAtLock: numeric('team_b_ovr_at_lock', { precision: 5, scale: 2 }),
   completedAt: timestamp('completed_at', { withTimezone: true }),
   ratingWindowClosedAt: timestamp('rating_window_closed_at', { withTimezone: true }),
   mvpPlayerId: uuid('mvp_player_id'),

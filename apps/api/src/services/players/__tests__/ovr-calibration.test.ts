@@ -1,18 +1,20 @@
 import { describe, it, expect } from 'vitest'
 import {
   OVR_ATTRIBUTE_WEIGHTS,
-  EMA_ALPHA_MIN,
-  EMA_ALPHA_DECAY,
-  EMA_ALPHA_START,
+  ALPHA_FLOOR,
+  ALPHA_DECAY,
+  ALPHA_BASE,
+  ALPHA_CEIL,
   GROUP_TIER_MULTIPLIERS,
   ALGORITHM_CONSTANTS_VERSION,
 } from '@fivematch/types/algorithm-constants'
 
 // ─── Inline helpers (mirror the formula — no service files yet) ───────────────
 
-function computeAlpha(matchCount: number, tierMultiplier: number = GROUP_TIER_MULTIPLIERS.club): number {
-  const raw = EMA_ALPHA_START - matchCount * EMA_ALPHA_DECAY
-  return Math.max(EMA_ALPHA_MIN, raw * tierMultiplier)
+function computeAlpha(distinctRatersCount: number, tierMultiplier: number = GROUP_TIER_MULTIPLIERS.club): number {
+  const raw = ALPHA_BASE - distinctRatersCount * ALPHA_DECAY
+  const base = Math.max(ALPHA_FLOOR, raw)
+  return Math.min(ALPHA_CEIL, Math.max(ALPHA_FLOOR, base * tierMultiplier))
 }
 
 function computeMatchImpact(attrs: {
@@ -29,8 +31,8 @@ function computeMatchImpact(attrs: {
   )
 }
 
-function applyEma(oldOvr: number, matchImpact: number, matchCount: number, tierMultiplier: number = GROUP_TIER_MULTIPLIERS.club): number {
-  const alpha = computeAlpha(matchCount, tierMultiplier)
+function applyEma(oldOvr: number, matchImpact: number, distinctRatersCount: number, tierMultiplier: number = GROUP_TIER_MULTIPLIERS.club): number {
+  const alpha = computeAlpha(distinctRatersCount, tierMultiplier)
   return (1 - alpha) * oldOvr + alpha * matchImpact
 }
 
@@ -65,53 +67,70 @@ describe(`OVR Calibration Baseline (${ALGORITHM_CONSTANTS_VERSION})`, () => {
     })
   })
 
-  describe('computeAlpha — adaptive decay', () => {
-    it('alpha at matchCount=0 equals EMA_ALPHA_START (0.25)', () => {
-      expect(computeAlpha(0)).toBeCloseTo(0.25, 10)
+  describe('computeAlpha — adaptive decay on rater diversity', () => {
+    it('alpha at distinctRatersCount=0 equals ALPHA_BASE (0.22) for club tier', () => {
+      // raw = 0.22 - 0×0.006 = 0.22; base = max(0.10, 0.22) = 0.22; club ×1.0 = 0.22
+      expect(computeAlpha(0)).toBeCloseTo(0.22, 10)
     })
 
-    it('alpha at matchCount=30 hits the floor (0.10)', () => {
-      // 0.25 - 30×0.005 = 0.25 - 0.15 = 0.10 → exactly at floor
-      expect(computeAlpha(30)).toBeCloseTo(0.10, 10)
+    it('alpha at distinctRatersCount=20 hits the floor (0.10) for club tier', () => {
+      // raw = 0.22 - 20×0.006 = 0.22 - 0.12 = 0.10 → exactly at floor
+      expect(computeAlpha(20)).toBeCloseTo(0.10, 10)
     })
 
-    it('alpha at matchCount=50 stays pinned at floor (0.10)', () => {
-      // 0.25 - 50×0.005 = 0.25 - 0.25 = 0.00 → clamped to EMA_ALPHA_MIN
-      expect(computeAlpha(50)).toBeCloseTo(EMA_ALPHA_MIN, 10)
+    it('alpha at distinctRatersCount=50 stays pinned at floor (0.10) for club tier', () => {
+      // raw = 0.22 - 50×0.006 = 0.22 - 0.30 = -0.08 → clamped to ALPHA_FLOOR
+      expect(computeAlpha(50)).toBeCloseTo(ALPHA_FLOOR, 10)
     })
 
-    it('alpha never falls below EMA_ALPHA_MIN for any matchCount', () => {
-      for (const mc of [0, 10, 20, 30, 40, 50, 100, 500]) {
-        expect(computeAlpha(mc)).toBeGreaterThanOrEqual(EMA_ALPHA_MIN)
+    it('alpha never falls below ALPHA_FLOOR for any distinctRatersCount', () => {
+      for (const dc of [0, 10, 20, 30, 40, 50, 100, 500]) {
+        expect(computeAlpha(dc)).toBeGreaterThanOrEqual(ALPHA_FLOOR)
+      }
+    })
+
+    it('alpha never exceeds ALPHA_CEIL for any tier/rater-count combination', () => {
+      for (const dc of [0, 5, 10]) {
+        for (const tier of Object.values(GROUP_TIER_MULTIPLIERS)) {
+          expect(computeAlpha(dc, tier)).toBeLessThanOrEqual(ALPHA_CEIL)
+        }
       }
     })
   })
 
   describe('applyEma — OVR update', () => {
-    it('EMA update at matchCount=15 produces 6.65 (regression baseline)', () => {
-      // raw_alpha = 0.25 - 15×0.005 = 0.175; club multiplier 1.0 → 0.175
-      // new_ovr = (1-0.175)×7.0 + 0.175×5.0 = 5.775 + 0.875 = 6.65
+    it('EMA update at distinctRatersCount=15 produces expected value (regression baseline)', () => {
+      // raw = 0.22 - 15×0.006 = 0.22 - 0.09 = 0.13; club ×1.0 → alpha = 0.13
+      // new_ovr = (1-0.13)×7.0 + 0.13×5.0 = 6.09 + 0.65 = 6.74
       const result = applyEma(7.0, 5.0, 15)
-      expect(result).toBeCloseTo(6.65, 5)
+      expect(result).toBeCloseTo(6.74, 5)
     })
   })
 
-  describe('GROUP_TIER_MULTIPLIERS — tier modulation', () => {
-    it('amateur tier multiplier reduces effective alpha vs club at matchCount=0', () => {
+  describe('GROUP_TIER_MULTIPLIERS — tier modulation (folded inside clamp)', () => {
+    it('amateur tier multiplier reduces effective alpha vs club at distinctRatersCount=0', () => {
       const amateurAlpha = computeAlpha(0, GROUP_TIER_MULTIPLIERS.amateur)
       const clubAlpha    = computeAlpha(0, GROUP_TIER_MULTIPLIERS.club)
-      // amateur: max(0.10, 0.25×0.8) = max(0.10, 0.20) = 0.20
-      // club:    max(0.10, 0.25×1.0) = 0.25
-      expect(amateurAlpha).toBeCloseTo(0.20, 10)
+      // amateur: clamp(0.22×0.8, 0.10, 0.30) = 0.176
+      // club:    clamp(0.22×1.0, 0.10, 0.30) = 0.22
+      expect(amateurAlpha).toBeCloseTo(0.176, 10)
       expect(amateurAlpha).toBeLessThan(clubAlpha)
     })
 
-    it('elite tier multiplier increases effective alpha vs club at matchCount=0', () => {
+    it('elite tier multiplier increases effective alpha vs club at distinctRatersCount=0', () => {
       const eliteAlpha = computeAlpha(0, GROUP_TIER_MULTIPLIERS.elite)
       const clubAlpha  = computeAlpha(0, GROUP_TIER_MULTIPLIERS.club)
-      // elite: max(0.10, 0.25×1.2) = max(0.10, 0.30) = 0.30
-      expect(eliteAlpha).toBeCloseTo(0.30, 10)
+      // elite: clamp(0.22×1.2, 0.10, 0.30) = 0.264
+      expect(eliteAlpha).toBeCloseTo(0.264, 10)
       expect(eliteAlpha).toBeGreaterThan(clubAlpha)
+    })
+
+    it('elite alpha is capped at ALPHA_CEIL even with low distinctRatersCount', () => {
+      // At distinctRatersCount=0: 0.22×1.2 = 0.264 < 0.30 so not capped yet
+      // At distinctRatersCount=0 with a hypothetical 2.0 multiplier it would exceed ALPHA_CEIL
+      // Verify the cap is enforced
+      const result = computeAlpha(0, 2.0) // hypothetical extreme
+      expect(result).toBeLessThanOrEqual(ALPHA_CEIL)
     })
   })
 })

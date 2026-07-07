@@ -10,7 +10,7 @@ import { teamGeneratorService } from '../../services/matches/team-generator.serv
 import type { GeneratorPlayer, GeneratorOptions } from '../../services/matches/team-generator.service'
 import { CreateMatchSchema, AttendanceUpdateSchema, TeamAdjustmentSchema, RecordResultSchema, SubmitMvpVoteSchema, SubmitPostMatchRatingSchema } from './schemas'
 import { ErrorCode } from '@fivematch/types'
-import { TEAM_GEN_MAX_GENERATIONS } from '@fivematch/types/algorithm-constants'
+import { TEAM_GEN_MAX_GENERATIONS, TEAM_GEN_OVR_FALLBACK } from '@fivematch/types/algorithm-constants'
 import { db } from '../../db'
 import { matches, teamGenerationJobs, teamGenerationPlayers, matchAttendances, players, matchParticipants, groups, mvpVotes, ratings } from '../../db/schema'
 import { eq, and, isNull, sql } from 'drizzle-orm'
@@ -427,6 +427,14 @@ router.post(
     const jobId = `gen_${randomUUID().replace(/-/g, '').slice(0, 12)}`
     const newGenerationCount = match.generationCount + 1
 
+    // Snapshot team OVR averages at the moment teams are locked (fix #3 — reproducible outcome term).
+    const avgOvr = (ps: GeneratorPlayer[]) => {
+      const ovrs = ps.map((p) => p.ovrScore ?? TEAM_GEN_OVR_FALLBACK)
+      return ovrs.reduce((s, v) => s + v, 0) / Math.max(1, ovrs.length)
+    }
+    const teamAOvrAtLock = avgOvr(result.teamA)
+    const teamBOvrAtLock = avgOvr(result.teamB)
+
     try {
       await db.transaction(async (tx) => {
         // Increment generationCount and update status (optimistic lock prevents race condition)
@@ -435,6 +443,8 @@ router.post(
           .set({
             generationCount: newGenerationCount,
             status: 'teams_generated',
+            teamAOvrAtLock: String(teamAOvrAtLock),
+            teamBOvrAtLock: String(teamBOvrAtLock),
             updatedAt: new Date(),
           })
           .where(and(

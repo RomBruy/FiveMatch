@@ -1,6 +1,6 @@
-// algorithm-constants.ts v1.0 — changes require PR review and version bump in ALGORITHM_CONSTANTS_VERSION
+// algorithm-constants.ts v2.0 — changes require PR review and version bump in ALGORITHM_CONSTANTS_VERSION
 
-export const ALGORITHM_CONSTANTS_VERSION = 'v1.0'
+export const ALGORITHM_CONSTANTS_VERSION = 'v2.0'
 
 // ─── OVR Attribute Weights ────────────────────────────────────────────────────
 // match_impact = Σ(attribute × weight). Weights sum to exactly 1.0.
@@ -16,18 +16,47 @@ export const OVR_ATTRIBUTE_WEIGHTS = {
   pace: 0.10,
 } as const
 
-// ─── Adaptive EMA ─────────────────────────────────────────────────────────────
-// alpha = max(EMA_ALPHA_MIN, EMA_ALPHA_START - matchCount × EMA_ALPHA_DECAY)
-// new_ovr = (1 - alpha) × old_ovr + alpha × match_impact
-// Boundary: first match (matchCount=0, no prior OVR) → new_ovr = match_impact
-export const EMA_ALPHA_MIN = 0.10      // Floor — veteran OVR stays stable
-export const EMA_ALPHA_DECAY = 0.005  // Per-match decay rate
-export const EMA_ALPHA_START = 0.25   // Starting alpha for a new player
+// ─── Adaptive EMA — alpha constants ───────────────────────────────────────────
+// Two roles, two mechanisms:
+//   matchCount drives SETTLING: baseAlpha decays as you accumulate matches,
+//     regardless of who rated you. OVR stabilises into a stable identity over time.
+//   distinctRatersCount drives a DIVERSITY GUARD: a bounded +DIVERSITY_SPRING bonus
+//     keeps alpha slightly springy when your evidence base is narrow relative to the
+//     available group. Prevents alpha from freezing at floor in small groups where
+//     everyone has already rated everyone (pure-diversity decay was a regression in
+//     those groups because distinctRatersCount plateaued, breaking fix #4).
+//
+// Formula:
+//   baseAlpha         = max(ALPHA_FLOOR, ALPHA_BASE − matchCount × ALPHA_DECAY)
+//   diversityRatio    = distinctRatersCount / diversityTarget   (target = min(rosterSize-1, CAP))
+//   diversityGuard    = DIVERSITY_SPRING × max(0, 1 − diversityRatio)
+//   adjustedBaseAlpha = min(ALPHA_CEIL, baseAlpha + diversityGuard)
+//   finalAlpha        = clamp(adjustedBaseAlpha × evidenceQuality × tierMultiplier, FLOOR, CEIL)
+//   new_ovr           = clamp(oldOvr + finalAlpha × (matchImpact − oldOvr), 40, 99)
+export const ALPHA_BASE  = 0.22   // starts lower than v1 (0.25) — OVR is stable skill, not recent form
+export const ALPHA_DECAY = 0.006  // per-match decay; floor reached after ~20 matches
+export const ALPHA_FLOOR = 0.10   // minimum alpha; veteran OVR stays stable
+export const ALPHA_CEIL  = 0.30   // maximum alpha; honest upper bound (tier×evidenceQuality can't exceed this)
+
+// Diversity guard — keeps alpha slightly springy when evidence is genuinely narrow.
+// DIVERSITY_SPRING: max additive bonus on baseAlpha (at zero diverse raters).
+//   At evidenceQuality=0.6, club tier: +0.05×0.6 = +0.03 to effective alpha.
+//   For a 20-OVR gap that's ~0.6 OVR extra per match — sub-threshold but accumulates.
+//   ⚠ UNVALIDATED — tune once historical match data is available.
+// DIVERSITY_TARGET_CAP: cap on min(rosterSize-1, CAP). Groups of 9+ are treated
+//   identically, matching recreational 5v5 group sizes.
+export const DIVERSITY_SPRING     = 0.05
+export const DIVERSITY_TARGET_CAP = 8
+
+// ─── Rater count divisor ──────────────────────────────────────────────────────
+// 5v5: only the opposing 5 can rate you. v1 used /6, which under-weighted every
+// update by ~17% and capped evidence quality at 0.833.
+export const RATER_FULL = 5
 
 // ─── Group Tier Multipliers ───────────────────────────────────────────────────
-// Applied forward-only from tier change. Modulates effective alpha:
-//   effective_alpha = max(EMA_ALPHA_MIN, raw_alpha × tierMultiplier)
-// Amateur: forgiving (slow OVR movement). Elite: tight (fast OVR movement).
+// Folded into alpha inside a single honest clamp (v2 fix #1).
+// In v1, tier was applied after the alpha clamp, pushing elite to 0.36 and
+// amateur to 0.08 — both outside the stated [0.10, 0.30] bound.
 export const GROUP_TIER_MULTIPLIERS = {
   amateur: 0.8,
   club: 1.0,
@@ -60,6 +89,12 @@ export const PLAYER_TIER_THRESHOLDS = {
 
 export type PlayerTier = 'rookie' | 'joueur' | 'performeur' | 'crack'
 
+// ─── Tier Hysteresis ──────────────────────────────────────────────────────────
+// A player must cross a boundary by this margin before a tier change fires.
+// Prevents flip-flopping and PLAYER_TIER_CHANGED notification spam for players
+// parked near a boundary.
+export const TIER_MARGIN = 0.5
+
 // ─── Organizer Rating Weight ──────────────────────────────────────────────────
 // Organizer's rating counts 2× when computing initial OVR from peer ratings.
 export const ORGANIZER_RATING_WEIGHT = 2
@@ -70,21 +105,30 @@ export const ORGANIZER_RATING_WEIGHT = 2
 // [5,4,3,2,1] → sum=15; most recent match = 5/15 ≈ 33% of form value.
 export const FORM_WEIGHTS = [5, 4, 3, 2, 1] as const
 
-// ─── Goal / Assist Attribute Boosts ──────────────────────────────────────────
-// Small bonus added to the contributing attribute's rating for the match.
-// Goal scorer: technique bonus (skill) + pace bonus (acceleration to score).
-// Assist: passing bonus (vision + delivery).
-// Applied BEFORE the EMA update, increasing match_impact for that attribute.
-export const GOAL_TECHNIQUE_BOOST = 0.5
-export const GOAL_PACE_BOOST = 0.3
-export const ASSIST_PASSING_BOOST = 0.5
+// ─── Objective Signals (Step 5) ───────────────────────────────────────────────
+// Small capped nudges added to matchImpactBase after calibration.
+// Together at most ≈ +5.5 / −2 OVR on the match target, which the EMA (α ≈ 0.10–0.20)
+// shrinks to well under ±1 OVR of actual movement per match.
+// Peer opinion remains the dominant driver.
 
-// ─── MVP Blend Constants ──────────────────────────────────────────────────────
-// MVP contributes exactly MVP_WEIGHT (3%) to match impact toward MVP_FIXED_CONTRIBUTION (80).
-// Formula: matchImpactAfterMvp = matchImpactClamped * (1 - MVP_WEIGHT) + MVP_FIXED_CONTRIBUTION * MVP_WEIGHT
-// See: docs/algorithm-decisions.md §"MVP Signal"
-export const MVP_WEIGHT = 0.03
-export const MVP_FIXED_CONTRIBUTION = 80
+// MVP: one-directional additive bonus on the calibrated OVR target.
+// Replaces v1 blend (matchImpactClamped × 0.97 + 80 × 0.03) which penalised
+// elite players (fixed point at 80 dragged down anyone performing above 80).
+export const MVP_BONUS = 1.5
+
+// Goals/assists: explicit, capped, diminishing.
+// Replaces v1 ephemeral attribute boost (removed to avoid double-counting —
+// the 5 opponents already saw the goals and rated technique/finishing accordingly).
+export const GOAL_PT  = 0.6   // per goal, OVR scale
+export const ASSIST_PT = 0.4  // per assist, OVR scale
+export const OBJECTIVE_GOAL_CAP = 2.0  // hat-trick can't explode the rating
+
+// Match result: Playtomic-style expected-adjusted.
+// Win/draw/loss only — a 9-0 blowout counts the same as 1-0.
+// Rewards over-performing vs expectation; beating a team you were meant to beat gives ≈ 0.
+// Not scoring is never a penalty; only losing to a weaker side dings you.
+export const OUTCOME_WEIGHT   = 2.0   // max +/−2 OVR from match result
+export const EXPECTED_SCALE_D = 40    // OVR gap for ~64% expected win probability
 
 // ─── Pronos Scoring Points ────────────────────────────────────────────────────
 // Points awarded per correct prediction type. Exact score and result are exclusive:
@@ -111,32 +155,32 @@ export const OVR_CLAMP_MAX = 99
 // Prevents noise when sub-integer EMA moves are too small to be meaningful.
 export const OVR_TREND_STABILITY_THRESHOLD = 0.15
 
-// ─── OVR Calibration Anchors ─────────────────────────────────────────────────
+// ─── OVR Calibration Anchors (smoothed, monotonic slopes) ────────────────────
 // Piecewise-linear mapping from attribute score (1–10 scale) to OVR domain (40–99).
+// Slopes: 5.5 → 6 → 6.5 → 7.5 → 8, strictly increasing so improvement always pays
+// off, more so at the top of the scale.
 // Semantic anchors (from algorithm-decisions.md):
 //   1/10  → 40  (Very poor)
-//   3/10  → 52  (Weak)
-//   5/10  → 65  (Acceptable / average recreational performance)
+//   3/10  → 51  (Weak)
+//   5/10  → 63  (Acceptable / average recreational performance)
 //   7/10  → 76  (Strong performance)
-//   9/10  → 90  (Dominant performance)
+//   9/10  → 91  (Dominant performance)
 //   10/10 → 99  (Exceptional)
 // UI requirement: 5/10 must be labeled "acceptable / average overall" — not "normal for you."
 // The scale is ABSOLUTE, not relative to the player's level.
 export const OVR_CALIBRATION_ANCHORS = [
   { rating: 1,  ovr: 40 },
-  { rating: 3,  ovr: 52 },
-  { rating: 5,  ovr: 65 },
+  { rating: 3,  ovr: 51 },
+  { rating: 5,  ovr: 63 },
   { rating: 7,  ovr: 76 },
-  { rating: 9,  ovr: 90 },
+  { rating: 9,  ovr: 91 },
   { rating: 10, ovr: 99 },
 ] as const
 
 // ─── Initial Seed (Bayesian Shrinkage) ───────────────────────────────────────
-// TARGET_SEED_WEIGHT: total weight at which the prior has zero influence.
-// ORGANIZER_SEED_WEIGHT: organizer rating counts as 2 peer ratings.
-// SEED_PRIOR_OVR_FALLBACK: used when group has fewer than SEED_PRIOR_MIN_UNLOCKED_PLAYERS.
-// SEED_SINGLE_RATER_AGREEMENT_FACTOR: fixed agreement factor when only 1 rater rated the player
-//   (stdDev is undefined for a single value; 0.70 reflects low-confidence seed).
+// Phase 0 is unchanged from v1. organizerWeight 2 + up to 5 peers makes
+// TARGET_SEED_WEIGHT = 6 reachable, so that constant is correct — only the
+// match path had the wrong /6 divisor (fixed to RATER_FULL = 5 in v2).
 export const TARGET_SEED_WEIGHT = 6
 export const ORGANIZER_SEED_WEIGHT = 2
 export const SEED_PRIOR_OVR_FALLBACK = 65

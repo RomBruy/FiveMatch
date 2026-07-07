@@ -59,7 +59,7 @@ vi.mock('../seeding.service', () => ({
 
 import { ovrService } from '../ovr.service'
 import type { OvrSignal } from '../ovr-signal'
-import { MVP_WEIGHT, MVP_FIXED_CONTRIBUTION } from '@fivematch/types/algorithm-constants'
+import { MVP_BONUS, ALPHA_BASE, ALPHA_FLOOR, DIVERSITY_SPRING, DIVERSITY_TARGET_CAP } from '@fivematch/types/algorithm-constants'
 
 const makeSignal = (value: number, weight: number): OvrSignal => ({
   type: 'match',
@@ -69,6 +69,15 @@ const makeSignal = (value: number, weight: number): OvrSignal => ({
   weight,
   computedAt: new Date(),
 })
+
+// Default outcome/diversity params for applyEmaWithBreakdown — balanced teams, draw, full diversity
+const DEFAULT_OUTCOME = {
+  distinctRatersCount: 8,    // at or beyond DIVERSITY_TARGET_CAP → diversityGuard = 0
+  diversityTarget: 8,
+  myTeamAvgOvr: 65,
+  oppTeamAvgOvr: 65,
+  matchOutcome: 'draw' as const,
+}
 
 describe('ovrService.computeOvr', () => {
   it('all attributes = 5.0 → result = 5.0 (weights sum to 1)', () => {
@@ -87,23 +96,21 @@ describe('ovrService.computeOvr', () => {
 })
 
 describe('ovrService.applyEma', () => {
-  it('regression baseline at matchCount=15 matches calibration formula', () => {
-    // Same formula as ovr-calibration.test.ts: alpha = max(0.10, 0.25 - 15×0.005) = 0.175
-    // Using OVR-range values (70, 50) to stay in [40, 99]:
-    // new_ovr = (1-0.175)×70 + 0.175×50 = 57.75 + 8.75 = 66.5
+  it('regression baseline at distinctRatersCount=15 matches calibration formula', () => {
+    // alpha = clamp(max(0.10, 0.22 - 15×0.006) × 1.0, 0.10, 0.30) = clamp(0.13, …) = 0.13
+    // new_ovr = (1-0.13)×70 + 0.13×50 = 60.9 + 6.5 = 67.4
     const result = ovrService.applyEma(70, 50, 15)
-    expect(result).toBeCloseTo(66.5, 5)
+    expect(result).toBeCloseTo(67.4, 5)
   })
 
   it('result is clamped to minimum 40', () => {
-    // currentOvr=41, matchImpact=0 with alpha=0.25 → 0.75*41 + 0.25*0 = 30.75 → clamped to 40
+    // currentOvr=41, matchImpact=0, distinctRatersCount=0 → alpha=0.22 → 0.78*41 = 31.98 → clamped to 40
     const result = ovrService.applyEma(41, 0, 0)
     expect(result).toBeGreaterThanOrEqual(40)
     expect(result).toBe(40)
   })
 
   it('result is clamped to maximum 99', () => {
-    // Very high impact should be clamped at 99
     const result = ovrService.applyEma(99, 200, 0)
     expect(result).toBeLessThanOrEqual(99)
     expect(result).toBe(99)
@@ -233,59 +240,87 @@ describe('ovrService.evaluatePlayerTier', () => {
 
 const makeRater = (v: number) => ({ pace: v, technique: v, passing: v, defending: v, physicality: v, effort: v })
 
+const makePlayer = (ovrScoreFloat: number, matchCount = 0) => ({
+  ovrScoreFloat,
+  matchCount,
+  lastMatchAt: null as Date | null,
+  avgPace: null as string | null, avgTechnique: null as string | null, avgPassing: null as string | null,
+  avgDefending: null as string | null, avgPhysicality: null as string | null, avgEffort: null as string | null,
+})
+
 describe('ovrService.applyEmaWithBreakdown', () => {
   it('full breakdown: known inputs produce exact values for every field', () => {
-    // player.ovrScoreFloat=60, matchCount=0, 3 raters all attrs=8, no goals/assists, club
+    // player.ovrScoreFloat=60, matchCount=0, distinctRatersCount=8 (=target, guard=0), 3 raters all attrs=8
+    // no goals/assists, balanced teams (draw), club tier
+    //
+    // Step 3: attributeScoreRaw = 8.0 (all attrs 8, weights sum to 1)
+    // Step 4: calibrate(8.0) — between anchors {7,76} and {9,91}
+    //         t = (8-7)/(9-7) = 0.5 → 76 + 0.5×15 = 83.5
+    //         matchImpactBase = 83.5
+    // Step 5: mvpBonus=0, goalContribution=0
+    //         expectedWin = 1/(1+10^0) = 0.5, actual=0.5, outcomeAdj = 2×0 = 0
+    //         matchImpact = 83.5
+    // Step 7: matchCount=0 → baseAlpha = max(0.10, 0.22-0×0.006) = 0.22
+    //         distinct=8, target=8 → diversityRatio=1 → diversityGuard = 0.05×max(0,0) = 0
+    //         adjustedBaseAlpha = min(0.30, 0.22+0) = 0.22
+    //         raterCount=3, perRaterScores all 8.0, stdDev=0 → rawAgreement=1.00
+    //         countFactor = min(1, 3/5) = 0.6
+    //         agreementFactor = 1 - 0.6×(1-1.00) = 1.0
+    //         evidenceQuality = 0.6×1.0 = 0.6
+    //         tierMultiplier (club) = 1.0
+    //         finalAlphaBeforeClamp = 0.22×0.6×1.0 = 0.132
+    //         finalAlphaAfterClamp = clamp(0.132, 0.10, 0.30) = 0.132
+    // Step 8: newOvr = 60 + 0.132×(83.5-60) = 60 + 0.132×23.5 = 60 + 3.102 = 63.102
     const { newOvr, breakdown } = ovrService.applyEmaWithBreakdown({
       matchId: 'match-test-1',
-      player: { ovrScoreFloat: 60, matchCount: 0, lastMatchAt: null, avgPace: null, avgTechnique: null, avgPassing: null, avgDefending: null, avgPhysicality: null, avgEffort: null },
+      player: makePlayer(60, 0),
       matchRatings: [makeRater(8), makeRater(8), makeRater(8)],
-      goalCount: 0,
-      assistCount: 0,
+      goalCount: 0, assistCount: 0,
       isMvp: false,
       groupTier: 'club',
+      ...DEFAULT_OUTCOME,
     })
 
-    // Attributes
     expect(breakdown.rawAttributes.pace).toBe(8)
-    expect(breakdown.boostedAttributes.pace).toBe(8)
     expect(breakdown.raterCount).toBe(3)
     expect(breakdown.ratingStdDev).toBeCloseTo(0, 10)
     expect(breakdown.attributeScoreRaw).toBeCloseTo(8.0, 10)
 
-    // Signal pipeline — calibrateMatchImpact(8): between {7,76} and {9,90}, t=0.5 → 76+7=83
-    expect(breakdown.matchImpactRaw).toBeCloseTo(83.0, 5)
-    expect(breakdown.matchImpactClamped).toBeCloseTo(83.0, 5)
-    expect(breakdown.mvpAdjustmentApplied).toBe(false)
-    expect(breakdown.matchImpactAfterMvp).toBeCloseTo(83.0, 5)
+    // Step 4
+    expect(breakdown.matchImpactRaw).toBeCloseTo(83.5, 5)
+    expect(breakdown.matchImpactBase).toBeCloseTo(83.5, 5)
 
-    // Context
-    expect(breakdown.groupTier).toBe('club')
-    expect(breakdown.contextMultiplier).toBe(1.0)
-    expect(breakdown.performanceDelta).toBeCloseTo(23, 5)
-    expect(breakdown.contextAdjustedDelta).toBeCloseTo(23, 5)
-    expect(breakdown.adjustedMatchImpact).toBeCloseTo(83.0, 5)
+    // Step 5 — no goals, no MVP, balanced draw
+    expect(breakdown.mvpBonus).toBe(0)
+    expect(breakdown.goalContribution).toBe(0)
+    expect(breakdown.expectedWin).toBeCloseTo(0.5, 5)
+    expect(breakdown.actual).toBe(0.5)
+    expect(breakdown.outcomeAdjustment).toBeCloseTo(0, 10)
+    expect(breakdown.matchImpact).toBeCloseTo(83.5, 5)
 
-    // Alpha
+    // Step 7 — split alpha, no diversity guard (at full diversity)
     expect(breakdown.alpha.matchCountBefore).toBe(0)
-    expect(breakdown.alpha.baseAlpha).toBeCloseTo(0.25, 10)
-    expect(breakdown.alpha.daysSinceLastMatch).toBeNull()
-    expect(breakdown.alpha.inactivityMultiplier).toBe(1.0)
-    expect(breakdown.alpha.uncertaintyAlpha).toBeCloseTo(0.25, 10)
-    expect(breakdown.alpha.countFactor).toBeCloseTo(0.5, 10)
+    expect(breakdown.alpha.distinctRatersBefore).toBe(8)
+    expect(breakdown.alpha.diversityTarget).toBe(8)
+    expect(breakdown.alpha.baseAlpha).toBeCloseTo(0.22, 10)
+    expect(breakdown.alpha.diversityGuard).toBeCloseTo(0, 10)
+    expect(breakdown.alpha.adjustedBaseAlpha).toBeCloseTo(0.22, 10)
+    expect(breakdown.alpha.countFactor).toBeCloseTo(0.6, 10)
+    expect(breakdown.alpha.rawAgreementFactor).toBeCloseTo(1.0, 10)
     expect(breakdown.alpha.agreementFactor).toBeCloseTo(1.0, 10)
-    expect(breakdown.alpha.evidenceQuality).toBeCloseTo(0.5, 10)
-    expect(breakdown.alpha.finalAlphaBeforeClamp).toBeCloseTo(0.125, 10)
-    expect(breakdown.alpha.finalAlphaAfterClamp).toBeCloseTo(0.125, 10)
+    expect(breakdown.alpha.evidenceQuality).toBeCloseTo(0.6, 10)
+    expect(breakdown.alpha.tierMultiplier).toBe(1.0)
+    expect(breakdown.alpha.finalAlphaBeforeClamp).toBeCloseTo(0.132, 10)
+    expect(breakdown.alpha.finalAlphaAfterClamp).toBeCloseTo(0.132, 10)
 
-    // Result — newOvr = 60 + 0.125*(83-60) = 60 + 2.875 = 62.875
+    // Step 8
     expect(breakdown.oldOvr).toBe(60)
-    expect(breakdown.newOvrBeforeClamp).toBeCloseTo(62.875, 10)
-    expect(breakdown.newOvr).toBeCloseTo(62.875, 10)
-    expect(newOvr).toBeCloseTo(62.875, 10)
+    expect(breakdown.newOvrBeforeClamp).toBeCloseTo(63.102, 5)
+    expect(breakdown.newOvr).toBeCloseTo(63.102, 5)
+    expect(newOvr).toBeCloseTo(63.102, 5)
     expect(breakdown.displayedOldOvr).toBe(60)
     expect(breakdown.displayedNewOvr).toBe(63)
-    expect(breakdown.rawDelta).toBeCloseTo(2.875, 10)
+    expect(breakdown.rawDelta).toBeCloseTo(3.102, 5)
     expect(breakdown.displayedDelta).toBe(3)
     expect(breakdown.matchId).toBe('match-test-1')
   })
@@ -293,12 +328,12 @@ describe('ovrService.applyEmaWithBreakdown', () => {
   it('raterCount < 2 → finalAlphaAfterClamp = 0 and newOvr = oldOvr', () => {
     const { newOvr, breakdown } = ovrService.applyEmaWithBreakdown({
       matchId: 'match-test-2',
-      player: { ovrScoreFloat: 65, matchCount: 5, lastMatchAt: null, avgPace: null, avgTechnique: null, avgPassing: null, avgDefending: null, avgPhysicality: null, avgEffort: null },
+      player: makePlayer(65, 5),
       matchRatings: [makeRater(8)],
-      goalCount: 0,
-      assistCount: 0,
+      goalCount: 0, assistCount: 0,
       isMvp: false,
       groupTier: 'club',
+      ...DEFAULT_OUTCOME,
     })
 
     expect(breakdown.alpha.finalAlphaAfterClamp).toBe(0)
@@ -309,22 +344,29 @@ describe('ovrService.applyEmaWithBreakdown', () => {
     expect(breakdown.raterCount).toBe(1)
   })
 
-  it('displayedDelta = 0 even when rawDelta ≠ 0 (sub-integer OVR move rounds away)', () => {
-    // player.ovrScoreFloat=70, matchCount=10, 3 raters all-6 attrs, no goals/assists
-    // calibrateMatchImpact(6): between {5,65} and {7,76}, t=0.5 → 70.5
-    // newOvr = 70 + 0.10*(70.5-70) = 70.05 → displayedDelta=0
+  it('displayedDelta = 0 when raw sub-integer OVR move rounds away', () => {
+    // 3 raters all attrs=6, no goals, balanced draw, matchCount=30 → baseAlpha=ALPHA_FLOOR=0.10
+    // calibrate(6): between {5,63} and {7,76}, t=0.5 → 63 + 0.5×13 = 69.5
+    // matchImpact = 69.5 (no MVP/goals/outcome adj on balanced draw)
+    // alpha = clamp(max(0.10, 0.22-30×0.006)×evidenceQuality×1.0, …)
+    //       = clamp(max(0.10, 0.04) × 0.6 × 1.0, …) = clamp(0.10 × 0.6, 0.10, …) = 0.10
+    // newOvr = 70 + 0.10×(69.5-70) = 70 - 0.05 = 69.95 → displayed 70; delta = 0
     const { newOvr, breakdown } = ovrService.applyEmaWithBreakdown({
       matchId: 'match-test-3',
-      player: { ovrScoreFloat: 70, matchCount: 10, lastMatchAt: null, avgPace: null, avgTechnique: null, avgPassing: null, avgDefending: null, avgPhysicality: null, avgEffort: null },
+      player: makePlayer(70, 30),
       matchRatings: [makeRater(6), makeRater(6), makeRater(6)],
-      goalCount: 0,
-      assistCount: 0,
+      goalCount: 0, assistCount: 0,
       isMvp: false,
       groupTier: 'club',
+      distinctRatersCount: 30,
+      diversityTarget: 8,
+      myTeamAvgOvr: 65,
+      oppTeamAvgOvr: 65,
+      matchOutcome: 'draw',
     })
 
-    expect(newOvr).toBeGreaterThan(70)
-    expect(breakdown.rawDelta).toBeGreaterThan(0)
+    expect(newOvr).toBeLessThan(70)
+    expect(breakdown.rawDelta).toBeLessThan(0)
     expect(breakdown.displayedDelta).toBe(0)
     expect(breakdown.displayedOldOvr).toBe(70)
     expect(breakdown.displayedNewOvr).toBe(70)
@@ -332,109 +374,270 @@ describe('ovrService.applyEmaWithBreakdown', () => {
   })
 })
 
-describe('applyEmaWithBreakdown — MVP explicit blend', () => {
-  const basePlayerParams = {
-    ovrScoreFloat: 70, matchCount: 10, lastMatchAt: null,
-    avgPace: null, avgTechnique: null, avgPassing: null,
-    avgDefending: null, avgPhysicality: null, avgEffort: null,
-  }
-  const twoRaterRatings = [
-    { pace: 5, technique: 5, passing: 5, defending: 5, physicality: 5, effort: 5 },
-    { pace: 5, technique: 5, passing: 5, defending: 5, physicality: 5, effort: 5 },
-  ]
+describe('applyEmaWithBreakdown — MVP additive bonus (fix #2)', () => {
+  const twoRaterRatings = [makeRater(5), makeRater(5)]
 
-  it('MVP blend: matchImpactAfterMvp = matchImpactClamped * 0.97 + 80 * 0.03', () => {
+  // calibrate(5): between {5,63} and {7,76} → t=0 → 63.0
+  // With balanced draw, no goals: matchImpact = 63.0 + mvpBonus + 0 + 0
+
+  it('MVP bonus: matchImpact = matchImpactBase + MVP_BONUS', () => {
     const result = ovrService.applyEmaWithBreakdown({
       matchId: 'test-mvp-1',
-      player: basePlayerParams,
+      player: makePlayer(70, 10),
       matchRatings: twoRaterRatings,
       goalCount: 0, assistCount: 0,
       isMvp: true,
-      groupTier: 'amateur' as const,
+      groupTier: 'amateur',
+      ...DEFAULT_OUTCOME,
     })
-    const { matchImpactClamped, matchImpactAfterMvp, mvpAdjustmentApplied } = result.breakdown
-    expect(mvpAdjustmentApplied).toBe(true)
-    const expectedBlend = matchImpactClamped * 0.97 + 80 * 0.03
-    expect(matchImpactAfterMvp).toBeCloseTo(expectedBlend, 10)
+    const { matchImpactBase, mvpBonus, matchImpact } = result.breakdown
+    expect(mvpBonus).toBe(MVP_BONUS)
+    expect(matchImpact).toBeCloseTo(matchImpactBase + MVP_BONUS, 5)
   })
 
-  it('non-MVP: matchImpactAfterMvp === matchImpactClamped (no change)', () => {
+  it('non-MVP: mvpBonus = 0, matchImpact = matchImpactBase (balanced draw)', () => {
     const result = ovrService.applyEmaWithBreakdown({
       matchId: 'test-mvp-2',
-      player: basePlayerParams,
+      player: makePlayer(70, 10),
       matchRatings: twoRaterRatings,
       goalCount: 0, assistCount: 0,
       isMvp: false,
-      groupTier: 'amateur' as const,
+      groupTier: 'amateur',
+      ...DEFAULT_OUTCOME,
     })
-    const { matchImpactClamped, matchImpactAfterMvp, mvpAdjustmentApplied } = result.breakdown
-    expect(mvpAdjustmentApplied).toBe(false)
-    expect(matchImpactAfterMvp).toBe(matchImpactClamped)
+    expect(result.breakdown.mvpBonus).toBe(0)
+    expect(result.breakdown.matchImpact).toBeCloseTo(result.breakdown.matchImpactBase, 5)
   })
 
-  it('MVP blend on a 5/10 performance: 65 * 0.97 + 80 * 0.03 = 63.05 + 2.4 = 65.45', () => {
-    // calibrateMatchImpact(5) = 65; MVP pushes it slightly toward 80
+  it('MVP bonus is always additive — never penalises high performers (fix #2)', () => {
+    // Player performing above 80 (all 10s → calibrate(10) = 99)
+    // Old v1 blend would have dragged them DOWN toward 80; v2 bonus adds +1.5
+    const withMvp = ovrService.applyEmaWithBreakdown({
+      matchId: 'test-mvp-elite-mvp',
+      player: makePlayer(90, 10),
+      matchRatings: [makeRater(10), makeRater(10)],
+      goalCount: 0, assistCount: 0, isMvp: true,
+      groupTier: 'club', ...DEFAULT_OUTCOME,
+    })
+    const withoutMvp = ovrService.applyEmaWithBreakdown({
+      matchId: 'test-mvp-elite-no-mvp',
+      player: makePlayer(90, 10),
+      matchRatings: [makeRater(10), makeRater(10)],
+      goalCount: 0, assistCount: 0, isMvp: false,
+      groupTier: 'club', ...DEFAULT_OUTCOME,
+    })
+    expect(withMvp.newOvr).toBeGreaterThanOrEqual(withoutMvp.newOvr)
+  })
+
+  it('MVP_BONUS constant has correct value', () => {
+    expect(MVP_BONUS).toBe(1.5)
+  })
+})
+
+describe('applyEmaWithBreakdown — goal/assist contributions (Step 5)', () => {
+  const twoRaterRatings = [makeRater(6), makeRater(6)]
+
+  it('single goal adds GOAL_PT to matchImpact', () => {
+    const noGoal = ovrService.applyEmaWithBreakdown({
+      matchId: 'g-0', player: makePlayer(70, 5),
+      matchRatings: twoRaterRatings, goalCount: 0, assistCount: 0,
+      isMvp: false, groupTier: 'club', ...DEFAULT_OUTCOME,
+    })
+    const oneGoal = ovrService.applyEmaWithBreakdown({
+      matchId: 'g-1', player: makePlayer(70, 5),
+      matchRatings: twoRaterRatings, goalCount: 1, assistCount: 0,
+      isMvp: false, groupTier: 'club', ...DEFAULT_OUTCOME,
+    })
+    expect(oneGoal.breakdown.goalContribution).toBeCloseTo(0.6, 10)
+    expect(oneGoal.breakdown.matchImpact).toBeCloseTo(noGoal.breakdown.matchImpact + 0.6, 5)
+  })
+
+  it('goal cap: 4 goals produce same contribution as OBJECTIVE_GOAL_CAP (2.0)', () => {
+    const fourGoals = ovrService.applyEmaWithBreakdown({
+      matchId: 'g-cap', player: makePlayer(70, 5),
+      matchRatings: twoRaterRatings, goalCount: 4, assistCount: 0,
+      isMvp: false, groupTier: 'club', ...DEFAULT_OUTCOME,
+    })
+    // 4×0.6 = 2.4 → capped at 2.0
+    expect(fourGoals.breakdown.goalContribution).toBeCloseTo(2.0, 10)
+  })
+
+  it('assist adds ASSIST_PT to goalContribution', () => {
+    const noContrib = ovrService.applyEmaWithBreakdown({
+      matchId: 'a-0', player: makePlayer(70, 5),
+      matchRatings: twoRaterRatings, goalCount: 0, assistCount: 0,
+      isMvp: false, groupTier: 'club', ...DEFAULT_OUTCOME,
+    })
+    const oneAssist = ovrService.applyEmaWithBreakdown({
+      matchId: 'a-1', player: makePlayer(70, 5),
+      matchRatings: twoRaterRatings, goalCount: 0, assistCount: 1,
+      isMvp: false, groupTier: 'club', ...DEFAULT_OUTCOME,
+    })
+    expect(oneAssist.breakdown.goalContribution).toBeCloseTo(0.4, 10)
+    expect(oneAssist.breakdown.matchImpact).toBeCloseTo(noContrib.breakdown.matchImpact + 0.4, 5)
+  })
+})
+
+describe('applyEmaWithBreakdown — match outcome adjustment (Step 5)', () => {
+  const twoRaterRatings = [makeRater(5), makeRater(5)]
+  const basePlayer = makePlayer(65, 10)
+
+  it('win against equal team produces near-zero outcome adjustment', () => {
+    // expectedWin = 0.5, actual = 1.0 → adjustment = 2×0.5 = +1.0
     const result = ovrService.applyEmaWithBreakdown({
-      matchId: 'test-mvp-3',
-      player: basePlayerParams,
-      matchRatings: twoRaterRatings,
-      goalCount: 0, assistCount: 0,
-      isMvp: true,
-      groupTier: 'amateur' as const,
+      matchId: 'oc-equal-win', player: basePlayer,
+      matchRatings: twoRaterRatings, goalCount: 0, assistCount: 0,
+      isMvp: false, groupTier: 'club',
+      distinctRatersCount: 10, diversityTarget: 8, myTeamAvgOvr: 65, oppTeamAvgOvr: 65,
+      matchOutcome: 'win',
     })
-    expect(result.breakdown.matchImpactAfterMvp).toBeCloseTo(65.45, 5)
+    expect(result.breakdown.expectedWin).toBeCloseTo(0.5, 5)
+    expect(result.breakdown.actual).toBe(1.0)
+    expect(result.breakdown.outcomeAdjustment).toBeCloseTo(1.0, 5)
   })
 
-  it('MVP blend result is still in [40, 99] (bounded by post-EMA clamp)', () => {
+  it('losing to a stronger team produces small negative adjustment', () => {
+    // myTeamAvg=60, oppTeamAvg=80 → expectedWin = 1/(1+10^(20/40)) = 1/(1+10^0.5) ≈ 0.240
+    // actual=0.0 → adjustment = 2×(0 - 0.240) = -0.480
     const result = ovrService.applyEmaWithBreakdown({
-      matchId: 'test-mvp-4',
-      player: basePlayerParams,
-      matchRatings: twoRaterRatings,
-      goalCount: 0, assistCount: 0,
-      isMvp: true,
-      groupTier: 'amateur' as const,
+      matchId: 'oc-underdog-loss', player: basePlayer,
+      matchRatings: twoRaterRatings, goalCount: 0, assistCount: 0,
+      isMvp: false, groupTier: 'club',
+      distinctRatersCount: 10, diversityTarget: 8, myTeamAvgOvr: 60, oppTeamAvgOvr: 80,
+      matchOutcome: 'loss',
     })
-    expect(result.newOvr).toBeGreaterThanOrEqual(40)
-    expect(result.newOvr).toBeLessThanOrEqual(99)
+    const expectedWin = 1 / (1 + Math.pow(10, -(60 - 80) / 40))
+    expect(result.breakdown.expectedWin).toBeCloseTo(expectedWin, 5)
+    expect(result.breakdown.outcomeAdjustment).toBeCloseTo(2 * (0 - expectedWin), 5)
+    // Losing as underdog is a small negative — should be less severe than losing as favourite
+    expect(result.breakdown.outcomeAdjustment).toBeGreaterThan(-1)
   })
 
-  it('MVP_WEIGHT and MVP_FIXED_CONTRIBUTION constants have correct values', () => {
-    expect(MVP_WEIGHT).toBe(0.03)
-    expect(MVP_FIXED_CONTRIBUTION).toBe(80)
+  it('losing to a weaker team gives maximum negative adjustment', () => {
+    // myTeamAvg=80, oppTeamAvg=60 → expectedWin ≈ 0.760
+    // actual=0.0 → adjustment = 2×(0 - 0.760) ≈ -1.52
+    const result = ovrService.applyEmaWithBreakdown({
+      matchId: 'oc-favourite-loss', player: basePlayer,
+      matchRatings: twoRaterRatings, goalCount: 0, assistCount: 0,
+      isMvp: false, groupTier: 'club',
+      distinctRatersCount: 10, diversityTarget: 8, myTeamAvgOvr: 80, oppTeamAvgOvr: 60,
+      matchOutcome: 'loss',
+    })
+    expect(result.breakdown.outcomeAdjustment).toBeLessThan(-1)
+  })
+
+  it('draw against equal teams → outcome adjustment = 0', () => {
+    const result = ovrService.applyEmaWithBreakdown({
+      matchId: 'oc-equal-draw', player: basePlayer,
+      matchRatings: twoRaterRatings, goalCount: 0, assistCount: 0,
+      isMvp: false, groupTier: 'club',
+      distinctRatersCount: 10, diversityTarget: 8, myTeamAvgOvr: 65, oppTeamAvgOvr: 65,
+      matchOutcome: 'draw',
+    })
+    expect(result.breakdown.outcomeAdjustment).toBeCloseTo(0, 10)
   })
 })
 
 describe('applyEmaWithBreakdown — signal clamp before EMA', () => {
   const baseParams = {
     matchId: 'test-match-1',
-    player: { ovrScoreFloat: 70, matchCount: 10, lastMatchAt: null, avgPace: null, avgTechnique: null, avgPassing: null, avgDefending: null, avgPhysicality: null, avgEffort: null },
-    matchRatings: [
-      { pace: 3, technique: 3, passing: 3, defending: 3, physicality: 3, effort: 3 },
-      { pace: 3, technique: 3, passing: 3, defending: 3, physicality: 3, effort: 3 },
-    ],
+    player: makePlayer(70, 10),
+    matchRatings: [makeRater(3), makeRater(3)],
     goalCount: 0, assistCount: 0, isMvp: false, groupTier: 'amateur' as const,
+    ...DEFAULT_OUTCOME,
   }
 
-  it('matchImpactClamped is at least 40 even when matchImpactRaw would be below', () => {
-    // Very low ratings (3/10 all attributes) → calibrateMatchImpact(3) = 52, already above 40
-    // To test the sub-40 clamp we'd need to bypass calibrateMatchImpact, which is internal.
-    // Instead verify the clamped value is always >= OVR_CLAMP_MIN
+  it('matchImpactBase is always >= 40 (OVR_CLAMP_MIN)', () => {
     const result = ovrService.applyEmaWithBreakdown(baseParams)
-    expect(result.breakdown.matchImpactClamped).toBeGreaterThanOrEqual(40)
-    expect(result.breakdown.matchImpactClamped).toBeLessThanOrEqual(99)
+    expect(result.breakdown.matchImpactBase).toBeGreaterThanOrEqual(40)
+    expect(result.breakdown.matchImpactBase).toBeLessThanOrEqual(99)
   })
 
   it('matchImpactRaw is preserved in breakdown even when clamped', () => {
     const result = ovrService.applyEmaWithBreakdown(baseParams)
-    // matchImpactRaw is stored before clamping — they may differ
     expect(result.breakdown).toHaveProperty('matchImpactRaw')
-    expect(result.breakdown).toHaveProperty('matchImpactClamped')
+    expect(result.breakdown).toHaveProperty('matchImpactBase')
   })
 
   it('EMA receives clamped signal (newOvr always in [40, 99])', () => {
     const result = ovrService.applyEmaWithBreakdown(baseParams)
     expect(result.newOvr).toBeGreaterThanOrEqual(40)
     expect(result.newOvr).toBeLessThanOrEqual(99)
+  })
+})
+
+describe('applyEmaWithBreakdown — alpha split roles (fix #5)', () => {
+  const ratings2 = [makeRater(7), makeRater(7)]
+
+  it('more matchCount → lower baseAlpha (OVR settles over time)', () => {
+    // matchCount drives baseAlpha decay; distinctRatersCount has no effect on baseAlpha
+    const fresh = ovrService.applyEmaWithBreakdown({
+      matchId: 'div-fresh', player: makePlayer(70, 0),
+      matchRatings: ratings2, goalCount: 0, assistCount: 0,
+      isMvp: false, groupTier: 'club',
+      distinctRatersCount: 8, diversityTarget: 8, myTeamAvgOvr: 65, oppTeamAvgOvr: 65, matchOutcome: 'draw',
+    })
+    const veteran = ovrService.applyEmaWithBreakdown({
+      matchId: 'div-veteran', player: makePlayer(70, 20),
+      matchRatings: ratings2, goalCount: 0, assistCount: 0,
+      isMvp: false, groupTier: 'club',
+      distinctRatersCount: 8, diversityTarget: 8, myTeamAvgOvr: 65, oppTeamAvgOvr: 65, matchOutcome: 'draw',
+    })
+    // matchCount=0 → baseAlpha=0.22; matchCount=20 → baseAlpha=max(0.10, 0.22-0.12)=0.10
+    expect(veteran.breakdown.alpha.baseAlpha).toBeLessThan(fresh.breakdown.alpha.baseAlpha)
+    expect(fresh.breakdown.alpha.matchCountBefore).toBe(0)
+    expect(veteran.breakdown.alpha.matchCountBefore).toBe(20)
+  })
+
+  it('fewer distinct raters → higher diversityGuard (evidence breadth bonus)', () => {
+    // distinctRatersCount drives diversityGuard, not baseAlpha
+    const narrow = ovrService.applyEmaWithBreakdown({
+      matchId: 'div-narrow', player: makePlayer(70, 5),
+      matchRatings: ratings2, goalCount: 0, assistCount: 0,
+      isMvp: false, groupTier: 'club',
+      distinctRatersCount: 0, diversityTarget: 8, myTeamAvgOvr: 65, oppTeamAvgOvr: 65, matchOutcome: 'draw',
+    })
+    const wide = ovrService.applyEmaWithBreakdown({
+      matchId: 'div-wide', player: makePlayer(70, 5),
+      matchRatings: ratings2, goalCount: 0, assistCount: 0,
+      isMvp: false, groupTier: 'club',
+      distinctRatersCount: 8, diversityTarget: 8, myTeamAvgOvr: 65, oppTeamAvgOvr: 65, matchOutcome: 'draw',
+    })
+    // narrow: diversityGuard = 0.05 × (1 - 0/8) = 0.05
+    // wide: diversityGuard = 0.05 × (1 - 1) = 0
+    expect(narrow.breakdown.alpha.diversityGuard).toBeCloseTo(DIVERSITY_SPRING, 10)
+    expect(wide.breakdown.alpha.diversityGuard).toBeCloseTo(0, 10)
+    expect(narrow.breakdown.alpha.adjustedBaseAlpha).toBeGreaterThan(wide.breakdown.alpha.adjustedBaseAlpha)
+    // baseAlpha is the SAME for both (same matchCount=5)
+    expect(narrow.breakdown.alpha.baseAlpha).toBeCloseTo(wide.breakdown.alpha.baseAlpha, 10)
+  })
+
+  it('elite tier raises alpha (same matchCount), but still <= ALPHA_CEIL', () => {
+    const club = ovrService.applyEmaWithBreakdown({
+      matchId: 'tier-club', player: makePlayer(70, 5),
+      matchRatings: ratings2, goalCount: 0, assistCount: 0,
+      isMvp: false, groupTier: 'club',
+      distinctRatersCount: 0, diversityTarget: 8, myTeamAvgOvr: 65, oppTeamAvgOvr: 65, matchOutcome: 'draw',
+    })
+    const elite = ovrService.applyEmaWithBreakdown({
+      matchId: 'tier-elite', player: makePlayer(70, 5),
+      matchRatings: ratings2, goalCount: 0, assistCount: 0,
+      isMvp: false, groupTier: 'elite',
+      distinctRatersCount: 0, diversityTarget: 8, myTeamAvgOvr: 65, oppTeamAvgOvr: 65, matchOutcome: 'draw',
+    })
+    expect(elite.breakdown.alpha.finalAlphaAfterClamp)
+      .toBeGreaterThan(club.breakdown.alpha.finalAlphaAfterClamp)
+    expect(elite.breakdown.alpha.finalAlphaAfterClamp).toBeLessThanOrEqual(0.30)
+  })
+
+  it('baseAlpha never exceeds ALPHA_BASE regardless of match count', () => {
+    const result = ovrService.applyEmaWithBreakdown({
+      matchId: 'alpha-base', player: makePlayer(70, 0),
+      matchRatings: ratings2, goalCount: 0, assistCount: 0,
+      isMvp: false, groupTier: 'club',
+      distinctRatersCount: 0, diversityTarget: 8, myTeamAvgOvr: 65, oppTeamAvgOvr: 65, matchOutcome: 'draw',
+    })
+    expect(result.breakdown.alpha.baseAlpha).toBeLessThanOrEqual(ALPHA_BASE)
   })
 })
 
@@ -445,8 +648,6 @@ describe('ovrService.computeAttributeAverages', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    // First select call: ratings innerJoin chain (with innerJoins for groupMemberships)
-    // Second select call: group median chain (direct .where())
     mocks.mockSelect
       .mockReturnValueOnce({ from: mocks.mockSelectFrom })
       .mockReturnValue({ from: mocks.mockGroupMedianFrom })
@@ -454,18 +655,15 @@ describe('ovrService.computeAttributeAverages', () => {
     mocks.mockSelectInnerJoin1.mockReturnValue({ innerJoin: mocks.mockSelectInnerJoin2 })
     mocks.mockSelectInnerJoin2.mockReturnValue({ where: mocks.mockSelectWhere })
     mocks.mockGroupMedianFrom.mockReturnValue({ where: mocks.mockGroupMedianWhere })
-    mocks.mockGroupMedianWhere.mockResolvedValue([]) // default: no unlocked players
+    mocks.mockGroupMedianWhere.mockResolvedValue([])
     mocks.mockUpdate.mockReturnValue({ set: mocks.mockUpdateSet })
     mocks.mockUpdateSet.mockReturnValue({ where: mocks.mockUpdateWhere })
     mocks.mockUpdateWhere.mockReturnValue({ returning: mocks.mockReturning })
-    // Default: update returns the rated player's userId
     mocks.mockReturning.mockResolvedValue([{ userId: RATED_USER_ID }])
     mocks.mockSeedingComputeInitialSeed.mockResolvedValue({ seededOvr: 70, seedStatus: 'PROVISIONAL' })
   })
 
   it('applies 2× organizer weight: 1 organizer + 1 member, verifies weighted average per attribute', async () => {
-    // Organizer: pace=8 (weight 2), Member: pace=4 (weight 1)
-    // Expected avgPace = (8*2 + 4*1) / (2+1) = 20/3 ≈ 6.6667
     const fakeRatings = [
       { pace: 8, technique: 6, passing: 7, defending: 5, physicality: 9, effort: 8, raterRole: 'organizer', raterUserId: 'user-org-1' },
       { pace: 4, technique: 6, passing: 5, defending: 7, physicality: 3, effort: 6, raterRole: 'member', raterUserId: 'user-member-1' },
@@ -477,17 +675,11 @@ describe('ovrService.computeAttributeAverages', () => {
     expect(mocks.mockUpdate).toHaveBeenCalled()
     const setArgs = (mocks.mockUpdateSet.mock.calls as unknown as [Record<string, string>][])[0][0]
 
-    // avgPace = (8*2 + 4*1) / 3 = 20/3
     expect(parseFloat(setArgs['avgPace'])).toBeCloseTo(20 / 3, 5)
-    // avgTechnique = (6*2 + 6*1) / 3 = 18/3 = 6.0
     expect(parseFloat(setArgs['avgTechnique'])).toBeCloseTo(6.0, 5)
-    // avgPassing = (7*2 + 5*1) / 3 = 19/3
     expect(parseFloat(setArgs['avgPassing'])).toBeCloseTo(19 / 3, 5)
-    // avgDefending = (5*2 + 7*1) / 3 = 17/3
     expect(parseFloat(setArgs['avgDefending'])).toBeCloseTo(17 / 3, 5)
-    // avgPhysicality = (9*2 + 3*1) / 3 = 21/3 = 7.0
     expect(parseFloat(setArgs['avgPhysicality'])).toBeCloseTo(7.0, 5)
-    // avgEffort = (8*2 + 6*1) / 3 = 22/3
     expect(parseFloat(setArgs['avgEffort'])).toBeCloseTo(22 / 3, 5)
     expect(setArgs['cardState']).toBe('in_progress_1')
   })
@@ -501,8 +693,6 @@ describe('ovrService.computeAttributeAverages', () => {
     await ovrService.computeAttributeAverages(GROUP_ID, RATED_PLAYER_ID)
 
     const setArgs = (mocks.mockUpdateSet.mock.calls as unknown as [Record<string, string>][])[0][0]
-
-    // With one organizer (weight 2), totalWeight = 2; (7*2)/2 = 7
     expect(parseFloat(setArgs['avgPace'])).toBeCloseTo(7.0, 5)
     expect(parseFloat(setArgs['avgTechnique'])).toBeCloseTo(5.0, 5)
     expect(parseFloat(setArgs['avgDefending'])).toBeCloseTo(8.0, 5)

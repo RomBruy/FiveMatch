@@ -1,8 +1,9 @@
-import {
-  GOAL_TECHNIQUE_BOOST,
-  GOAL_PACE_BOOST,
-  ASSIST_PASSING_BOOST,
-} from '@fivematch/types/algorithm-constants'
+// post-match-rating-signal.ts
+// This legacy signal builder is no longer used in the main post-match pipeline.
+// In v2, goal/assist contributions are applied explicitly in Step 5 of applyEmaWithBreakdown
+// rather than as ephemeral attribute boosts, eliminating the double-counting issue.
+// Kept for reference; do not call from runPostMatchUpdate.
+
 import { ovrService } from '../ovr.service'
 import type { OvrSignal } from '../ovr-signal'
 
@@ -22,17 +23,10 @@ export function createPostMatchRatingSignal(
   groupId: string,
   agg: MatchRatingAgg,
 ): OvrSignal {
-  // Apply goal and assist boosts to the per-match attribute aggregate
-  // These boosts are ephemeral — they affect the EMA signal only, NOT players.avg* columns
-  const boostedTechnique = agg.avgTechnique + (agg.goalsScored > 0 ? GOAL_TECHNIQUE_BOOST : 0)
-  const boostedPace = agg.avgPace + (agg.goalsScored > 0 ? GOAL_PACE_BOOST : 0)
-  const boostedPassing = agg.avgPassing + (agg.assists > 0 ? ASSIST_PASSING_BOOST : 0)
-
-  // Signal value is on the OVR scale (40–99): multiply computeOvr (1–10 range) by 10
   const rawOvr = ovrService.computeOvr({
-    pace: boostedPace,
-    technique: boostedTechnique,
-    passing: boostedPassing,
+    pace: agg.avgPace,
+    technique: agg.avgTechnique,
+    passing: agg.avgPassing,
     defending: agg.avgDefending,
     physicality: agg.avgPhysicality,
     effort: agg.avgEffort,
@@ -42,8 +36,8 @@ export function createPostMatchRatingSignal(
     type: 'post_match_rating',
     playerId,
     groupId,
-    value: rawOvr * 10, // scale to OVR range (1–10 attrs → 10–100 OVR)
-    weight: 1,           // standard weight — EMA is dominated by rating data
+    value: rawOvr * 10,
+    weight: 1,
     computedAt: new Date(),
   }
 }
