@@ -299,5 +299,18 @@
   "admin.metrics.cardPhotoJobsByState.pending": "En attente",
   "admin.metrics.cardPhotoJobsByState.processing": "En traitement",
   "admin.metrics.cardPhotoJobsByState.complete": "Terminé",
-  "admin.metrics.cardPhotoJobsByState.failed": "Échoué"
+  "admin.metrics.cardPhotoJobsByState.failed": "Échoué",
+  "auth.signIn.verificationRequired": "Vérification supplémentaire requise. Essaie la connexion Google.",
+  "auth.signIn.ssoIncomplete": "La connexion n'a pas abouti. Réessaie.",
+  "auth.signIn.noAccount": "Pas encore de compte ? Crée-en un",
+  "auth.signUp.title": "Crée ton compte",
+  "auth.signUp.subtitle": "Rejoins ton groupe sur FiveMatch",
+  "auth.signUp.usernamePlaceholder": "Nom d'utilisateur",
+  "auth.signUp.button": "Créer le compte",
+  "auth.signUp.hasAccount": "Déjà un compte ? Connecte-toi",
+  "auth.signUp.verifyTitle": "Vérifie tes e-mails",
+  "auth.signUp.verifySubtitle": "Nous avons envoyé un code de vérification à {{email}}",
+  "auth.signUp.codePlaceholder": "Code de vérification",
+  "auth.signUp.verifyButton": "Vérifier",
+  "auth.signUp.incomplete": "L'inscription n'a pas pu être finalisée. Réessaie."
 }

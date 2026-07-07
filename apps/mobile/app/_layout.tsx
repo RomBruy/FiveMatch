@@ -3,6 +3,21 @@ import '../src/i18n'
 import * as Sentry from '@sentry/react-native'
 import { ClerkProvider, useAuth } from '@clerk/expo'
 
+if (__DEV__) {
+  // Surface the real message behind minified unhandled rejections (e.g. Clerk internals)
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  require('promise/setimmediate/rejection-tracking').enable({
+    allRejections: true,
+    onUnhandled: (id: number, error: unknown) => {
+      const e = error as { message?: string; code?: string; longMessage?: string; errors?: unknown; stack?: string }
+      console.error(
+        `[unhandled-rejection ${id}]`,
+        JSON.stringify({ message: e?.message, code: e?.code, longMessage: e?.longMessage, errors: e?.errors }, null, 2),
+      )
+    },
+  })
+}
+
 Sentry.init({
   dsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
   enabled: process.env.APP_ENV === 'production',
