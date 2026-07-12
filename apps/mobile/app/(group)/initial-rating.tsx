@@ -2,8 +2,6 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator
 import { Stack, useRouter } from 'expo-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import { useFonts, BebasNeue_400Regular } from '@expo-google-fonts/bebas-neue'
-import { Inter_400Regular, Inter_600SemiBold } from '@expo-google-fonts/inter'
 import { useController, useForm } from 'react-hook-form'
 import { useEffect, useState } from 'react'
 import { Colors } from '../../constants/colors'
@@ -79,7 +77,6 @@ export default function InitialRatingScreen() {
   const { activeGroupId } = useGroupContext()
   const groupId = activeGroupId
 
-  const [fontsLoaded] = useFonts({ BebasNeue_400Regular, Inter_400Regular, Inter_600SemiBold })
   const [localIndex, setLocalIndex] = useState(0)
   const [skippedIds, setSkippedIds] = useState<Set<string>>(new Set())
   const [showDone, setShowDone] = useState(false)
@@ -161,7 +158,7 @@ export default function InitialRatingScreen() {
     }
   }
 
-  if (!groupId || isLoading || !fontsLoaded) {
+  if (!groupId || isLoading) {
     return (
       <View style={styles.centered}>
         <ActivityIndicator color={Colors.primary} />

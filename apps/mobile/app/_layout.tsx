@@ -5,7 +5,7 @@ import { ClerkProvider, useAuth } from '@clerk/expo'
 
 if (__DEV__) {
   // Surface the real message behind minified unhandled rejections (e.g. Clerk internals)
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   require('promise/setimmediate/rejection-tracking').enable({
     allRejections: true,
     onUnhandled: (id: number, error: unknown) => {
@@ -26,6 +26,8 @@ Sentry.init({
 import { QueryClientProvider } from '@tanstack/react-query'
 import { Slot, useRouter, useSegments } from 'expo-router'
 import { useEffect } from 'react'
+import { useFonts, BebasNeue_400Regular } from '@expo-google-fonts/bebas-neue'
+import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter'
 import { queryClient } from '../lib/query-client'
 import { setClerkGetToken } from '../lib/api-client'
 
@@ -53,6 +55,17 @@ function AuthGuard() {
 }
 
 export default function RootLayout() {
+  // All five faces load once here; screens reference them via constants/tokens.ts Fonts map.
+  const [fontsLoaded] = useFonts({
+    BebasNeue_400Regular,
+    Inter_400Regular,
+    Inter_500Medium,
+    Inter_600SemiBold,
+    Inter_700Bold,
+  })
+
+  if (!fontsLoaded) return null
+
   return (
     <ClerkProvider publishableKey={process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!}>
       <QueryClientProvider client={queryClient}>

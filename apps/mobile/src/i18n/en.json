@@ -312,5 +312,8 @@
   "auth.signUp.verifySubtitle": "We sent a verification code to {{email}}",
   "auth.signUp.codePlaceholder": "Verification code",
   "auth.signUp.verifyButton": "Verify",
-  "auth.signUp.incomplete": "Sign-up could not be completed. Please try again."
+  "auth.signUp.incomplete": "Sign-up could not be completed. Please try again.",
+  "formDots.win": "Win",
+  "formDots.draw": "Draw",
+  "formDots.loss": "Loss"
 }

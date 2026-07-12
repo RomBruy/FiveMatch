@@ -2,7 +2,6 @@ import { View, Text, StyleSheet } from 'react-native'
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router'
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import { useFonts, BebasNeue_400Regular } from '@expo-google-fonts/bebas-neue'
 import { BlurView } from 'expo-blur'
 import Animated, {
   useSharedValue,
@@ -32,7 +31,6 @@ export default function PendingScreen() {
   const { t } = useTranslation()
   const { groupId } = useLocalSearchParams<{ groupId: string }>()
   const router = useRouter()
-  const [fontsLoaded] = useFonts({ BebasNeue_400Regular })
   const [showWelcome, setShowWelcome] = useState(false)
   const [rejected, setRejected] = useState(false)
 
@@ -88,7 +86,7 @@ export default function PendingScreen() {
   if (showWelcome) {
     return (
       <Animated.View style={styles.container} exiting={FadeOut.duration(500)}>
-        <Text style={[styles.welcomeText, fontsLoaded && styles.bebasText]}>
+        <Text style={[styles.welcomeText, styles.bebasText]}>
           {t('groups.pending.welcome', { groupName: pendingInfo?.groupName ?? '' })}
         </Text>
       </Animated.View>
@@ -107,7 +105,7 @@ export default function PendingScreen() {
     <>
       <Stack.Screen options={{ animation: 'none', headerShown: false }} />
       <View style={styles.container}>
-        <Text style={[styles.groupName, fontsLoaded && styles.bebasText]}>
+        <Text style={[styles.groupName, styles.bebasText]}>
           {pendingInfo?.groupName ?? ''}
         </Text>
 

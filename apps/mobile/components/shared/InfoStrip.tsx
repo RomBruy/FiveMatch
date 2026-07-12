@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { View, Text, Animated, AccessibilityInfo, StyleSheet } from 'react-native'
 import { Colors } from '../../constants/colors'
+import { Fonts, Radius } from '../../constants/tokens'
 
 interface InfoStripProps {
   message: string
@@ -46,19 +47,21 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 12,
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
   },
   dot: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
   text: {
     color: Colors.inkSecondary,
-    fontSize: 12,
-    fontFamily: 'Inter_400Regular',
+    fontSize: 13,
+    fontFamily: Fonts.interMedium,
     flex: 1,
   },
 })

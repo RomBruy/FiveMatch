@@ -1,6 +1,7 @@
 import { View, Text, StyleSheet } from 'react-native'
 import { useTranslation } from 'react-i18next'
 import { Colors } from '../../constants/colors'
+import { Fonts, Radius } from '../../constants/tokens'
 
 interface ProgressBarPillProps {
   matchCount: number
@@ -30,36 +31,45 @@ export function ProgressBarPill({ matchCount, cardState }: ProgressBarPillProps)
   const fill = getProgressFill(cardState, matchCount)
   const count = getProgressMatchCount(cardState, matchCount)
 
+  // Locked = progress, never exclusion: Bebas fraction + red bar + unlock hint. No lock icons.
   return (
     <View
       accessible
       accessibilityLabel={t('card.locked.accessibility', { count })}
     >
+      <Text style={styles.fraction}>{count}/4</Text>
       <View style={styles.track}>
         <View style={[styles.fill, { width: Math.round(fill * 48) }]} />
       </View>
-      <Text style={styles.label}>{t('card.locked.progress', { count })}</Text>
+      <Text style={styles.label}>{t('card.locked.lockHint')}</Text>
     </View>
   )
 }
 
 const styles = StyleSheet.create({
+  fraction: {
+    color: Colors.ink,
+    fontSize: 16,
+    fontFamily: Fonts.bebas,
+    letterSpacing: 0.6,
+    marginBottom: 3,
+  },
   track: {
     width: 48,
     height: 4,
-    borderRadius: 2,
+    borderRadius: Radius.full,
     backgroundColor: Colors.surfaceRaised,
     overflow: 'hidden',
   },
   fill: {
     height: 4,
-    borderRadius: 2,
+    borderRadius: Radius.full,
     backgroundColor: Colors.primary,
   },
   label: {
     color: Colors.inkDisabled,
     fontSize: 10,
-    fontFamily: 'Inter_600SemiBold',
+    fontFamily: Fonts.interSemiBold,
     marginTop: 3,
   },
 })

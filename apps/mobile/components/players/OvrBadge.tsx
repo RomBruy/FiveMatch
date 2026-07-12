@@ -1,14 +1,17 @@
 import { View, Text, StyleSheet } from 'react-native'
 import { useTranslation } from 'react-i18next'
 import { Colors } from '../../constants/colors'
+import { Fonts, Radius } from '../../constants/tokens'
 
 interface OvrBadgeProps {
   ovrScore: number | null
   cardState: string
   size?: 'hero' | 'list'
+  /** Gold variant — the single top-rated player only (one gold per screen; caller's responsibility). */
+  gold?: boolean
 }
 
-export function OvrBadge({ ovrScore, cardState, size = 'list' }: OvrBadgeProps) {
+export function OvrBadge({ ovrScore, cardState, size = 'list', gold = false }: OvrBadgeProps) {
   const { t } = useTranslation()
 
   if (ovrScore === null || cardState !== 'unlocked') {
@@ -45,7 +48,7 @@ export function OvrBadge({ ovrScore, cardState, size = 'list' }: OvrBadgeProps) 
       accessible
       accessibilityLabel={`OVR ${ovrScore}`}
     >
-      <Text style={styles.listOvr}>{ovrScore}</Text>
+      <Text style={[styles.listOvr, gold && styles.listOvrGold]}>{ovrScore}</Text>
     </View>
   )
 }
@@ -58,23 +61,27 @@ const styles = StyleSheet.create({
   heroLockedText: {
     color: Colors.inkDisabled,
     fontSize: 11,
-    fontFamily: 'Inter_400Regular',
+    fontFamily: Fonts.inter,
   },
   heroOvr: {
     color: Colors.gold,
     fontSize: 76,
-    fontFamily: 'BebasNeue_400Regular',
+    fontFamily: Fonts.bebas,
     lineHeight: 76,
   },
   listPill: {
     backgroundColor: Colors.primarySubtle,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 2,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: Radius.full,
   },
   listOvr: {
+    color: Colors.primary,
+    fontSize: 15,
+    fontFamily: Fonts.bebas,
+    letterSpacing: 0.6,
+  },
+  listOvrGold: {
     color: Colors.gold,
-    fontSize: 20,
-    fontFamily: 'BebasNeue_400Regular',
   },
 })

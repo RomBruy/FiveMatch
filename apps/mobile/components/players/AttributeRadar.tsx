@@ -105,11 +105,11 @@ export function AttributeRadar({ attributes, size = 94, width, height }: Attribu
           <Polygon
             points={pointsToString(valuePoints)}
             fill="rgba(255,59,71,0.18)"
-            stroke="#FF3B47"
+            stroke={Colors.primary}
             strokeWidth={1.5}
           />
           {valuePoints.map((p, i) => (
-            <Circle key={i} cx={p.x} cy={p.y} r={2.2} fill="#FF3B47" />
+            <Circle key={i} cx={p.x} cy={p.y} r={2.2} fill={Colors.primary} />
           ))}
           {ATTRS.map((a) => {
             const lp = polarToPoint(cx, cy, labelR, a.angle)
@@ -119,7 +119,7 @@ export function AttributeRadar({ attributes, size = 94, width, height }: Attribu
                 x={lp.x}
                 y={lp.y + 3}
                 textAnchor="middle"
-                fill="#48484A"
+                fill={Colors.inkDisabled}
                 fontSize={7}
                 fontFamily="Inter_600SemiBold"
               >

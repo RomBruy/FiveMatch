@@ -1,6 +1,7 @@
 import { View, Text, StyleSheet } from 'react-native'
 import { useTranslation } from 'react-i18next'
 import { Colors } from '../../constants/colors'
+import { Fonts, Radius } from '../../constants/tokens'
 
 type MatchStatus =
   | 'planning'
@@ -45,27 +46,15 @@ export function PhaseStepper({ status }: PhaseStepperProps) {
         const isDone = index < activeIndex
         const isActive = index === activeIndex
         return (
-          <View key={step.labelKey} style={styles.stepWrapper}>
-            <View style={styles.stepRow}>
-              <View
-                style={[
-                  styles.dot,
-                  isDone && styles.dotDone,
-                  isActive && styles.dotActive,
-                ]}
-              />
-              {index < STEPS.length - 1 && (
-                <View style={[styles.connector, isDone && styles.connectorDone]} />
-              )}
-            </View>
+          <View
+            key={step.labelKey}
+            style={[styles.pill, isDone && styles.pillDone, isActive && styles.pillActive]}
+          >
             <Text
-              style={[
-                styles.label,
-                isActive && styles.labelActive,
-                isDone && styles.labelDone,
-              ]}
+              style={[styles.label, isDone && styles.labelDone, isActive && styles.labelActive]}
+              numberOfLines={1}
             >
-              {t(step.labelKey)}
+              {isDone ? `✓ ${t(step.labelKey)}` : t(step.labelKey)}
             </Text>
           </View>
         )
@@ -77,59 +66,34 @@ export function PhaseStepper({ status }: PhaseStepperProps) {
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    flexWrap: 'wrap',
+    gap: 6,
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
-  stepWrapper: {
-    flex: 1,
+  pill: {
+    height: 30,
+    borderRadius: Radius.full,
+    paddingHorizontal: 12,
     alignItems: 'center',
-  },
-  stepRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    width: '100%',
     justifyContent: 'center',
+    backgroundColor: Colors.surface,
   },
-  dot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: Colors.inkDisabled,
-    zIndex: 1,
+  pillDone: {
+    backgroundColor: Colors.successSubtle,
   },
-  dotActive: {
+  pillActive: {
     backgroundColor: Colors.primary,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-  },
-  dotDone: {
-    backgroundColor: Colors.success,
-  },
-  connector: {
-    position: 'absolute',
-    left: '50%',
-    right: '-50%',
-    height: 2,
-    backgroundColor: Colors.inkDisabled,
-    top: 4,
-  },
-  connectorDone: {
-    backgroundColor: Colors.success,
   },
   label: {
-    marginTop: 6,
-    fontSize: 10,
+    fontSize: 11,
+    fontFamily: Fonts.interSemiBold,
     color: Colors.inkDisabled,
-    fontFamily: 'Inter_400Regular',
-    textAlign: 'center',
-  },
-  labelActive: {
-    color: Colors.primary,
-    fontFamily: 'Inter_600SemiBold',
   },
   labelDone: {
-    color: Colors.inkSecondary,
+    color: Colors.success,
+  },
+  labelActive: {
+    color: Colors.onPrimary,
   },
 })
