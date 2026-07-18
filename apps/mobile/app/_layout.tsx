@@ -2,6 +2,8 @@ import '../global.css'
 import '../src/i18n'
 import * as Sentry from '@sentry/react-native'
 import { ClerkProvider, useAuth } from '@clerk/expo'
+import { tokenCache } from '@clerk/expo/token-cache'
+import { Platform } from 'react-native'
 
 if (__DEV__) {
   // Surface the real message behind minified unhandled rejections (e.g. Clerk internals)
@@ -25,6 +27,7 @@ Sentry.init({
 })
 import { QueryClientProvider } from '@tanstack/react-query'
 import { Slot, useRouter, useSegments } from 'expo-router'
+import { ReduceMotion, ReducedMotionConfig } from 'react-native-reanimated'
 import { useEffect } from 'react'
 import { useFonts, BebasNeue_400Regular } from '@expo-google-fonts/bebas-neue'
 import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter'
@@ -43,10 +46,13 @@ function AuthGuard() {
   useEffect(() => {
     if (!isLoaded) return
     const inAuthGroup = segments[0] === '(auth)'
+    const inProfileCompletion = inAuthGroup && segments[1] === 'profile-completion'
     const inJoinRoute = segments[0] === 'join'
     if (!isSignedIn && !inAuthGroup && !inJoinRoute) {
       router.replace('/(auth)/sign-in')
-    } else if (isSignedIn && inAuthGroup) {
+    } else if (isSignedIn && inAuthGroup && !inProfileCompletion) {
+      // A session restored from SecureStore should enter immediately. Explicit
+      // sign-in/sign-up handlers route through profile completion themselves.
       router.replace('/(app)')
     }
   }, [isSignedIn, isLoaded, segments])
@@ -67,8 +73,13 @@ export default function RootLayout() {
   if (!fontsLoaded) return null
 
   return (
-    <ClerkProvider publishableKey={process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!}>
+    <ClerkProvider
+      publishableKey={process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!}
+      tokenCache={Platform.OS === 'web' ? undefined : tokenCache}
+    >
       <QueryClientProvider client={queryClient}>
+        {/* All reanimated animations follow the OS reduce-motion setting (design v2 motion rule). */}
+        <ReducedMotionConfig mode={ReduceMotion.System} />
         <AuthGuard />
       </QueryClientProvider>
     </ClerkProvider>

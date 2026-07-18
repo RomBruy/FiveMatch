@@ -59,7 +59,7 @@ vi.mock('../seeding.service', () => ({
 
 import { ovrService } from '../ovr.service'
 import type { OvrSignal } from '../ovr-signal'
-import { MVP_BONUS, ALPHA_BASE, ALPHA_FLOOR, DIVERSITY_SPRING, DIVERSITY_TARGET_CAP } from '@fivematch/types/algorithm-constants'
+import { MVP_BONUS, ALPHA_BASE, DIVERSITY_SPRING } from '@fivematch/types/algorithm-constants'
 
 const makeSignal = (value: number, weight: number): OvrSignal => ({
   type: 'match',

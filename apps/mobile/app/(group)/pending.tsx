@@ -2,20 +2,15 @@ import { View, Text, StyleSheet } from 'react-native'
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router'
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import { BlurView } from 'expo-blur'
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withRepeat,
-  withSequence,
-  withTiming,
-  withDelay,
-  Easing,
-  FadeOut,
-} from 'react-native-reanimated'
+import Animated, { FadeOut } from 'react-native-reanimated'
 import { useEffect, useState } from 'react'
 import { Colors } from '../../constants/colors'
+import { Fonts } from '../../constants/tokens'
+import { DuotoneAvatar } from '../../components/ui/DuotoneAvatar'
+import { InfoStrip } from '../../components/shared/InfoStrip'
 import { httpClient } from '../../lib/api-client'
+
+const SEPARATOR = ' · '
 
 type PendingInfo = {
   groupName: string
@@ -33,23 +28,6 @@ export default function PendingScreen() {
   const router = useRouter()
   const [showWelcome, setShowWelcome] = useState(false)
   const [rejected, setRejected] = useState(false)
-
-  const shimmerX = useSharedValue(-300)
-
-  useEffect(() => {
-    shimmerX.value = withRepeat(
-      withSequence(
-        withDelay(3000, withTiming(300, { duration: 1000, easing: Easing.linear })),
-        withTiming(-300, { duration: 0 }),
-      ),
-      -1,
-      false,
-    )
-  }, [])
-
-  const shimmerStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: shimmerX.value }],
-  }))
 
   const { data: pendingInfo } = useQuery<PendingInfo>({
     queryKey: ['groups', groupId, 'pending-info'],
@@ -86,7 +64,7 @@ export default function PendingScreen() {
   if (showWelcome) {
     return (
       <Animated.View style={styles.container} exiting={FadeOut.duration(500)}>
-        <Text style={[styles.welcomeText, styles.bebasText]}>
+        <Text style={styles.welcomeText}>
           {t('groups.pending.welcome', { groupName: pendingInfo?.groupName ?? '' })}
         </Text>
       </Animated.View>
@@ -101,26 +79,30 @@ export default function PendingScreen() {
     )
   }
 
+  const subLine = pendingInfo
+    ? `${pendingInfo.groupName}${SEPARATOR}${pendingInfo.memberCount} ${t('groups.pending.members')}`
+    : ''
+
   return (
     <>
+      {/* UX-DR24: no entry transition on this screen. */}
       <Stack.Screen options={{ animation: 'none', headerShown: false }} />
       <View style={styles.container}>
-        <Text style={[styles.groupName, styles.bebasText]}>
-          {pendingInfo?.groupName ?? ''}
-        </Text>
+        <DuotoneAvatar displayName={pendingInfo?.groupName ?? ''} size={84} />
 
-        <Text style={styles.waitMessage}>
-          {t('groups.pending.waitMessage', {
-            organizer: pendingInfo?.organizerDisplayName ?? '',
-          })}
-        </Text>
+        <Text style={styles.title}>{t('groups.pending.title')}</Text>
 
-        <View style={styles.frostedContainer}>
-          <BlurView intensity={80} tint="dark" style={styles.frostedPanel}>
-            <Animated.View style={[styles.shimmerBar, shimmerStyle]} />
-            <Text style={styles.memberCount}>{pendingInfo?.memberCount ?? '—'}</Text>
-            <Text style={styles.memberLabel}>{t('groups.pending.members')}</Text>
-          </BlurView>
+        {subLine.length > 0 && <Text style={styles.subLine}>{subLine}</Text>}
+
+        {/* The pulsing dot is this screen's only motion ("demande envoyée" state). */}
+        <View style={styles.stripWrap}>
+          <InfoStrip
+            variant="warning"
+            pulsing
+            message={t('groups.pending.waitMessage', {
+              organizer: pendingInfo?.organizerDisplayName ?? '',
+            })}
+          />
         </View>
       </View>
     </>
@@ -134,61 +116,39 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 32,
-    gap: 24,
   },
-  groupName: {
+  title: {
     color: Colors.ink,
-    fontSize: 48,
-    textAlign: 'center',
-  },
-  bebasText: {
-    fontFamily: 'BebasNeue_400Regular',
-  },
-  waitMessage: {
-    color: Colors.inkSecondary,
-    fontSize: 17,
-    textAlign: 'center',
-    lineHeight: 24,
-  },
-  frostedContainer: {
-    borderRadius: 4,
-    overflow: 'hidden',
-    marginTop: 16,
-  },
-  frostedPanel: {
-    paddingHorizontal: 32,
-    paddingVertical: 24,
-    alignItems: 'center',
-    minWidth: 160,
-    overflow: 'hidden',
-  },
-  shimmerBar: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    width: 60,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  memberCount: {
-    color: Colors.ink,
+    fontFamily: Fonts.bebas,
     fontSize: 40,
-    fontWeight: '700',
-  },
-  memberLabel: {
-    color: Colors.inkSecondary,
-    fontSize: 13,
+    lineHeight: 42,
+    letterSpacing: 1.6, // 0.04em @ 40 (display register)
     textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginTop: 4,
+    textAlign: 'center',
+    marginTop: 22,
+  },
+  subLine: {
+    color: Colors.inkSecondary,
+    fontSize: 14,
+    fontFamily: Fonts.interMedium,
+    textAlign: 'center',
+    marginTop: 10,
+  },
+  stripWrap: {
+    alignSelf: 'stretch',
+    marginTop: 26,
   },
   welcomeText: {
     color: Colors.ink,
+    fontFamily: Fonts.bebas,
     fontSize: 32,
+    letterSpacing: 1.28, // 0.04em @ 32
     textAlign: 'center',
   },
   rejectedText: {
     color: Colors.inkSecondary,
     fontSize: 17,
+    fontFamily: Fonts.inter,
     textAlign: 'center',
   },
 })

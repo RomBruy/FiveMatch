@@ -1,6 +1,11 @@
 import { View, Text, StyleSheet, Pressable } from 'react-native'
 import { useTranslation } from 'react-i18next'
+import { Ionicons } from '@expo/vector-icons'
+import { TEAM_GEN_MAX_GENERATIONS } from '@fivematch/types/algorithm-constants'
 import { Colors } from '../../constants/colors'
+import { Fonts, Radius } from '../../constants/tokens'
+import { DuotoneAvatar } from '../ui/DuotoneAvatar'
+import { FairnessRing } from './FairnessRing'
 
 export interface TeamPlayer {
   playerId: string | null
@@ -27,10 +32,12 @@ interface TeamDisplayProps {
   isLocked: boolean
 }
 
-function getFairnessKey(score: number): string {
-  if (score <= 10) return 'match.generate.fairness.excellent'
-  if (score <= 20) return 'match.generate.fairness.good'
-  return 'match.generate.fairness.adjust'
+/** OVR average over visible scores only (FR-14 gating), 1 decimal; null when no score is visible. */
+export function teamOvrAverage(players: TeamPlayer[]): string | null {
+  const visible = players.filter((p) => p.cardState === 'unlocked' && p.ovrScore !== null)
+  if (visible.length === 0) return null
+  const avg = visible.reduce((s, p) => s + p.ovrScore!, 0) / visible.length
+  return avg.toFixed(1)
 }
 
 function PlayerRow({
@@ -50,29 +57,79 @@ function PlayerRow({
 }) {
   const { t } = useTranslation()
   const showOvr = player.cardState === 'unlocked' && player.ovrScore !== null
+  const swappable = !isLocked && player.playerId !== null
+
   return (
-    <View style={[styles.playerRow, isSelected && styles.playerRowSelected]}>
+    <Pressable
+      style={[styles.playerRow, isSelected && styles.playerRowSelected]}
+      disabled={!swappable}
+      onPress={() => onSwap(player.playerId!, currentTeam)}
+      accessibilityRole={swappable ? 'button' : undefined}
+      accessibilityLabel={swappable ? `${t('match.teamLock.swap')} ${player.displayName ?? ''}` : undefined}
+      accessibilityState={swappable ? { selected: isSelected } : undefined}
+    >
+      <DuotoneAvatar displayName={player.displayName ?? '—'} size={24} />
       <View style={styles.playerNameBlock}>
         <Text style={styles.playerName} numberOfLines={1}>{player.displayName ?? '—'}</Text>
-        {isSwapped && (
+        {/* Selection is announced with text + icon, never color alone. */}
+        {isSelected && (
+          <Text style={styles.selectedLabel}>{t('match.teamLock.swap')}</Text>
+        )}
+        {!isSelected && isSwapped && (
           <Text style={styles.adjustedLabel}>{t('match.teamLock.manualAdjusted')}</Text>
         )}
       </View>
-      {showOvr && (
-        <View style={styles.ovrPill} accessibilityLabel={`OVR ${player.ovrScore}`}>
-          <Text style={styles.ovrText}>{player.ovrScore}</Text>
-        </View>
+      {isSelected && (
+        <Ionicons name="swap-horizontal" size={14} color={Colors.primary} style={styles.swapIcon} />
       )}
-      {!isLocked && player.playerId && (
-        <Pressable
-          style={styles.swapButton}
-          onPress={() => onSwap(player.playerId!, currentTeam)}
-          accessibilityRole="button"
-          accessibilityLabel={`${t('match.teamLock.swap')} ${player.displayName ?? ''}`}
-        >
-          <Text style={styles.swapButtonText}>{t('match.teamLock.swap')}</Text>
-        </Pressable>
-      )}
+      <View style={[styles.ovrPill, !showOvr && styles.ovrPillMuted]} accessibilityLabel={showOvr ? `OVR ${player.ovrScore}` : undefined}>
+        <Text style={[styles.ovrText, !showOvr && styles.ovrTextMuted]}>
+          {showOvr ? player.ovrScore : t('match.generate.ovrLocked')}
+        </Text>
+      </View>
+    </Pressable>
+  )
+}
+
+function TeamCard({
+  labelKey,
+  players,
+  accent,
+  currentTeam,
+  swappedIds,
+  selectedForSwap,
+  isLocked,
+  onSwap,
+}: {
+  labelKey: string
+  players: TeamPlayer[]
+  accent: string
+  currentTeam: 'A' | 'B'
+  swappedIds: Set<string>
+  selectedForSwap: { playerId: string; team: 'A' | 'B' } | null
+  isLocked: boolean
+  onSwap: (playerId: string, currentTeam: 'A' | 'B') => void
+}) {
+  const { t } = useTranslation()
+  const ovrAvg = teamOvrAverage(players)
+
+  return (
+    <View style={[styles.teamCard, { borderTopColor: accent }]}>
+      <View style={styles.teamHeader}>
+        <Text style={styles.teamName}>{t(labelKey)}</Text>
+        <Text style={styles.teamOvr}>{`OVR ${ovrAvg ?? t('match.generate.ovrLocked')}`}</Text>
+      </View>
+      {players.map((p, i) => (
+        <PlayerRow
+          key={p.playerId ?? i}
+          player={p}
+          currentTeam={currentTeam}
+          isSwapped={p.playerId !== null && swappedIds.has(p.playerId)}
+          isSelected={selectedForSwap?.playerId === p.playerId}
+          isLocked={isLocked}
+          onSwap={onSwap}
+        />
+      ))}
     </View>
   )
 }
@@ -89,154 +146,180 @@ export function TeamDisplay({
   isLocked,
 }: TeamDisplayProps) {
   const { t } = useTranslation()
-  const fairnessKey = getFairnessKey(fairnessScore)
   const swappedIds = new Set(stagedSwaps.map((s) => s.playerId))
 
   return (
     <View style={styles.container}>
-      <Text style={styles.counter}>{t('match.generate.counter', { n: generationCount })}</Text>
-      <Text style={styles.fairness}>{t(fairnessKey)}</Text>
+      <FairnessRing score={fairnessScore} />
 
       <View style={styles.columns}>
-        <View style={styles.column}>
-          <Text style={styles.teamLabel}>{t('match.generate.teamA')}</Text>
-          {teamA.map((p, i) => (
-            <PlayerRow
-              key={p.playerId ?? i}
-              player={p}
-              currentTeam="A"
-              isSwapped={p.playerId !== null && swappedIds.has(p.playerId)}
-              isSelected={selectedForSwap?.playerId === p.playerId}
-              isLocked={isLocked}
-              onSwap={onSwap}
-            />
-          ))}
-        </View>
-        <View style={styles.divider} />
-        <View style={styles.column}>
-          <Text style={styles.teamLabel}>{t('match.generate.teamB')}</Text>
-          {teamB.map((p, i) => (
-            <PlayerRow
-              key={p.playerId ?? i}
-              player={p}
-              currentTeam="B"
-              isSwapped={p.playerId !== null && swappedIds.has(p.playerId)}
-              isSelected={selectedForSwap?.playerId === p.playerId}
-              isLocked={isLocked}
-              onSwap={onSwap}
-            />
-          ))}
-        </View>
+        {/* R7 split: Équipe A carries the red top border, Équipe B the white one. */}
+        <TeamCard
+          labelKey="match.generate.teamA"
+          players={teamA}
+          accent={Colors.primary}
+          currentTeam="A"
+          swappedIds={swappedIds}
+          selectedForSwap={selectedForSwap}
+          isLocked={isLocked}
+          onSwap={onSwap}
+        />
+        <TeamCard
+          labelKey="match.generate.teamB"
+          players={teamB}
+          accent={Colors.ink}
+          currentTeam="B"
+          swappedIds={swappedIds}
+          selectedForSwap={selectedForSwap}
+          isLocked={isLocked}
+          onSwap={onSwap}
+        />
       </View>
 
-      {onRegenerate && (
+      {onRegenerate ? (
         <Pressable
-          style={styles.regenerateButton}
+          style={styles.regeneratePill}
           onPress={onRegenerate}
           accessibilityRole="button"
-          accessibilityLabel={t('match.generate.regenerate')}
+          accessibilityLabel={`${t('match.generate.regenerate')} ${generationCount}/${TEAM_GEN_MAX_GENERATIONS}`}
         >
-          <Text style={styles.regenerateButtonText}>{t('match.generate.regenerate')}</Text>
+          <Ionicons name="refresh" size={15} color={Colors.inkSecondary} />
+          <Text style={styles.regenerateLabel}>{t('match.generate.regenerate')}</Text>
+          <Text style={styles.regenerateCount}>{`${generationCount}/${TEAM_GEN_MAX_GENERATIONS}`}</Text>
         </Pressable>
+      ) : (
+        <Text style={styles.counter}>{t('match.generate.counter', { n: generationCount })}</Text>
       )}
     </View>
   )
 }
 
 const styles = StyleSheet.create({
-  container: { paddingHorizontal: 16 },
-  counter: {
-    color: Colors.inkSecondary,
-    fontFamily: 'Inter_600SemiBold',
-    fontSize: 11,
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
-    textAlign: 'center',
-    marginBottom: 4,
+  container: {
+    gap: 14,
   },
-  fairness: {
+  columns: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  teamCard: {
+    flex: 1,
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    borderTopWidth: 3,
+    padding: 12,
+  },
+  teamHeader: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  teamName: {
     color: Colors.ink,
-    fontFamily: 'Inter_600SemiBold',
-    fontSize: 14,
-    textAlign: 'center',
-    marginBottom: 16,
+    fontFamily: Fonts.bebas,
+    fontSize: 18,
+    letterSpacing: 2.16, // 0.12em @ 18 (heading register)
   },
-  columns: { flexDirection: 'row' },
-  column: { flex: 1, gap: 4 },
-  divider: { width: 1, backgroundColor: Colors.inkDisabled, marginHorizontal: 8 },
-  teamLabel: {
+  teamOvr: {
     color: Colors.inkSecondary,
-    fontFamily: 'Inter_600SemiBold',
-    fontSize: 10,
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    marginBottom: 8,
+    fontFamily: Fonts.bebas,
+    fontSize: 14,
+    letterSpacing: 0.56, // 0.04em @ 14 (stat register)
+    fontVariant: ['tabular-nums'],
   },
   playerRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    minHeight: 32,
+    minHeight: 36,
     paddingVertical: 4,
+    gap: 8,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+    borderRadius: Radius.sm,
   },
   playerRowSelected: {
-    borderWidth: 1,
     borderColor: Colors.primary,
-    borderRadius: 2,
+    paddingHorizontal: 4,
   },
-  playerNameBlock: { flex: 1, marginRight: 4 },
+  playerNameBlock: {
+    flex: 1,
+  },
   playerName: {
     color: Colors.ink,
-    fontFamily: 'Inter_400Regular',
+    fontFamily: Fonts.interMedium,
     fontSize: 13,
+  },
+  selectedLabel: {
+    color: Colors.primary,
+    fontFamily: Fonts.interSemiBold,
+    fontSize: 9,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    marginTop: 2,
   },
   adjustedLabel: {
     color: Colors.inkSecondary,
-    fontFamily: 'Inter_500Medium',
+    fontFamily: Fonts.interMedium,
     fontSize: 9,
     letterSpacing: 0.5,
     marginTop: 2,
   },
+  swapIcon: {
+    flexShrink: 0,
+  },
   ovrPill: {
     backgroundColor: Colors.primarySubtle,
-    borderRadius: 4,
-    paddingHorizontal: 6,
-    paddingVertical: 1,
+    borderRadius: Radius.full,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    minWidth: 30,
+    alignItems: 'center',
+  },
+  ovrPillMuted: {
+    backgroundColor: Colors.surfaceRaised,
   },
   ovrText: {
     color: Colors.primary,
-    fontFamily: 'BebasNeue_400Regular',
+    fontFamily: Fonts.bebas,
     fontSize: 14,
+    letterSpacing: 0.56, // 0.04em @ 14 (stat register)
+    fontVariant: ['tabular-nums'],
   },
-  swapButton: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderWidth: 1,
-    borderColor: Colors.inkDisabled,
-    borderRadius: 2,
-    marginLeft: 4,
+  ovrTextMuted: {
+    color: Colors.inkDisabled,
   },
-  swapButtonText: {
-    color: Colors.inkSecondary,
-    fontFamily: 'Inter_600SemiBold',
-    fontSize: 9,
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-  },
-  regenerateButton: {
-    borderWidth: 1,
-    borderColor: Colors.inkDisabled,
-    borderRadius: 4,
-    paddingVertical: 10,
+  regeneratePill: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 12,
-    marginHorizontal: 16,
+    justifyContent: 'center',
+    alignSelf: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: Colors.line,
+    borderRadius: Radius.full,
+    paddingVertical: 10,
+    paddingHorizontal: 20,
   },
-  regenerateButtonText: {
+  regenerateLabel: {
     color: Colors.inkSecondary,
-    fontFamily: 'Inter_600SemiBold',
+    fontFamily: Fonts.interSemiBold,
     fontSize: 13,
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
+  },
+  regenerateCount: {
+    color: Colors.ink,
+    fontFamily: Fonts.bebas,
+    fontSize: 14,
+    letterSpacing: 0.56, // 0.04em @ 14 (stat register)
+    fontVariant: ['tabular-nums'],
+  },
+  counter: {
+    color: Colors.inkSecondary,
+    fontFamily: Fonts.interSemiBold,
+    fontSize: 11,
+    letterSpacing: 1.54, // 0.14em @ 11 (label-caps register)
     textTransform: 'uppercase',
+    textAlign: 'center',
   },
 })

@@ -1,11 +1,18 @@
-import { View, Text, Pressable, StyleSheet, ActivityIndicator } from 'react-native'
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, ScrollView } from 'react-native'
 import { useTranslation } from 'react-i18next'
 import { useRouter } from 'expo-router'
 import { useQuery } from '@tanstack/react-query'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Colors } from '../../constants/colors'
+import { Fonts, Radius } from '../../constants/tokens'
 import { useGroupContext } from '../../contexts/GroupContext'
 import { InfoStrip } from '../../components/shared/InfoStrip'
+import { PrimaryButton } from '../../components/ui/PrimaryButton'
+import { SecondaryButton } from '../../components/ui/SecondaryButton'
+import { DOCK_CLEARANCE } from '../../components/ui/TabDock'
 import { httpClient } from '../../lib/api-client'
+
+const SEPARATOR = ' · '
 
 interface TeamGenStatus {
   canGenerate: boolean
@@ -22,11 +29,13 @@ interface MatchSummary {
   location: string | null
   format: string
   playersPerTeam: number
+  seriesId: string | null
 }
 
 export default function MatchTab() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const router = useRouter()
+  const insets = useSafeAreaInsets()
   const { activeGroupId } = useGroupContext()
 
   const { data: myStatus } = useQuery({
@@ -51,28 +60,33 @@ export default function MatchTab() {
     enabled: Boolean(activeGroupId),
   })
 
-  const { data: activeMatch, isLoading: matchLoading } = useQuery({
-    queryKey: ['matches', activeGroupId, 'active'],
+  const { data: upcomingData, isLoading: matchLoading } = useQuery({
+    queryKey: ['matches', activeGroupId, 'upcoming'],
     queryFn: async () => {
-      // GET /v1/groups/:groupId/matches returns the most recent non-completed match
-      // This endpoint will be implemented in Story 3.2; returns null until then
-      const { data } = await httpClient.get<{ data: MatchSummary | null }>(
-        `/v1/groups/${activeGroupId}/matches/active`,
+      const { data } = await httpClient.get<{ data: { matches: MatchSummary[] } }>(
+        `/v1/groups/${activeGroupId}/matches?status=upcoming&limit=10`,
       )
       return data.data
     },
     enabled: Boolean(activeGroupId),
-    // Gracefully handle 404 until Story 3.2 ships the list endpoint
     retry: false,
   })
+
+  const upcoming = upcomingData?.matches ?? []
+  const [nextMatch, ...laterMatches] = upcoming
 
   if (!activeGroupId) {
     return (
       <View style={styles.container}>
         <Text style={styles.message}>{t('auth.shell.noGroup')}</Text>
-        <Pressable style={styles.button} onPress={() => router.push('/(app)/groups/new' as never)}>
-          <Text style={styles.buttonText}>{t('auth.shell.createGroup')}</Text>
-        </Pressable>
+        <View style={styles.fullWidth}>
+          {/* The tab dock owns this screen's one glow. */}
+          <PrimaryButton
+            label={t('auth.shell.createGroup')}
+            onPress={() => router.push('/(app)/groups/new' as never)}
+            glow={false}
+          />
+        </View>
       </View>
     )
   }
@@ -80,8 +94,27 @@ export default function MatchTab() {
   const canGenerate = status?.canGenerate ?? false
   const missing = status ? status.minimumRequired - status.ratedPlayerCount : 0
 
+  const openMatch = (match: MatchSummary) => {
+    const dest = isOrganizer
+      ? `/(app)/match/organizer?matchId=${match.matchId}`
+      : `/(app)/match/player?matchId=${match.matchId}`
+    router.push(dest as never)
+  }
+
+  const formatRowDate = (iso: string) =>
+    new Date(iso).toLocaleDateString(i18n.language, {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+
   return (
-    <View style={styles.container}>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 12 }]}
+    >
       <View style={styles.gateSection}>
         {status?.fairnessConfidenceDisclaimer != null && (
           <InfoStrip
@@ -99,61 +132,65 @@ export default function MatchTab() {
             })}
           />
         )}
-
-        {matchLoading ? (
-          <ActivityIndicator color={Colors.primary} style={styles.loader} />
-        ) : activeMatch ? (
-          <Pressable
-            style={styles.activeMatchButton}
-            onPress={() => {
-              const dest = isOrganizer
-                ? `/(app)/match/organizer?matchId=${activeMatch.matchId}`
-                : `/(app)/match/player?matchId=${activeMatch.matchId}`
-              router.push(dest as never)
-            }}
-          >
-            <Text style={styles.activeMatchLabel}>
-              {new Date(activeMatch.scheduledAt).toLocaleDateString('fr-FR', {
-                weekday: 'short',
-                day: 'numeric',
-                month: 'short',
-                hour: '2-digit',
-                minute: '2-digit',
-              })}
-            </Text>
-            <Text style={styles.activeMatchSublabel}>
-              {activeMatch.format.toUpperCase()}
-              {activeMatch.location ? ` · ${activeMatch.location}` : ''}
-            </Text>
-          </Pressable>
-        ) : (
-          <>
-            {!isOrganizer && (
-              <Text style={styles.emptyText}>{t('match.empty.noMatch')}</Text>
-            )}
-          </>
-        )}
-
-        {isOrganizer && !activeMatch && (
-          <Pressable
-            style={styles.createButton}
-            onPress={() => router.push('/(app)/match/create' as never)}
-          >
-            <Text style={styles.createButtonText}>{t('match.cta.create')}</Text>
-          </Pressable>
-        )}
-
-        <Pressable
-          style={[styles.generateButton, !canGenerate && styles.generateButtonDisabled]}
-          disabled={!canGenerate}
-          // onPress wired in Story 3.5
-        >
-          <Text style={styles.generateButtonText}>
-            {t('match.teamGen.generateButton')}
-          </Text>
-        </Pressable>
       </View>
-    </View>
+
+      <Text style={styles.sectionLabel}>{t('match.upcoming.title')}</Text>
+
+      {matchLoading ? (
+        <ActivityIndicator color={Colors.primary} style={styles.loader} />
+      ) : nextMatch ? (
+        <>
+          <Pressable style={styles.activeMatchCard} onPress={() => openMatch(nextMatch)} accessibilityRole="button">
+            <Text style={styles.activeMatchDate}>{formatRowDate(nextMatch.scheduledAt)}</Text>
+            <Text style={styles.activeMatchMeta}>
+              {[
+                nextMatch.format.toUpperCase(),
+                ...(nextMatch.location ? [nextMatch.location] : []),
+                ...(nextMatch.seriesId ? [t('match.upcoming.series')] : []),
+              ].join(SEPARATOR)}
+            </Text>
+          </Pressable>
+          {laterMatches.length > 0 && (
+            <View style={styles.laterRows}>
+              {laterMatches.map((match) => (
+                <Pressable
+                  key={match.matchId}
+                  style={styles.laterRow}
+                  onPress={() => openMatch(match)}
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.laterRowDate}>{formatRowDate(match.scheduledAt)}</Text>
+                  <Text style={styles.laterRowMeta} numberOfLines={1}>
+                    {[
+                      ...(match.location ? [match.location] : []),
+                      ...(match.seriesId ? [t('match.upcoming.series')] : []),
+                    ].join(SEPARATOR)}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          )}
+        </>
+      ) : (
+        <Text style={styles.emptyText}>{t('match.empty.noMatch')}</Text>
+      )}
+
+      {isOrganizer && (
+        <View style={styles.actionBlock}>
+          {/* The tab dock owns this screen's one glow. */}
+          <PrimaryButton
+            label={t('match.cta.create')}
+            onPress={() => router.push('/(app)/match/create' as never)}
+            glow={false}
+          />
+        </View>
+      )}
+
+      <View style={styles.actionBlock}>
+        {/* onPress wired in Story 3.5 */}
+        <SecondaryButton label={t('match.teamGen.generateButton')} disabled={!canGenerate} />
+      </View>
+    </ScrollView>
   )
 }
 
@@ -164,23 +201,66 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
+    paddingBottom: DOCK_CLEARANCE,
+  },
+  screen: {
+    flex: 1,
+    backgroundColor: Colors.bg,
+  },
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingBottom: DOCK_CLEARANCE,
+  },
+  sectionLabel: {
+    color: Colors.inkSecondary,
+    fontSize: 11,
+    fontFamily: Fonts.interSemiBold,
+    letterSpacing: 1.54,
+    textTransform: 'uppercase',
+    marginTop: 20,
+    marginBottom: 12,
+  },
+  laterRows: {
+    marginTop: 10,
+    gap: 8,
+  },
+  laterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  laterRowDate: {
+    color: Colors.ink,
+    fontFamily: Fonts.interSemiBold,
+    fontSize: 13.5,
+    textTransform: 'capitalize',
+  },
+  laterRowMeta: {
+    flexShrink: 1,
+    color: Colors.inkSecondary,
+    fontSize: 11,
+    fontFamily: Fonts.interSemiBold,
+    letterSpacing: 0.9,
+    textTransform: 'uppercase',
+  },
+  actionBlock: {
+    width: '100%',
+    marginTop: 20,
   },
   message: {
-    color: Colors.ink,
-    fontSize: 17,
+    color: Colors.inkSecondary,
+    fontSize: 15,
+    fontFamily: Fonts.inter,
     textAlign: 'center',
     marginBottom: 24,
   },
-  button: {
-    backgroundColor: Colors.primary,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 4,
-  },
-  buttonText: {
-    color: Colors.ink,
-    fontSize: 16,
-    fontWeight: '600',
+  fullWidth: {
+    width: '100%',
   },
   gateSection: {
     width: '100%',
@@ -193,55 +273,29 @@ const styles = StyleSheet.create({
   emptyText: {
     color: Colors.inkSecondary,
     fontSize: 14,
+    fontFamily: Fonts.inter,
     textAlign: 'center',
     marginVertical: 8,
   },
-  activeMatchButton: {
+  activeMatchCard: {
     width: '100%',
     backgroundColor: Colors.surface,
-    borderRadius: 8,
+    borderRadius: Radius.md,
     padding: 16,
     gap: 4,
   },
-  activeMatchLabel: {
+  activeMatchDate: {
     color: Colors.ink,
-    fontSize: 16,
-    fontWeight: '600',
+    fontFamily: Fonts.bebas,
+    fontSize: 24,
+    letterSpacing: 1.92, // 0.08em @ 24 (heading register)
     textTransform: 'capitalize',
   },
-  activeMatchSublabel: {
+  activeMatchMeta: {
     color: Colors.inkSecondary,
-    fontSize: 13,
-  },
-  createButton: {
-    width: '100%',
-    backgroundColor: Colors.surfaceRaised,
-    borderRadius: 4,
-    paddingVertical: 14,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: Colors.primary,
-  },
-  createButtonText: {
-    color: Colors.primary,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  generateButton: {
-    backgroundColor: Colors.primary,
-    paddingHorizontal: 32,
-    paddingVertical: 14,
-    borderRadius: 4,
-    width: '100%',
-    alignItems: 'center',
-  },
-  generateButtonDisabled: {
-    opacity: 0.35,
-  },
-  generateButtonText: {
-    color: Colors.ink,
-    fontSize: 16,
-    fontWeight: '700',
-    letterSpacing: 0.5,
+    fontSize: 12,
+    fontFamily: Fonts.interSemiBold,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
   },
 })

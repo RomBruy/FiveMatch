@@ -3,7 +3,9 @@ import { View, Text, StyleSheet } from 'react-native'
 import { Swipeable } from 'react-native-gesture-handler'
 import { useTranslation } from 'react-i18next'
 import { Colors } from '../../constants/colors'
-import { AttendanceToggle } from './AttendanceToggle'
+import { Fonts } from '../../constants/tokens'
+import { AttendanceSegmentedPill } from './AttendanceSegmentedPill'
+import { DuotoneAvatar } from '../ui/DuotoneAvatar'
 
 interface Props {
   playerId: string | null
@@ -57,8 +59,9 @@ export function AttendanceSwiperRow({
   if (disabled) {
     return (
       <View style={styles.row}>
+        {displayName != null && <DuotoneAvatar displayName={displayName} size={28} />}
         <Text style={styles.name} numberOfLines={1}>{displayName ?? '—'}</Text>
-        <AttendanceToggle status={status} isWaitlisted={isWaitlisted} waitlistPosition={waitlistPosition} />
+        <AttendanceSegmentedPill compact status={status} isWaitlisted={isWaitlisted} waitlistPosition={waitlistPosition} />
       </View>
     )
   }
@@ -74,8 +77,10 @@ export function AttendanceSwiperRow({
       onSwipeableOpen={handleSwipeableOpen}
     >
       <View style={styles.row}>
+        {displayName != null && <DuotoneAvatar displayName={displayName} size={28} />}
         <Text style={styles.name} numberOfLines={1}>{displayName ?? '—'}</Text>
-        <AttendanceToggle
+        <AttendanceSegmentedPill
+          compact
           status={status}
           isWaitlisted={isWaitlisted}
           waitlistPosition={waitlistPosition}
@@ -94,11 +99,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     backgroundColor: Colors.surface,
+    gap: 10,
   },
   name: {
     color: Colors.ink,
     fontSize: 15,
-    fontWeight: '500',
+    fontFamily: Fonts.interSemiBold,
     flex: 1,
     marginRight: 12,
   },
@@ -117,6 +123,6 @@ const styles = StyleSheet.create({
   actionText: {
     color: Colors.ink,
     fontSize: 13,
-    fontWeight: '700',
+    fontFamily: Fonts.interBold,
   },
 })

@@ -79,6 +79,9 @@ describe('MATCH_UPDATE RatingEvent written after rating window closes', () => {
       playersPerTeam: 5,
       goalkeeperMode: 'none',
       generatorStyle: 'pure_ovr',
+      // runPostMatchUpdate requires a recorded result — it returns early on null scores
+      scoreA: 4,
+      scoreB: 2,
     }).returning()
     seededMatchIds.push(match!.id)
 

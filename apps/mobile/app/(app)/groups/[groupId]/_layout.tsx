@@ -8,7 +8,7 @@ export default function GroupLayout() {
       <Stack.Screen name="settings" />
       <Stack.Screen
         name="card-reveal"
-        options={{ presentation: 'fullScreenModal', gestureEnabled: false }}
+        options={{ presentation: 'fullScreenModal', gestureEnabled: false, animation: 'fade' }}
       />
       <Stack.Screen
         name="card-photo-settings"

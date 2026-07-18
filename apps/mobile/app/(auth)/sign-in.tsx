@@ -1,13 +1,17 @@
 import * as WebBrowser from 'expo-web-browser'
 import * as AuthSession from 'expo-auth-session'
-import * as Localization from 'expo-localization'
-import { Platform, View, Text, TextInput, Pressable, StyleSheet } from 'react-native'
+import { KeyboardAvoidingView, Platform, ScrollView, View, Text, Pressable, StyleSheet } from 'react-native'
 import { useSSO, useSignIn } from '@clerk/expo'
 import { useRouter } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
 import { Colors } from '../../constants/colors'
-import { httpClient } from '../../lib/api-client'
+import { Fonts, Type } from '../../constants/tokens'
+import { Input } from '../../components/ui/Input'
+import { PrimaryButton } from '../../components/ui/PrimaryButton'
+import { SecondaryButton } from '../../components/ui/SecondaryButton'
+import { CodeInput } from '../../components/ui/CodeInput'
+import { TextureType } from '../../components/ui/TextureType'
 
 WebBrowser.maybeCompleteAuthSession()
 
@@ -34,29 +38,17 @@ export default function SignIn() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  const afterSignIn = async (emailAddress: string) => {
-    const locale = Localization.getLocales()[0]?.languageCode ?? 'en'
-    await httpClient.post('/v1/auth/sync', {
-      name: null,
-      email: emailAddress,
-      profilePhotoUrl: null,
-      languagePreference: ['en', 'fr'].includes(locale) ? locale : 'en',
-    })
-    router.replace('/(app)')
-  }
-
   const handleSSO = async (strategy: 'oauth_google' | 'oauth_apple') => {
     setError(null)
     setBusy(true)
     try {
-      const { createdSessionId, setActive: ssoSetActive, signIn: ssoSignIn } = await startSSOFlow({
+      const { createdSessionId, setActive: ssoSetActive } = await startSSOFlow({
         strategy,
         redirectUrl: AuthSession.makeRedirectUri(),
       })
       if (createdSessionId && ssoSetActive) {
         await ssoSetActive({ session: createdSessionId })
-        const emailAddress = ssoSignIn?.identifier ?? ''
-        await afterSignIn(emailAddress)
+        router.replace('/(auth)/profile-completion')
       } else {
         setError(t('auth.signIn.ssoIncomplete'))
       }
@@ -74,7 +66,7 @@ export default function SignIn() {
       setError(clerkErrorMessage(finalizeError))
       return
     }
-    await afterSignIn(email.trim())
+    router.replace('/(auth)/profile-completion')
   }
 
   const handleEmailPassword = async () => {
@@ -132,124 +124,156 @@ export default function SignIn() {
 
   if (pendingCode) {
     return (
-      <View style={styles.container}>
-        <Text style={styles.title}>{t('auth.signUp.verifyTitle')}</Text>
-        <Text style={styles.subtitle}>{t('auth.signUp.verifySubtitle', { email: email.trim() })}</Text>
-        <TextInput
-          style={styles.input}
-          value={code}
-          onChangeText={setCode}
-          placeholder={t('auth.signUp.codePlaceholder')}
-          placeholderTextColor={Colors.inkSecondary}
-          keyboardType="number-pad"
-          autoCapitalize="none"
-        />
-        {error && <Text style={styles.errorText}>{error}</Text>}
-        <Pressable style={styles.button} disabled={busy} onPress={handleVerifyCode}>
-          <Text style={styles.buttonText}>{t('auth.signUp.verifyButton')}</Text>
-        </Pressable>
+      <View style={styles.screen}>
+        <TextureType lines={[{ text: 'FIVE' }, { text: 'MATCH', x: 90 }]} style={styles.texture} />
+        <KeyboardAvoidingView style={styles.keyboard} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="interactive"
+          >
+            <View style={styles.container}>
+              <Text style={styles.title}>{t('auth.signUp.verifyTitle')}</Text>
+              <Text style={styles.subtitle}>{t('auth.signUp.verifySubtitle', { email: email.trim() })}</Text>
+              <View style={styles.codeWrap}>
+                <CodeInput value={code} onChangeText={setCode} accessibilityLabel={t('auth.signUp.codePlaceholder')} />
+              </View>
+              {error && <Text style={styles.errorText}>{error}</Text>}
+              <View style={styles.fullWidth}>
+                <PrimaryButton label={t('auth.signUp.verifyButton')} disabled={busy} onPress={handleVerifyCode} />
+              </View>
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </View>
     )
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>{t('auth.signIn.title')}</Text>
-      <Text style={styles.subtitle}>{t('auth.signIn.subtitle')}</Text>
+    <View style={styles.screen}>
+      <TextureType lines={[{ text: 'FIVE' }, { text: 'MATCH', x: 90 }]} style={styles.texture} />
+      <KeyboardAvoidingView style={styles.keyboard} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+        >
+          <View style={styles.container}>
+            <View style={styles.header}>
+              <Text style={styles.title}>
+                {t('auth.signIn.title')}
+                <Text style={styles.titleAccent}>.</Text>
+              </Text>
+              <Text style={styles.subtitle}>{t('auth.signIn.subtitle')}</Text>
+            </View>
 
-      <Pressable style={styles.button} disabled={busy} onPress={() => handleSSO('oauth_google')}>
-        <Text style={styles.buttonText}>{t('auth.signIn.withGoogle')}</Text>
-      </Pressable>
+            <View style={styles.stack}>
+              <SecondaryButton label={t('auth.signIn.withGoogle')} disabled={busy} onPress={() => handleSSO('oauth_google')} />
+              {Platform.OS === 'ios' && (
+                <SecondaryButton label={t('auth.signIn.withApple')} disabled={busy} onPress={() => handleSSO('oauth_apple')} />
+              )}
+            </View>
 
-      {Platform.OS === 'ios' && (
-        <Pressable style={styles.button} disabled={busy} onPress={() => handleSSO('oauth_apple')}>
-          <Text style={styles.buttonText}>{t('auth.signIn.withApple')}</Text>
-        </Pressable>
-      )}
+            <View style={styles.stack}>
+              <Input
+                value={email}
+                onChangeText={setEmail}
+                placeholder={t('auth.signIn.emailPlaceholder')}
+                keyboardType="email-address"
+                autoCapitalize="none"
+              />
+              <Input
+                value={password}
+                onChangeText={setPassword}
+                placeholder={t('auth.signIn.passwordPlaceholder')}
+                secureTextEntry
+              />
+            </View>
+            {error && <Text style={styles.errorText}>{error}</Text>}
+            <View style={styles.fullWidth}>
+              <PrimaryButton label={t('auth.signIn.withEmail')} disabled={busy} onPress={handleEmailPassword} />
+            </View>
 
-      <TextInput
-        style={styles.input}
-        value={email}
-        onChangeText={setEmail}
-        placeholder={t('auth.signIn.emailPlaceholder')}
-        placeholderTextColor={Colors.inkSecondary}
-        keyboardType="email-address"
-        autoCapitalize="none"
-      />
-      <TextInput
-        style={styles.input}
-        value={password}
-        onChangeText={setPassword}
-        placeholder={t('auth.signIn.passwordPlaceholder')}
-        placeholderTextColor={Colors.inkSecondary}
-        secureTextEntry
-      />
-      {error && <Text style={styles.errorText}>{error}</Text>}
-      <Pressable style={styles.button} disabled={busy} onPress={handleEmailPassword}>
-        <Text style={styles.buttonText}>{t('auth.signIn.withEmail')}</Text>
-      </Pressable>
-
-      <Pressable onPress={() => router.push('/(auth)/sign-up')}>
-        <Text style={styles.linkText}>{t('auth.signIn.noAccount')}</Text>
-      </Pressable>
+            <Pressable onPress={() => router.push('/(auth)/sign-up')} accessibilityRole="link" style={styles.link}>
+              <Text style={styles.linkText}>{t('auth.signIn.noAccount')}</Text>
+            </Pressable>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   )
 }
 
 const styles = StyleSheet.create({
-  container: {
+  screen: {
     flex: 1,
     backgroundColor: Colors.bg,
+    overflow: 'hidden',
+  },
+  texture: {
+    top: 48,
+    left: -30,
+  },
+  keyboard: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
     justifyContent: 'center',
-    alignItems: 'center',
+  },
+  container: {
+    backgroundColor: 'transparent',
     padding: 24,
+    paddingVertical: 48,
+  },
+  header: {
+    alignItems: 'center',
+    marginBottom: 34,
   },
   title: {
     color: Colors.ink,
-    fontSize: 24,
-    fontWeight: '700',
-    marginBottom: 8,
+    fontFamily: Type.display.fontFamily,
+    fontSize: 40,
+    letterSpacing: Type.display.letterSpacing,
     textAlign: 'center',
+  },
+  titleAccent: {
+    color: Colors.primary,
   },
   subtitle: {
     color: Colors.inkSecondary,
+    fontFamily: Fonts.inter,
     fontSize: 15,
-    marginBottom: 32,
+    marginTop: 10,
     textAlign: 'center',
   },
-  button: {
-    backgroundColor: Colors.primary,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 4,
-    width: '100%',
-    alignItems: 'center',
-    marginBottom: 12,
+  stack: {
+    gap: 10,
+    marginBottom: 18,
   },
-  buttonText: {
-    color: Colors.ink,
-    fontSize: 16,
-    fontWeight: '600',
+  fullWidth: {
+    alignSelf: 'stretch',
   },
-  input: {
-    backgroundColor: Colors.surface,
-    color: Colors.ink,
-    padding: 12,
-    borderRadius: 4,
-    width: '100%',
-    marginBottom: 12,
-    fontSize: 15,
+  codeWrap: {
+    marginBottom: 26,
   },
   errorText: {
     color: Colors.primary,
+    fontFamily: Fonts.inter,
     fontSize: 13,
     marginBottom: 12,
     textAlign: 'center',
   },
+  link: {
+    alignSelf: 'center',
+    paddingVertical: 20,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
   linkText: {
     color: Colors.inkSecondary,
-    fontSize: 14,
-    marginTop: 16,
-    textDecorationLine: 'underline',
+    fontFamily: Fonts.interMedium,
+    fontSize: 13,
+    textAlign: 'center',
   },
 })

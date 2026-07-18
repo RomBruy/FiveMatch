@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { View, StyleSheet, Animated, AccessibilityInfo } from 'react-native'
+import { LinearGradient } from 'expo-linear-gradient'
 import { useTranslation } from 'react-i18next'
 import { Colors } from '../../constants/colors'
+import { Gradients } from '../../constants/gradients'
+import { Fonts, Radius } from '../../constants/tokens'
 
 const MESSAGE_KEYS = [
   'match.generate.loading1',
@@ -41,6 +44,14 @@ export function NarrativeLoader() {
 
   return (
     <View style={styles.container} accessibilityLiveRegion="polite">
+      {/* The card's ONE ember gradient corner — texture, never content. */}
+      <LinearGradient
+        colors={Gradients.emberCorner}
+        start={{ x: 1, y: 0 }}
+        end={{ x: 0.25, y: 0.9 }}
+        style={styles.ember}
+        pointerEvents="none"
+      />
       <Animated.Text style={[styles.message, { opacity: reduceMotion ? 1 : opacity }]}>
         {message}
       </Animated.Text>
@@ -52,12 +63,24 @@ const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
     justifyContent: 'center',
+    minHeight: 150,
     paddingVertical: 32,
+    backgroundColor: Colors.bg,
+    borderRadius: Radius.card,
+    overflow: 'hidden',
+  },
+  ember: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    width: 170,
+    height: 130,
   },
   message: {
-    color: Colors.inkSecondary,
-    fontFamily: 'Inter_400Regular',
-    fontSize: 15,
+    color: Colors.ink,
+    fontFamily: Fonts.bebas,
+    fontSize: 22,
+    letterSpacing: 2.2, // 0.10em @ 22 (heading register)
     textAlign: 'center',
     paddingHorizontal: 24,
   },

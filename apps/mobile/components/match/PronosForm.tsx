@@ -3,10 +3,8 @@ import {
   View,
   Text,
   TextInput,
-  Pressable,
   ScrollView,
   StyleSheet,
-  ActivityIndicator,
 } from 'react-native'
 import { useForm, Controller } from 'react-hook-form'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -14,13 +12,16 @@ import { useTranslation } from 'react-i18next'
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
-  withTiming,
-  withRepeat,
-  withSequence,
   withSpring,
 } from 'react-native-reanimated'
+import { Ionicons } from '@expo/vector-icons'
+import * as Haptics from 'expo-haptics'
 import { Colors } from '../../constants/colors'
+import { Fonts, Radius, Type } from '../../constants/tokens'
 import { httpClient } from '../../lib/api-client'
+import { Chip } from '../ui/Chip'
+import { CountdownPill } from '../ui/CountdownPill'
+import { PrimaryButton } from '../ui/PrimaryButton'
 
 interface PronosFormProps {
   matchId: string
@@ -48,15 +49,6 @@ interface ExistingProno {
   pointsEarned: number | null
 }
 
-function formatCountdown(ms: number): string {
-  if (ms <= 0) return '00:00:00'
-  const totalSeconds = Math.floor(ms / 1000)
-  const h = Math.floor(totalSeconds / 3600)
-  const m = Math.floor((totalSeconds % 3600) / 60)
-  const s = totalSeconds % 60
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-}
-
 function formatLockTime(isoString: string): string {
   const d = new Date(isoString)
   return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -66,49 +58,23 @@ export function PronosForm({ matchId, groupId, scheduledAt }: PronosFormProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
 
-  const [timeRemaining, setTimeRemaining] = useState<number>(() => {
-    return new Date(scheduledAt).getTime() - Date.now()
-  })
   const [isLocked, setIsLocked] = useState(() => new Date(scheduledAt).getTime() <= Date.now())
   const [lockedAt, setLockedAt] = useState<string | null>(null)
 
-  const isUrgent = !isLocked && timeRemaining < 10 * 60 * 1000
-
-  // Countdown interval
+  // Lock-state interval — the countdown display itself lives in CountdownPill.
   useEffect(() => {
     if (isLocked) return
     const interval = setInterval(() => {
       const diff = new Date(scheduledAt).getTime() - Date.now()
       if (diff <= 0) {
         setIsLocked(true)
-        setTimeRemaining(0)
         clearInterval(interval)
-      } else {
-        setTimeRemaining(diff)
       }
     }, 1000)
     return () => clearInterval(interval)
   }, [scheduledAt, isLocked])
 
-  // Pulse animation for urgent countdown
-  const pulseOpacity = useSharedValue(1)
-  useEffect(() => {
-    if (isUrgent) {
-      pulseOpacity.value = withRepeat(
-        withSequence(withTiming(0.7, { duration: 500 }), withTiming(1, { duration: 500 })),
-        -1,
-        true,
-      )
-    } else {
-      pulseOpacity.value = 1
-    }
-  }, [isUrgent])
-
-  const timerAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: pulseOpacity.value,
-  }))
-
-  // Padlock scale animation
+  // Padlock scale animation — signature motion, timing is a Story 6.1 contract.
   const padlockScale = useSharedValue(0.8)
   useEffect(() => {
     if (isLocked) {
@@ -202,6 +168,11 @@ export function PronosForm({ matchId, groupId, scheduledAt }: PronosFormProps) {
     }
   })
 
+  const onLockPress = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {})
+    void onSubmit()
+  }
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>{t('pronos.title')}</Text>
@@ -209,24 +180,16 @@ export function PronosForm({ matchId, groupId, scheduledAt }: PronosFormProps) {
       {/* Countdown */}
       {!isLocked && (
         <View style={styles.countdownRow}>
-          <Animated.Text
-            style={[
-              styles.countdown,
-              isUrgent && styles.countdownUrgent,
-              timerAnimatedStyle,
-            ]}
-          >
-            {formatCountdown(timeRemaining)}
-          </Animated.Text>
-          <Text style={styles.countdownLabel}>{t('pronos.countdownLabel')}</Text>
+          <CountdownPill targetAt={scheduledAt} label={t('pronos.countdownLabel')} />
         </View>
       )}
 
       {/* Locked state */}
       {isLocked && (
         <Animated.View style={[styles.lockedBanner, padlockAnimatedStyle]}>
-          <Text style={styles.lockedIcon}>🔒</Text>
-          <View>
+          {/* No lock icons anywhere (design rule) — the confirmed state speaks success. */}
+          <Ionicons name="checkmark-circle" size={22} color={Colors.success} />
+          <View style={styles.lockedTextWrap}>
             <Text style={styles.lockedLabel}>{t('pronos.lockedLabel')}</Text>
             {lockedAt && (
               <Text style={styles.confirmedAt}>
@@ -237,27 +200,23 @@ export function PronosForm({ matchId, groupId, scheduledAt }: PronosFormProps) {
         </Animated.View>
       )}
 
-      {/* Result prediction */}
+      {/* Result prediction — 1X2 as chips */}
       <View style={styles.fieldGroup}>
         <Text style={styles.fieldLabel}>{t('pronos.resultLabel')}</Text>
         <Controller
           control={control}
           name="predictionResult"
           render={({ field: { value, onChange } }) => (
-            <View style={styles.radioRow}>
+            <View style={styles.chipRow}>
               {(['teamA', 'draw', 'teamB'] as const).map((option) => (
-                <Pressable
-                  key={option}
-                  style={[styles.radioOption, value === option && styles.radioOptionActive]}
-                  onPress={() => !isLocked && onChange(option)}
-                  disabled={isLocked}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: value === option }}
-                >
-                  <Text style={[styles.radioLabel, value === option && styles.radioLabelActive]}>
-                    {t(`pronos.${option}`)}
-                  </Text>
-                </Pressable>
+                <View key={option} style={styles.chipCell}>
+                  <Chip
+                    label={t(`pronos.${option}`)}
+                    active={value === option}
+                    onPress={() => !isLocked && onChange(option)}
+                    disabled={isLocked}
+                  />
+                </View>
               ))}
             </View>
           )}
@@ -284,7 +243,7 @@ export function PronosForm({ matchId, groupId, scheduledAt }: PronosFormProps) {
               />
             )}
           />
-          <Text style={styles.scoreDivider}> – </Text>
+          <Text style={styles.scoreDivider}>–</Text>
           <Controller
             control={control}
             name="predictionScoreB"
@@ -314,20 +273,20 @@ export function PronosForm({ matchId, groupId, scheduledAt }: PronosFormProps) {
             control={control}
             name="predictionMvpPlayerId"
             render={({ field: { value, onChange } }) => (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.mvpScroll}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.mvpScroll}
+                contentContainerStyle={styles.mvpScrollContent}
+              >
                 {attendees.map((player) => (
-                  <Pressable
+                  <Chip
                     key={player.playerId}
-                    style={[styles.mvpChip, value === player.playerId && styles.mvpChipActive]}
+                    label={player.displayName}
+                    active={value === player.playerId}
                     onPress={() => !isLocked && onChange(value === player.playerId ? null : player.playerId)}
                     disabled={isLocked}
-                    accessibilityRole="radio"
-                    accessibilityState={{ selected: value === player.playerId }}
-                  >
-                    <Text style={[styles.mvpChipText, value === player.playerId && styles.mvpChipTextActive]}>
-                      {player.displayName}
-                    </Text>
-                  </Pressable>
+                  />
                 ))}
               </ScrollView>
             )}
@@ -335,20 +294,15 @@ export function PronosForm({ matchId, groupId, scheduledAt }: PronosFormProps) {
         )}
       </View>
 
-      {/* Submit */}
+      {/* Lock CTA — the host screen's glow is owned elsewhere (hero band / tab dock). */}
       {!isLocked && (
-        <Pressable
-          style={[styles.submitButton, (!isFormValid || isSubmitting) && styles.submitButtonDisabled]}
-          onPress={onSubmit}
+        <PrimaryButton
+          label={t('pronos.submitButton')}
+          onPress={onLockPress}
           disabled={!isFormValid || isSubmitting}
-          accessibilityRole="button"
-        >
-          {isSubmitting ? (
-            <ActivityIndicator color={Colors.ink} />
-          ) : (
-            <Text style={styles.submitButtonText}>{t('pronos.submitButton')}</Text>
-          )}
-        </Pressable>
+          loading={isSubmitting}
+          glow={false}
+        />
       )}
 
       {/* Submission confirmation */}
@@ -364,60 +318,47 @@ export function PronosForm({ matchId, groupId, scheduledAt }: PronosFormProps) {
 const styles = StyleSheet.create({
   container: {
     backgroundColor: Colors.surface,
-    marginHorizontal: 16,
-    borderRadius: 8,
+    marginHorizontal: 20,
+    borderRadius: Radius.card,
     padding: 16,
     gap: 16,
   },
   title: {
     color: Colors.ink,
-    fontSize: 16,
-    fontWeight: '700',
-    letterSpacing: 0.5,
+    fontFamily: Type.heading.fontFamily,
+    fontSize: 20,
+    letterSpacing: Type.heading.letterSpacing,
     textTransform: 'uppercase',
   },
   countdownRow: {
     alignItems: 'center',
-    gap: 4,
-  },
-  countdown: {
-    color: Colors.primary,
-    fontSize: 32,
-    fontWeight: '700',
-    fontVariant: ['tabular-nums'],
-    letterSpacing: 1,
-  },
-  countdownUrgent: {
-    color: Colors.gold,
-  },
-  countdownLabel: {
-    color: Colors.inkSecondary,
-    fontSize: 12,
   },
   lockedBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: Colors.surfaceRaised,
-    borderRadius: 6,
-    padding: 12,
+    borderRadius: Radius.md,
+    padding: 14,
     gap: 12,
   },
-  lockedIcon: {
-    fontSize: 24,
+  lockedTextWrap: {
+    flexShrink: 1,
   },
   lockedLabel: {
-    color: Colors.inkDisabled,
+    color: Colors.ink,
     fontSize: 14,
-    fontWeight: '600',
+    fontFamily: Fonts.interSemiBold,
   },
   confirmedAt: {
     color: Colors.inkSecondary,
     fontSize: 12,
+    fontFamily: Fonts.inter,
     marginTop: 2,
   },
   confirmedAtInline: {
     color: Colors.inkSecondary,
     fontSize: 12,
+    fontFamily: Fonts.inter,
     textAlign: 'center',
   },
   fieldGroup: {
@@ -425,101 +366,55 @@ const styles = StyleSheet.create({
   },
   fieldLabel: {
     color: Colors.inkSecondary,
-    fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: 0.5,
+    fontSize: 11,
+    fontFamily: Type.labelCaps.fontFamily,
+    letterSpacing: Type.labelCaps.letterSpacing,
     textTransform: 'uppercase',
   },
-  radioRow: {
+  chipRow: {
     flexDirection: 'row',
     gap: 8,
   },
-  radioOption: {
+  chipCell: {
     flex: 1,
-    paddingVertical: 10,
-    borderRadius: 6,
-    backgroundColor: Colors.surfaceRaised,
-    alignItems: 'center',
-  },
-  radioOptionActive: {
-    backgroundColor: Colors.primary,
-  },
-  radioLabel: {
-    color: Colors.inkSecondary,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  radioLabelActive: {
-    color: Colors.ink,
   },
   scoreRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    justifyContent: 'center',
+    gap: 16,
   },
   scoreInput: {
     backgroundColor: Colors.surfaceRaised,
-    borderRadius: 6,
-    paddingVertical: 10,
+    borderRadius: Radius.md,
+    paddingVertical: 8,
     paddingHorizontal: 16,
     color: Colors.ink,
-    fontSize: 20,
-    fontWeight: '700',
+    fontFamily: Fonts.bebas,
+    fontSize: 40,
+    letterSpacing: 1.6, // 0.04em @ 40 (stat register, scaled)
+    fontVariant: ['tabular-nums'],
     textAlign: 'center',
-    width: 64,
+    minWidth: 76,
   },
   inputDisabled: {
     opacity: 0.5,
   },
   scoreDivider: {
     color: Colors.inkSecondary,
-    fontSize: 18,
-    fontWeight: '600',
-    paddingHorizontal: 4,
+    fontFamily: Fonts.bebas,
+    fontSize: 28,
   },
   emptyAttendees: {
     color: Colors.inkDisabled,
     fontSize: 13,
+    fontFamily: Fonts.inter,
     fontStyle: 'italic',
   },
   mvpScroll: {
     flexGrow: 0,
   },
-  mvpChip: {
-    backgroundColor: Colors.surfaceRaised,
-    borderRadius: 20,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    marginRight: 8,
-    borderWidth: 1,
-    borderColor: 'transparent',
-  },
-  mvpChipActive: {
-    borderColor: Colors.primary,
-  },
-  mvpChipText: {
-    color: Colors.inkSecondary,
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  mvpChipTextActive: {
-    color: Colors.primary,
-    fontWeight: '600',
-  },
-  submitButton: {
-    backgroundColor: Colors.primary,
-    borderRadius: 4,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  submitButtonDisabled: {
-    opacity: 0.35,
-  },
-  submitButtonText: {
-    color: Colors.ink,
-    fontSize: 14,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
+  mvpScrollContent: {
+    gap: 8,
   },
 })

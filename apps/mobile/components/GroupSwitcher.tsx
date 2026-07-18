@@ -1,12 +1,35 @@
-import { View, Text, Pressable, Modal, FlatList, StyleSheet, ActivityIndicator } from 'react-native'
+import {
+  ActivityIndicator,
+  FlatList,
+  Modal,
+  PanResponder,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native'
+import { useEffect, useRef, useState } from 'react'
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated'
+import { BlurView } from 'expo-blur'
+import { Ionicons } from '@expo/vector-icons'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTranslation } from 'react-i18next'
 import { useRouter } from 'expo-router'
 import { useQuery } from '@tanstack/react-query'
 import { Colors } from '../constants/colors'
+import { Fonts, Motion, MotionEasing, MotionSpring, Radius } from '../constants/tokens'
+import { DuotoneAvatar } from './ui/DuotoneAvatar'
+import { SecondaryButton } from './ui/SecondaryButton'
+import { useReduceMotion } from '../hooks/use-reduce-motion'
 import { httpClient } from '../lib/api-client'
 import { useGroupContext } from '../contexts/GroupContext'
-
-const CLOSE_SYMBOL = '✕'
 
 interface GroupItem {
   id: string
@@ -20,10 +43,93 @@ interface Props {
   onClose: () => void
 }
 
+const DRAG_DISMISS_DISTANCE = 120
+const DRAG_DISMISS_VELOCITY = 0.8
+const EXIT_DURATION = 240
+
+/**
+ * Group switcher — level-3 bottom sheet (raised + blur + hairline, the TabDock
+ * surface treatment) with a 320ms spring entrance. Drag the grab zone down or
+ * tap the backdrop to dismiss. Public API unchanged: `visible` / `onClose`.
+ */
 export function GroupSwitcher({ visible, onClose }: Props) {
   const { t } = useTranslation()
   const router = useRouter()
-  const { setActiveGroupId } = useGroupContext()
+  const insets = useSafeAreaInsets()
+  const { height: windowHeight } = useWindowDimensions()
+  const reduceMotion = useReduceMotion()
+  const { activeGroupId, setActiveGroupId } = useGroupContext()
+
+  // Modal stays mounted through the exit animation, then unmounts.
+  const [rendered, setRendered] = useState(visible)
+  const translateY = useSharedValue(windowHeight)
+  const sheetOpacity = useSharedValue(1)
+  const backdropOpacity = useSharedValue(0)
+
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+
+  useEffect(() => {
+    if (visible) {
+      // Pre-position before the modal mounts; the entrance runs in Modal.onShow.
+      backdropOpacity.value = 0
+      if (reduceMotion) {
+        translateY.value = 0
+        sheetOpacity.value = 0
+      } else {
+        translateY.value = windowHeight
+        sheetOpacity.value = 1
+      }
+      setRendered(true)
+    } else if (rendered) {
+      backdropOpacity.value = withTiming(0, { duration: Motion.toggle })
+      if (reduceMotion) {
+        sheetOpacity.value = withTiming(0, { duration: Motion.toggle }, (finished) => {
+          if (finished) runOnJS(setRendered)(false)
+        })
+      } else {
+        translateY.value = withTiming(
+          windowHeight,
+          { duration: EXIT_DURATION, easing: MotionEasing.out },
+          (finished) => {
+            if (finished) runOnJS(setRendered)(false)
+          },
+        )
+      }
+    }
+  }, [visible])
+
+  const handleShow = () => {
+    backdropOpacity.value = withTiming(1, { duration: Motion.toggle })
+    if (reduceMotion) {
+      sheetOpacity.value = withTiming(1, { duration: Motion.toggle })
+    } else {
+      translateY.value = withSpring(0, MotionSpring.sheet)
+    }
+  }
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, g) => g.dy > 4 && Math.abs(g.dy) > Math.abs(g.dx),
+      onPanResponderMove: (_, g) => {
+        translateY.value = Math.max(0, g.dy)
+      },
+      onPanResponderRelease: (_, g) => {
+        if (g.dy > DRAG_DISMISS_DISTANCE || g.vy > DRAG_DISMISS_VELOCITY) {
+          onCloseRef.current()
+        } else {
+          translateY.value = withSpring(0, MotionSpring.sheet)
+        }
+      },
+    }),
+  ).current
+
+  const backdropStyle = useAnimatedStyle(() => ({ opacity: backdropOpacity.value }))
+  const sheetStyle = useAnimatedStyle(() => ({
+    opacity: sheetOpacity.value,
+    transform: [{ translateY: translateY.value }],
+  }))
 
   const { data, isLoading } = useQuery({
     queryKey: ['users', 'me', 'groups'],
@@ -47,50 +153,90 @@ export function GroupSwitcher({ visible, onClose }: Props) {
 
   return (
     <Modal
-      visible={visible}
-      animationType="slide"
-      presentationStyle="pageSheet"
+      visible={rendered}
+      transparent
+      statusBarTranslucent
+      animationType="none"
+      onShow={handleShow}
       onRequestClose={onClose}
     >
       <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.title}>{t('groups.switcher.title')}</Text>
-          <Pressable onPress={onClose} style={styles.closeButton} accessibilityLabel={t('groups.switcher.close')}>
-            <Text style={styles.closeButtonText}>{CLOSE_SYMBOL}</Text>
-          </Pressable>
-        </View>
-
-        {isLoading ? (
-          <View style={styles.center}>
-            <ActivityIndicator color={Colors.primary} />
-          </View>
-        ) : (
-          <FlatList
-            data={data ?? []}
-            keyExtractor={(item) => item.id}
-            ItemSeparatorComponent={() => <View style={styles.separator} />}
-            ListEmptyComponent={
-              <View style={styles.center}>
-                <Text style={styles.emptyText}>{t('groups.switcher.noGroups')}</Text>
-              </View>
-            }
-            renderItem={({ item }) => (
-              <Pressable style={styles.groupRow} onPress={() => handleSelect(item.id)}>
-                <View style={styles.groupRowLeft}>
-                  <Text style={styles.groupName}>{item.name}</Text>
-                  <View style={styles.tierBadge}>
-                    <Text style={styles.tierBadgeText}>{t(`groups.home.tier.${item.tier}`)}</Text>
-                  </View>
-                </View>
-              </Pressable>
-            )}
-            ListFooterComponent={
-              <Pressable style={styles.createGroupButton} onPress={handleCreateGroup}>
-                <Text style={styles.createGroupText}>{t('groups.switcher.createGroup')}</Text>
-              </Pressable>
-            }
+        <Animated.View style={[styles.backdrop, backdropStyle]}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={onClose}
+            accessibilityRole="button"
+            accessibilityLabel={t('groups.switcher.close')}
           />
-        )}
+        </Animated.View>
+
+        <Animated.View style={[styles.sheet, { maxHeight: windowHeight * 0.7 }, sheetStyle]}>
+          {/* Level-3 surface: raised + blur(14) + hairline — the TabDock treatment. */}
+          <View style={styles.surface}>
+            <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
+            <View style={styles.tint} />
+          </View>
+
+          <View style={styles.grabZone} {...panResponder.panHandlers}>
+            <View style={styles.handle} />
+            <Text style={styles.title}>{t('groups.switcher.title')}</Text>
+          </View>
+
+          {isLoading ? (
+            <View style={styles.center}>
+              <ActivityIndicator color={Colors.primary} />
+            </View>
+          ) : (
+            <FlatList
+              data={data ?? []}
+              keyExtractor={(item) => item.id}
+              style={styles.list}
+              ItemSeparatorComponent={() => <View style={styles.separator} />}
+              ListEmptyComponent={
+                <View style={styles.center}>
+                  <Text style={styles.emptyText}>{t('groups.switcher.noGroups')}</Text>
+                </View>
+              }
+              renderItem={({ item }) => {
+                const isActive = item.id === activeGroupId
+                return (
+                  <Pressable
+                    style={styles.groupRow}
+                    onPress={() => handleSelect(item.id)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: isActive }}
+                  >
+                    <DuotoneAvatar displayName={item.name} size={40} ring={isActive ? 'red' : undefined} />
+                    <Text style={styles.groupName} numberOfLines={1}>
+                      {item.name}
+                    </Text>
+                    <View style={styles.tierPill}>
+                      <Text style={styles.tierPillText}>{t(`groups.home.tier.${item.tier}`)}</Text>
+                    </View>
+                    {isActive && (
+                      <View style={styles.activeTag}>
+                        <Ionicons name="checkmark" size={16} color={Colors.primary} />
+                        <Text style={styles.activeTagText}>{t('groups.switcher.active')}</Text>
+                      </View>
+                    )}
+                  </Pressable>
+                )
+              }}
+              ListFooterComponent={
+                <Pressable style={styles.createRow} onPress={handleCreateGroup} accessibilityRole="button">
+                  <View style={styles.createIcon}>
+                    <Ionicons name="add" size={20} color={Colors.inkSecondary} />
+                  </View>
+                  <Text style={styles.createText}>{t('groups.switcher.createGroup')}</Text>
+                </Pressable>
+              }
+            />
+          )}
+
+          <View style={[styles.footer, { paddingBottom: insets.bottom + 16 }]}>
+            <SecondaryButton label={t('groups.switcher.close')} onPress={onClose} />
+          </View>
+        </Animated.View>
       </View>
     </Modal>
   )
@@ -99,30 +245,51 @@ export function GroupSwitcher({ visible, onClose }: Props) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.bg,
+    justifyContent: 'flex-end',
   },
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.surface,
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  sheet: {
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    overflow: 'hidden',
+  },
+  surface: {
+    ...StyleSheet.absoluteFillObject,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    borderColor: Colors.hairline,
+    overflow: 'hidden',
+  },
+  tint: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(38,38,44,0.92)',
+  },
+  grabZone: {
+    paddingTop: 12,
+    paddingHorizontal: 22,
+  },
+  handle: {
+    width: 44,
+    height: 5,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.surfaceRaised,
+    alignSelf: 'center',
+    marginBottom: 18,
   },
   title: {
+    fontFamily: Fonts.bebas,
+    fontSize: 26,
+    letterSpacing: 2.08, // 0.08em @ 26 (heading register)
+    textTransform: 'uppercase',
     color: Colors.ink,
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  closeButton: {
-    padding: 8,
-  },
-  closeButtonText: {
-    color: Colors.inkSecondary,
-    fontSize: 16,
+    marginBottom: 6,
   },
   center: {
-    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
@@ -130,54 +297,81 @@ const styles = StyleSheet.create({
   emptyText: {
     color: Colors.inkSecondary,
     fontSize: 15,
+    fontFamily: Fonts.inter,
     textAlign: 'center',
+  },
+  list: {
+    flexGrow: 0,
+    flexShrink: 1,
+    paddingHorizontal: 22,
   },
   groupRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
+    gap: 12,
+    paddingVertical: 12,
     minHeight: 56,
   },
-  groupRowLeft: {
-    flex: 1,
-  },
   groupName: {
+    flex: 1,
     color: Colors.ink,
-    fontSize: 16,
-    fontWeight: '500',
-    marginBottom: 4,
+    fontSize: 15,
+    fontFamily: Fonts.interSemiBold,
   },
-  tierBadge: {
-    alignSelf: 'flex-start',
-    backgroundColor: Colors.surface,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 2,
+  tierPill: {
+    backgroundColor: Colors.surfaceRaised,
+    borderRadius: Radius.full,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
   },
-  tierBadgeText: {
-    color: Colors.inkSecondary,
+  tierPillText: {
+    fontFamily: Fonts.interSemiBold,
     fontSize: 10,
-    fontWeight: '600',
+    letterSpacing: 1.2,
     textTransform: 'uppercase',
-    letterSpacing: 0.1 * 10,
+    color: Colors.inkSecondary,
+  },
+  activeTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  activeTagText: {
+    fontFamily: Fonts.interSemiBold,
+    fontSize: 10,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    color: Colors.primary,
   },
   separator: {
     height: 1,
-    backgroundColor: Colors.surface,
-    marginHorizontal: 20,
+    backgroundColor: Colors.hairline,
   },
-  createGroupButton: {
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderTopWidth: 1,
-    borderTopColor: Colors.surface,
-    marginTop: 8,
+  createRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+    minHeight: 56,
   },
-  createGroupText: {
-    color: Colors.primary,
+  createIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.surfaceRaised,
+    borderWidth: 1,
+    borderColor: Colors.hairline,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  createText: {
+    flex: 1,
+    color: Colors.inkSecondary,
     fontSize: 15,
-    fontWeight: '600',
+    fontFamily: Fonts.interSemiBold,
+  },
+  footer: {
+    paddingHorizontal: 22,
+    paddingTop: 10,
   },
 })

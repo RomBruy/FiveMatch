@@ -1,8 +1,11 @@
 import { View, Text, StyleSheet } from 'react-native'
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
+import { Ionicons } from '@expo/vector-icons'
 import { Colors } from '../../constants/colors'
+import { Fonts, Radius, Type } from '../../constants/tokens'
 import { httpClient } from '../../lib/api-client'
+import { DuotoneAvatar } from '../ui/DuotoneAvatar'
 
 interface RevealRow {
   playerId: string
@@ -43,9 +46,9 @@ export function PronosReveal({ matchId, groupId, currentPlayerId }: PronosReveal
 
   if (isLoading) {
     return (
-      <View style={styles.skeletonContainer}>
+      <View style={styles.grid}>
         {[0, 1, 2].map((i) => (
-          <View key={i} style={styles.skeletonRow} />
+          <View key={i} style={styles.skeletonCard} />
         ))}
       </View>
     )
@@ -60,54 +63,39 @@ export function PronosReveal({ matchId, groupId, currentPlayerId }: PronosReveal
   }
 
   return (
-    <View>
+    <View style={styles.grid}>
       {data.rows.map((row) => {
         const isCurrentUser = row.playerId === currentPlayerId
         return (
           <View
             key={row.playerId}
-            style={[styles.row, isCurrentUser && styles.rowCurrentUser]}
+            style={[styles.card, isCurrentUser && styles.cardCurrentUser]}
           >
-            <View style={styles.rowTop}>
-              <Text style={styles.playerName}>{row.displayName}</Text>
-              <Text style={styles.pointsBadge}>
-                {row.pointsEarned} {t('pronos.reveal.pointsSuffix')}
-              </Text>
+            <View style={styles.cardTop}>
+              <DuotoneAvatar displayName={row.displayName} size={36} />
+              <Text style={styles.playerName} numberOfLines={1}>{row.displayName}</Text>
+              {/* Points chip — stat register; 50/30/20 scoring display unchanged. */}
+              <View style={styles.pointsChip}>
+                <Text style={styles.pointsValue}>{row.pointsEarned}</Text>
+                <Text style={styles.pointsSuffix}>{t('pronos.reveal.pointsSuffix')}</Text>
+              </View>
             </View>
             <View style={styles.predictionCells}>
-              <View style={styles.predictionCell}>
-                <Text style={styles.cellLabel}>{t('pronos.reveal.scoreLabel')}</Text>
-                <Text
-                  style={[
-                    styles.cellValue,
-                    row.breakdown.scoreCorrect ? styles.correct : styles.incorrect,
-                  ]}
-                >
-                  {row.predictionScore}
-                </Text>
-              </View>
-              <View style={styles.predictionCell}>
-                <Text style={styles.cellLabel}>{t('pronos.reveal.resultLabel')}</Text>
-                <Text
-                  style={[
-                    styles.cellValue,
-                    row.breakdown.resultCorrect ? styles.correct : styles.incorrect,
-                  ]}
-                >
-                  {t(`pronos.${row.predictionResult}`)}
-                </Text>
-              </View>
-              <View style={styles.predictionCell}>
-                <Text style={styles.cellLabel}>{t('pronos.reveal.mvpLabel')}</Text>
-                <Text
-                  style={[
-                    styles.cellValue,
-                    row.breakdown.mvpCorrect ? styles.correct : styles.incorrect,
-                  ]}
-                >
-                  {row.predictionMvpDisplayName ?? t('pronos.reveal.noPrediction')}
-                </Text>
-              </View>
+              <PredictionCell
+                label={t('pronos.reveal.scoreLabel')}
+                value={row.predictionScore}
+                correct={row.breakdown.scoreCorrect}
+              />
+              <PredictionCell
+                label={t('pronos.reveal.resultLabel')}
+                value={t(`pronos.${row.predictionResult}`)}
+                correct={row.breakdown.resultCorrect}
+              />
+              <PredictionCell
+                label={t('pronos.reveal.mvpLabel')}
+                value={row.predictionMvpDisplayName ?? t('pronos.reveal.noPrediction')}
+                correct={row.breakdown.mvpCorrect}
+              />
             </View>
           </View>
         )
@@ -116,47 +104,89 @@ export function PronosReveal({ matchId, groupId, currentPlayerId }: PronosReveal
   )
 }
 
+// Correctness always reads as text + icon, never color alone.
+function PredictionCell({ label, value, correct }: { label: string; value: string; correct: boolean }) {
+  return (
+    <View style={styles.predictionCell}>
+      <Text style={styles.cellLabel}>{label}</Text>
+      <View style={styles.cellValueRow}>
+        <Ionicons
+          name={correct ? 'checkmark-circle' : 'close-circle'}
+          size={12}
+          color={correct ? Colors.success : Colors.primary}
+        />
+        <Text
+          style={[styles.cellValue, correct ? styles.correct : styles.incorrect]}
+          numberOfLines={1}
+        >
+          {value}
+        </Text>
+      </View>
+    </View>
+  )
+}
+
 const styles = StyleSheet.create({
-  skeletonContainer: {
-    gap: 1,
+  grid: {
+    gap: 10,
   },
-  skeletonRow: {
-    height: 72,
+  skeletonCard: {
+    height: 84,
     backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
   },
   emptyContainer: {
-    paddingHorizontal: 16,
     paddingVertical: 12,
   },
   emptyText: {
     color: Colors.inkSecondary,
     fontSize: 14,
+    fontFamily: Fonts.inter,
     fontStyle: 'italic',
   },
-  row: {
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.06)',
-    gap: 6,
+  card: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    padding: 14,
+    gap: 10,
   },
-  rowCurrentUser: {
-    backgroundColor: 'rgba(255,59,71,0.05)',
+  cardCurrentUser: {
+    backgroundColor: Colors.primarySubtle,
   },
-  rowTop: {
+  cardTop: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 10,
   },
   playerName: {
+    flex: 1,
     color: Colors.ink,
     fontSize: 14,
-    fontWeight: '600',
+    fontFamily: Fonts.interSemiBold,
   },
-  pointsBadge: {
-    color: Colors.gold,
-    fontSize: 18,
-    fontFamily: 'BebasNeue',
+  pointsChip: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 3,
+    backgroundColor: Colors.surfaceRaised,
+    borderRadius: Radius.full,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+  },
+  pointsValue: {
+    // --type-stat numerals; points speak primary like every points chip (gold is prestige-only, 9.12).
+    color: Colors.primary,
+    fontFamily: Type.stat.fontFamily,
+    fontSize: 16,
+    letterSpacing: 0.64, // 0.04em @ 16
+    fontVariant: ['tabular-nums'],
+  },
+  pointsSuffix: {
+    color: Colors.inkSecondary,
+    fontSize: 9,
+    fontFamily: Fonts.interSemiBold,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
   },
   predictionCells: {
     flexDirection: 'row',
@@ -164,18 +194,24 @@ const styles = StyleSheet.create({
   },
   predictionCell: {
     flex: 1,
-    gap: 2,
+    gap: 3,
   },
   cellLabel: {
     color: Colors.inkSecondary,
-    fontSize: 10,
-    fontWeight: '500',
+    fontSize: 9,
+    fontFamily: Fonts.interSemiBold,
+    letterSpacing: 1.2,
     textTransform: 'uppercase',
-    letterSpacing: 0.4,
+  },
+  cellValueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   cellValue: {
+    flexShrink: 1,
     fontSize: 12,
-    fontWeight: '600',
+    fontFamily: Fonts.interSemiBold,
   },
   correct: {
     color: Colors.success,

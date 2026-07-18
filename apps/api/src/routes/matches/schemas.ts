@@ -7,6 +7,7 @@ export const CreateMatchSchema = z.object({
   playersPerTeam: z.number().int().min(5).max(20),
   goalkeeperMode: z.enum(['fixed', 'rotating', 'none']),
   generatorStyle: z.enum(['pure_ovr', 'position_aware', 'mixed']).optional(),
+  recurrence: z.object({ frequency: z.enum(['weekly', 'biweekly']) }).optional().nullable(),
 })
 
 export type CreateMatchInput = z.infer<typeof CreateMatchSchema>

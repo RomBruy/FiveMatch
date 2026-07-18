@@ -3,23 +3,41 @@ import { View, Text, ScrollView, StyleSheet, ActivityIndicator, Pressable } from
 import { useLocalSearchParams, useFocusEffect } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Ionicons } from '@expo/vector-icons'
+import { LinearGradient } from 'expo-linear-gradient'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import * as Haptics from 'expo-haptics'
 import { Colors } from '../../../constants/colors'
+import { Fonts, Radius } from '../../../constants/tokens'
 import { httpClient } from '../../../lib/api-client'
 import { useGroupContext } from '../../../contexts/GroupContext'
 import { PhaseStepper } from '../../../components/shared/PhaseStepper'
 import { AttendanceSwiperRow } from '../../../components/match/AttendanceSwiperRow'
-import { AttendanceToggle } from '../../../components/match/AttendanceToggle'
+import { AttendanceSegmentedPill } from '../../../components/match/AttendanceSegmentedPill'
+import { TextureType } from '../../../components/ui/TextureType'
+import { PrimaryButton } from '../../../components/ui/PrimaryButton'
+import { CountdownPill } from '../../../components/ui/CountdownPill'
+import { DuotoneAvatar } from '../../../components/ui/DuotoneAvatar'
+import { DOCK_CLEARANCE } from '../../../components/ui/TabDock'
 import { PronosForm } from '../../../components/match/PronosForm'
 import { PronosReveal } from '../../../components/match/PronosReveal'
+import { PostMatchRatings } from '../../../components/match/PostMatchRatings'
+import { LockedPitchBoard } from '../../../components/match/PitchBoard'
+
+const SEPARATOR = ' · '
+const TEXTURE_TEXT = 'MATCH DAY'
 
 interface MatchDetail {
   matchId: string
   status: 'planning' | 'attendance_open' | 'attendance_locked' | 'teams_generated' | 'in_progress' | 'completed' | 'cancelled'
   scheduledAt: string
+  completedAt: string | null
   location: string | null
   format: string
   playersPerTeam: number
 }
+
+const MVP_WINDOW_MS = 24 * 60 * 60 * 1000
 
 interface AttendanceRow {
   playerId: string | null
@@ -54,9 +72,10 @@ interface ParticipantsData {
 }
 
 export default function MatchPlayerScreen() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { matchId } = useLocalSearchParams<{ matchId: string }>()
   const { activeGroupId } = useGroupContext()
+  const insets = useSafeAreaInsets()
   const queryClient = useQueryClient()
 
   const { data: match, isLoading: matchLoading } = useQuery({
@@ -105,6 +124,13 @@ export default function MatchPlayerScreen() {
       setSelectedNominee(null)
     },
   })
+
+  // Selection feedback only — vote rules and submission stay server-enforced (UX-DR23).
+  const selectNominee = (playerId: string | null) => {
+    if (!playerId) return
+    setSelectedNominee(playerId)
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {})
+  }
 
   useFocusEffect(
     useCallback(() => {
@@ -167,136 +193,233 @@ export default function MatchPlayerScreen() {
   const confirmedCount = attendances?.confirmed.length ?? 0
   const total = match.playersPerTeam * 2
 
-  const scheduledDate = new Date(match.scheduledAt).toLocaleDateString('fr-FR', {
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+  const scheduled = new Date(match.scheduledAt)
+  const kickoffTime = scheduled.toLocaleTimeString(i18n.language, { hour: '2-digit', minute: '2-digit' })
+  const daysUntil = Math.ceil((scheduled.getTime() - Date.now()) / (24 * 60 * 60 * 1000))
+  const dateLine = [
+    scheduled.toLocaleDateString(i18n.language, { weekday: 'long', day: 'numeric', month: 'long' }),
+    ...(daysUntil > 0 ? [t('match.player.dayCountdown', { days: daysUntil })] : []),
+  ].join(SEPARATOR)
+  const venueLine = [
+    ...(match.location ? [match.location] : []),
+    `${match.format.toUpperCase()}`,
+    `${match.playersPerTeam}v${match.playersPerTeam}`,
+  ].join(SEPARATOR)
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <PhaseStepper status={match.status} />
+    <View style={styles.screen}>
+      {/* The screen's ONE texture element + its one glow (hero band). */}
+      <TextureType lines={[{ text: TEXTURE_TEXT }]} fontSize={150} style={styles.texture} />
+      <LinearGradient
+        colors={['rgba(255,68,56,0.14)', 'rgba(255,68,56,0)']}
+        style={styles.glow}
+        pointerEvents="none"
+      />
 
-      {match.status !== 'completed' && match.status !== 'cancelled' && activeGroupId && (
-        <PronosForm matchId={matchId} groupId={activeGroupId} scheduledAt={match.scheduledAt} />
-      )}
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}
+      >
+        <PhaseStepper status={match.status} />
 
-      {match.status === 'completed' && activeGroupId && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>{t('pronos.reveal.title')}</Text>
-          <PronosReveal matchId={matchId} groupId={activeGroupId} currentPlayerId={myPlayerId ?? ''} />
+        <View style={styles.hero}>
+          <Text style={styles.dateLine}>{dateLine}</Text>
+          <Text style={styles.kickoff}>{kickoffTime}</Text>
+          <View style={styles.venueRow}>
+            <Ionicons name="location-outline" size={15} color={Colors.inkSecondary} />
+            <Text style={styles.venueText}>{venueLine}</Text>
+          </View>
         </View>
-      )}
 
-      <View style={styles.card}>
-        <Text style={styles.dateText}>{scheduledDate}</Text>
-        {match.location && <Text style={styles.locationText}>{match.location}</Text>}
-        <Text style={styles.formatText}>
-          {`${match.format.toUpperCase()} · ${match.playersPerTeam}v${match.playersPerTeam}`}
-        </Text>
-      </View>
-
-      {myPlayerId && (
-        <View style={styles.myRowCard}>
-          <AttendanceSwiperRow
-            playerId={myPlayerId}
-            displayName={null}
-            status={myStatus}
-            isWaitlisted={isWaitlisted}
-            waitlistPosition={myWaitlistRow?.waitlistPosition ?? undefined}
-            onSwipeIn={isAttendanceOpen ? () => updateAttendance('in') : undefined}
-            onSwipeOut={isAttendanceOpen ? () => updateAttendance('out') : undefined}
-            onTogglePress={isAttendanceOpen ? (s) => updateAttendance(s) : undefined}
-            disabled={!isAttendanceOpen}
-          />
-        </View>
-      )}
-
-      <Text style={styles.summaryText}>
-        {t('attendance.summary', { confirmed: confirmedCount, total })}
-      </Text>
-
-      {(attendances?.confirmed.length ?? 0) > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>{t('attendance.section.confirmed')}</Text>
-          {attendances!.confirmed.map((row) => (
-            <AttendanceSwiperRow
-              key={row.playerId}
-              playerId={row.playerId}
-              displayName={row.displayName}
-              status={row.status}
-              disabled
+        {myPlayerId && !isWaitlisted && (
+          <View style={styles.pillWrap}>
+            <AttendanceSegmentedPill
+              status={myStatus}
+              onPress={isAttendanceOpen ? (s) => updateAttendance(s) : undefined}
+              disabled={!isAttendanceOpen}
             />
-          ))}
-        </View>
-      )}
+          </View>
+        )}
 
-      {(attendances?.waitlist.length ?? 0) > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>{t('attendance.section.waitlist')}</Text>
-          {attendances!.waitlist.map((row) => (
-            <View key={row.playerId} style={styles.waitlistRow}>
-              <Text style={styles.positionBadge}>#{row.waitlistPosition}</Text>
-              <AttendanceToggle status="in" isWaitlisted waitlistPosition={row.waitlistPosition ?? undefined} />
-              <Text style={styles.waitlistName}>{row.displayName}</Text>
-            </View>
-          ))}
-        </View>
-      )}
+        {myPlayerId && isWaitlisted && (
+          <View style={styles.waitlistCard}>
+            <AttendanceSegmentedPill
+              status={myStatus}
+              isWaitlisted
+              waitlistPosition={myWaitlistRow?.waitlistPosition ?? undefined}
+              onPress={isAttendanceOpen ? (s) => updateAttendance(s) : undefined}
+              disabled={!isAttendanceOpen}
+            />
+          </View>
+        )}
 
-      {match.status === 'completed' && (
-        <View style={styles.mvpSection}>
-          <Text style={styles.sectionTitle}>{t('match.mvp.title')}</Text>
-          {!participants?.myTeamSide ? (
-            <Text style={styles.mvpNotEligible}>{t('match.mvp.notEligible')}</Text>
-          ) : voteSubmitted ? (
-            <View style={styles.mvpVotedCard}>
-              <Text style={styles.mvpVotedText}>{t('match.mvp.alreadyVoted')}</Text>
+        {match.status === 'in_progress' && activeGroupId && matchId && (
+          <View style={styles.section}>
+            <LockedPitchBoard groupId={activeGroupId} matchId={matchId} />
+          </View>
+        )}
+
+        {match.status !== 'completed' && match.status !== 'cancelled' && activeGroupId && (
+          <PronosForm matchId={matchId} groupId={activeGroupId} scheduledAt={match.scheduledAt} />
+        )}
+
+        {match.status === 'completed' && activeGroupId && (
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>{t('pronos.reveal.title')}</Text>
+            <PronosReveal matchId={matchId} groupId={activeGroupId} currentPlayerId={myPlayerId ?? ''} />
+          </View>
+        )}
+
+        {(attendances?.confirmed.length ?? 0) > 0 && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionLabel}>{t('attendance.section.confirmed')}</Text>
+              <Text style={styles.sectionCount}>
+                {t('attendance.summary', { confirmed: confirmedCount, total })}
+              </Text>
             </View>
-          ) : (
-            <>
-              <Text style={styles.mvpSubtitle}>{t('match.mvp.subtitle')}</Text>
-              {(participants.myTeamSide === 'A' ? participants.teamB : participants.teamA).map((player) => (
-                <Pressable
-                  key={player.playerId}
-                  style={[styles.mvpCandidateRow, selectedNominee === player.playerId && styles.mvpCandidateSelected]}
-                  onPress={() => setSelectedNominee(player.playerId)}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: selectedNominee === player.playerId }}
-                >
-                  <Text style={[styles.mvpCandidateName, selectedNominee === player.playerId && styles.mvpCandidateNameSelected]}>
-                    {player.displayName}
-                  </Text>
-                </Pressable>
+            <View style={styles.rowsCard}>
+              {attendances!.confirmed.map((row) => (
+                <AttendanceSwiperRow
+                  key={row.playerId}
+                  playerId={row.playerId}
+                  displayName={row.displayName}
+                  status={row.status}
+                  disabled
+                />
               ))}
-              <Pressable
-                style={[styles.mvpSubmitButton, (!selectedNominee || isVoting) && styles.mvpSubmitButtonDisabled]}
-                onPress={() => selectedNominee && submitVote(selectedNominee)}
-                disabled={!selectedNominee || isVoting}
-                accessibilityRole="button"
-              >
-                <Text style={styles.mvpSubmitButtonText}>
-                  {isVoting ? t('match.mvp.voting') : t('match.mvp.voteButton')}
-                </Text>
-              </Pressable>
-            </>
-          )}
-        </View>
-      )}
-    </ScrollView>
+            </View>
+          </View>
+        )}
+
+        {(attendances?.waitlist.length ?? 0) > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>{t('attendance.section.waitlist')}</Text>
+            <View style={styles.rowsCard}>
+              {attendances!.waitlist.map((row) => (
+                <View
+                  key={row.playerId}
+                  style={styles.waitlistRow}
+                  accessibilityLabel={t('attendance.toggle.waitlist.a11y', { position: row.waitlistPosition })}
+                >
+                  <Text style={styles.positionBadge}>{`#${row.waitlistPosition}`}</Text>
+                  <Text style={styles.waitlistName} numberOfLines={1}>
+                    {row.displayName}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {match.status === 'completed' && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionLabel}>{t('match.mvp.title')}</Text>
+              {match.completedAt && new Date(match.completedAt).getTime() + MVP_WINDOW_MS > Date.now() && (
+                <CountdownPill
+                  targetAt={new Date(new Date(match.completedAt).getTime() + MVP_WINDOW_MS).toISOString()}
+                  label={t('match.mvp.countdownLabel')}
+                />
+              )}
+            </View>
+            {!participants?.myTeamSide ? (
+              <Text style={styles.mvpNotEligible}>{t('match.mvp.notEligible')}</Text>
+            ) : voteSubmitted ? (
+              <View style={styles.mvpVotedCard}>
+                <Ionicons name="checkmark-circle" size={18} color={Colors.success} />
+                <Text style={styles.mvpVotedText}>{t('match.mvp.alreadyVoted')}</Text>
+              </View>
+            ) : (
+              <>
+                <Text style={styles.mvpSubtitle}>{t('match.mvp.subtitle')}</Text>
+                <View style={styles.mvpGrid}>
+                  {(participants.myTeamSide === 'A' ? participants.teamB : participants.teamA).map((player) => {
+                    const selected = selectedNominee === player.playerId
+                    return (
+                      <Pressable
+                        key={player.playerId}
+                        style={[styles.mvpTile, selected && styles.mvpTileSelected]}
+                        onPress={() => selectNominee(player.playerId)}
+                        accessibilityRole="radio"
+                        accessibilityState={{ selected }}
+                      >
+                        {/* R10 register: the chosen one takes the primary ring + check. */}
+                        <DuotoneAvatar
+                          displayName={player.displayName ?? '—'}
+                          size={48}
+                          ring={selected ? 'red' : undefined}
+                        />
+                        <View style={styles.mvpTileNameRow}>
+                          {selected && <Ionicons name="checkmark-circle" size={15} color={Colors.primary} />}
+                          <Text
+                            style={[styles.mvpTileName, selected && styles.mvpTileNameSelected]}
+                            numberOfLines={1}
+                          >
+                            {player.displayName}
+                          </Text>
+                        </View>
+                      </Pressable>
+                    )
+                  })}
+                </View>
+                <View style={styles.mvpSubmitWrap}>
+                  {/* The tab dock owns this screen's one glow. */}
+                  <PrimaryButton
+                    label={isVoting ? t('match.mvp.voting') : t('match.mvp.voteButton')}
+                    onPress={() => selectedNominee && submitVote(selectedNominee)}
+                    disabled={!selectedNominee}
+                    loading={isVoting}
+                    glow={false}
+                  />
+                </View>
+              </>
+            )}
+          </View>
+        )}
+
+        {match.status === 'completed' && activeGroupId && matchId && match.completedAt && participants?.myTeamSide && (
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>{t('match.ratings.windowTitle')}</Text>
+            <PostMatchRatings
+              matchId={matchId}
+              groupId={activeGroupId}
+              completedAt={match.completedAt}
+              teammates={(participants.myTeamSide === 'A' ? participants.teamA : participants.teamB).filter(
+                (p): p is ParticipantPlayer & { playerId: string } =>
+                  p.playerId !== null && p.playerId !== myPlayerId,
+              )}
+            />
+          </View>
+        )}
+      </ScrollView>
+    </View>
   )
 }
 
 const styles = StyleSheet.create({
-  container: {
+  screen: {
     flex: 1,
     backgroundColor: Colors.bg,
+    overflow: 'hidden',
+  },
+  texture: {
+    top: 50,
+    left: -40,
+  },
+  glow: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 220,
+  },
+  container: {
+    flex: 1,
   },
   content: {
-    paddingBottom: 48,
-    gap: 12,
+    paddingBottom: DOCK_CLEARANCE,
+    gap: 16,
   },
   centered: {
     flex: 1,
@@ -307,53 +430,74 @@ const styles = StyleSheet.create({
   errorText: {
     color: Colors.inkSecondary,
     fontSize: 15,
+    fontFamily: Fonts.inter,
   },
-  card: {
-    backgroundColor: Colors.surface,
-    marginHorizontal: 16,
-    borderRadius: 8,
-    padding: 16,
-    gap: 6,
+  hero: {
+    paddingHorizontal: 20,
   },
-  dateText: {
+  dateLine: {
+    color: Colors.inkSecondary,
+    fontSize: 11,
+    fontFamily: Fonts.interSemiBold,
+    letterSpacing: 1.54,
+    textTransform: 'uppercase',
+  },
+  kickoff: {
+    // --type-numeral: THE one giant numeral on this screen.
+    fontFamily: Fonts.bebas,
+    fontSize: 92,
+    lineHeight: 88, // 0.95 line-height per the hero block
+    letterSpacing: -0.92, // -0.01em @ 92
     color: Colors.ink,
-    fontSize: 16,
-    fontWeight: '600',
-    textTransform: 'capitalize',
+    fontVariant: ['tabular-nums'],
   },
-  locationText: {
-    color: Colors.inkSecondary,
-    fontSize: 14,
+  venueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 2,
   },
-  formatText: {
-    color: Colors.inkSecondary,
-    fontSize: 12,
-    fontWeight: '500',
-    letterSpacing: 0.5,
-    marginTop: 4,
-  },
-  myRowCard: {
-    backgroundColor: Colors.surface,
-    marginHorizontal: 16,
-    borderRadius: 8,
-    overflow: 'hidden',
-  },
-  summaryText: {
+  venueText: {
     color: Colors.inkSecondary,
     fontSize: 13,
-    paddingHorizontal: 16,
+    fontFamily: Fonts.interMedium,
+  },
+  pillWrap: {
+    paddingHorizontal: 20,
+  },
+  waitlistCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    padding: 16,
+    marginHorizontal: 20,
   },
   section: {
-    gap: 1,
+    paddingHorizontal: 20,
   },
-  sectionTitle: {
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  sectionLabel: {
     color: Colors.inkSecondary,
-    fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: 0.5,
+    fontSize: 11,
+    fontFamily: Fonts.interSemiBold,
+    letterSpacing: 1.54,
     textTransform: 'uppercase',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    marginBottom: 10,
+  },
+  sectionCount: {
+    color: Colors.inkSecondary,
+    fontSize: 12.5,
+    fontFamily: Fonts.interSemiBold,
+    marginBottom: 10,
+  },
+  rowsCard: {
+    borderRadius: Radius.md,
+    overflow: 'hidden',
+    gap: 1,
   },
   waitlistRow: {
     flexDirection: 'row',
@@ -364,75 +508,81 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   positionBadge: {
+    fontFamily: Fonts.bebas,
+    fontSize: 16,
+    letterSpacing: 0.64, // 0.04em @ 16 (stat register)
     color: Colors.inkDisabled,
-    fontSize: 12,
-    fontWeight: '700',
-    width: 24,
+    width: 28,
+    fontVariant: ['tabular-nums'],
   },
   waitlistName: {
     color: Colors.inkDisabled,
     fontSize: 15,
+    fontFamily: Fonts.interMedium,
     flex: 1,
-  },
-  mvpSection: {
-    gap: 8,
-    paddingHorizontal: 16,
   },
   mvpSubtitle: {
     color: Colors.inkSecondary,
     fontSize: 13,
-    marginBottom: 4,
+    fontFamily: Fonts.inter,
+    marginBottom: 10,
   },
   mvpNotEligible: {
     color: Colors.inkSecondary,
     fontSize: 14,
-    fontStyle: 'italic',
+    fontFamily: Fonts.inter,
   },
-  mvpCandidateRow: {
+  mvpGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  mvpTile: {
+    flexGrow: 1,
+    flexBasis: '46%',
     backgroundColor: Colors.surface,
-    borderRadius: 6,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderWidth: 1,
+    borderRadius: Radius.md,
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1.5,
     borderColor: 'transparent',
   },
-  mvpCandidateSelected: {
+  mvpTileSelected: {
     borderColor: Colors.primary,
   },
-  mvpCandidateName: {
-    color: Colors.ink,
-    fontSize: 15,
-  },
-  mvpCandidateNameSelected: {
-    color: Colors.primary,
-    fontWeight: '600',
-  },
-  mvpSubmitButton: {
-    backgroundColor: Colors.primary,
-    borderRadius: 4,
-    paddingVertical: 14,
+  mvpTileNameRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 8,
+    gap: 5,
+    maxWidth: '100%',
   },
-  mvpSubmitButtonDisabled: {
-    opacity: 0.35,
-  },
-  mvpSubmitButtonText: {
+  mvpTileName: {
+    flexShrink: 1,
     color: Colors.ink,
-    fontSize: 14,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
+    fontSize: 13.5,
+    fontFamily: Fonts.interMedium,
+  },
+  mvpTileNameSelected: {
+    color: Colors.primary,
+    fontFamily: Fonts.interBold,
+  },
+  mvpSubmitWrap: {
+    marginTop: 12,
   },
   mvpVotedCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: 6,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: Colors.successSubtle,
+    borderRadius: Radius.md,
     padding: 16,
     alignItems: 'center',
   },
   mvpVotedText: {
     color: Colors.success,
     fontSize: 15,
-    fontWeight: '600',
+    fontFamily: Fonts.interSemiBold,
   },
 })

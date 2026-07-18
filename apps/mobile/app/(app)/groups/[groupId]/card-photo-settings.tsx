@@ -4,8 +4,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { randomUUID } from 'expo-crypto'
+import { Ionicons } from '@expo/vector-icons'
 import { httpClient } from '../../../../lib/api-client'
 import { Colors } from '../../../../constants/colors'
+import { Fonts, Radius } from '../../../../constants/tokens'
+import { PrimaryButton } from '../../../../components/ui/PrimaryButton'
 
 type CardPhotoStatus = {
   state: 'idle' | 'pending' | 'processing' | 'complete' | 'failed'
@@ -13,6 +16,15 @@ type CardPhotoStatus = {
   generationsUsed: number
   generationsAllowed: number
   resetsAt: string
+}
+
+// Color never the only signal: each generation state pairs its tint with an icon.
+const STATE_VISUALS: Record<CardPhotoStatus['state'], { icon: keyof typeof Ionicons.glyphMap; color: string }> = {
+  idle: { icon: 'image-outline', color: Colors.inkSecondary },
+  pending: { icon: 'time-outline', color: Colors.inkSecondary },
+  processing: { icon: 'time-outline', color: Colors.inkSecondary },
+  complete: { icon: 'checkmark-circle', color: Colors.success },
+  failed: { icon: 'alert-circle', color: Colors.primary },
 }
 
 export default function CardPhotoSettingsScreen() {
@@ -64,49 +76,60 @@ export default function CardPhotoSettingsScreen() {
   const generationsAllowed = statusData?.generationsAllowed ?? 3
   const isProcessing = state === 'pending' || state === 'processing'
   const canGenerate = generationsUsed < generationsAllowed && !isProcessing && state !== 'complete'
+  const stateVisual = STATE_VISUALS[state]
 
   return (
     <View style={styles.container}>
       <Text style={styles.title}>{t('cardPhoto.settings.title')}</Text>
 
       {state === 'idle' && (
-        <View style={styles.consentBox}>
+        <View style={styles.consentCard}>
           <Text style={styles.consentText}>{t('cardPhoto.consent.explanation')}</Text>
-          <Pressable
-            style={styles.primaryButton}
-            onPress={() => consentMutation.mutate()}
-            disabled={consentMutation.isPending}
-          >
-            <Text style={styles.primaryButtonText}>{t('cardPhoto.consent.accept')}</Text>
-          </Pressable>
-          <Pressable style={styles.ghostButton} onPress={() => router.back()}>
-            <Text style={styles.ghostButtonText}>{t('cardPhoto.consent.refuse')}</Text>
-          </Pressable>
+          <View style={styles.consentActions}>
+            <Pressable
+              style={[styles.acceptPill, consentMutation.isPending && styles.pillDisabled]}
+              onPress={() => consentMutation.mutate()}
+              disabled={consentMutation.isPending}
+              accessibilityRole="button"
+            >
+              <Ionicons name="checkmark" size={16} color={Colors.onPrimary} />
+              <Text style={styles.acceptPillText}>{t('cardPhoto.consent.accept')}</Text>
+            </Pressable>
+            <Pressable style={styles.ghostPill} onPress={() => router.back()} accessibilityRole="button">
+              <Ionicons name="close" size={16} color={Colors.inkSecondary} />
+              <Text style={styles.ghostPillText}>{t('cardPhoto.consent.refuse')}</Text>
+            </Pressable>
+          </View>
         </View>
       )}
 
       {state !== 'idle' && (
-        <View style={styles.statusBox}>
-          <Text style={styles.statusLabel}>
-            {t(`cardPhoto.state.${state}`)}
-          </Text>
-          {isProcessing && <ActivityIndicator color={Colors.primary} style={{ marginTop: 12 }} />}
-          {state === 'failed' && (
-            <Text style={styles.errorText}>{t('cardPhoto.state.failedHint')}</Text>
-          )}
-          <Text style={styles.quotaText}>
-            {t('cardPhoto.quota', { used: generationsUsed, total: generationsAllowed })}
-          </Text>
-          {canGenerate && (
-            <Pressable
-              style={styles.primaryButton}
-              onPress={() => generateMutation.mutate()}
-              disabled={generateMutation.isPending}
-            >
-              <Text style={styles.primaryButtonText}>
-                {state === 'failed' ? t('cardPhoto.retry') : t('cardPhoto.generate')}
+        <View style={styles.statusStack}>
+          <View style={styles.statusCard}>
+            <View style={styles.statusRow}>
+              <Ionicons name={stateVisual.icon} size={18} color={stateVisual.color} />
+              <Text style={[styles.statusLabel, { color: stateVisual.color }]}>
+                {t(`cardPhoto.state.${state}`)}
               </Text>
-            </Pressable>
+              {isProcessing && <ActivityIndicator color={Colors.primary} size="small" />}
+            </View>
+            {state === 'failed' && (
+              <Text style={styles.failedHint}>{t('cardPhoto.state.failedHint')}</Text>
+            )}
+          </View>
+
+          <View style={styles.quotaCard}>
+            <Text style={styles.quotaText}>
+              {t('cardPhoto.quota', { used: generationsUsed, total: generationsAllowed })}
+            </Text>
+          </View>
+
+          {canGenerate && (
+            <PrimaryButton
+              label={state === 'failed' ? t('cardPhoto.retry') : t('cardPhoto.generate')}
+              onPress={() => generateMutation.mutate()}
+              loading={generateMutation.isPending}
+            />
           )}
         </View>
       )}
@@ -122,58 +145,97 @@ const styles = StyleSheet.create({
   },
   title: {
     color: Colors.ink,
-    fontSize: 20,
-    fontFamily: 'BebasNeue_400Regular',
-    letterSpacing: 3,
-    marginBottom: 24,
+    fontFamily: Fonts.bebas,
+    fontSize: 24,
+    letterSpacing: 2.4, // 0.10em @ 24 (heading register)
+    textTransform: 'uppercase',
+    marginBottom: 20,
   },
-  consentBox: { gap: 16 },
+  consentCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    padding: 18,
+    gap: 16,
+  },
   consentText: {
     color: Colors.inkSecondary,
     fontSize: 14,
-    fontFamily: 'Inter_400Regular',
-    lineHeight: 20,
+    fontFamily: Fonts.inter,
+    lineHeight: 21,
   },
-  statusBox: { gap: 12 },
+  consentActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  acceptPill: {
+    flex: 1,
+    height: 44,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.primary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  acceptPillText: {
+    color: Colors.onPrimary,
+    fontSize: 14,
+    fontFamily: Fonts.interBold,
+  },
+  ghostPill: {
+    flex: 1,
+    height: 44,
+    borderRadius: Radius.full,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.16)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  ghostPillText: {
+    color: Colors.inkSecondary,
+    fontSize: 14,
+    fontFamily: Fonts.interSemiBold,
+  },
+  pillDisabled: {
+    opacity: 0.4,
+  },
+  statusStack: {
+    gap: 12,
+  },
+  statusCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    padding: 16,
+    gap: 10,
+  },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   statusLabel: {
-    color: Colors.ink,
-    fontSize: 16,
-    fontFamily: 'Inter_600SemiBold',
+    flex: 1,
+    fontSize: 15,
+    fontFamily: Fonts.interSemiBold,
   },
-  errorText: {
+  failedHint: {
     color: Colors.inkSecondary,
     fontSize: 13,
-    fontFamily: 'Inter_400Regular',
+    fontFamily: Fonts.inter,
+    lineHeight: 19,
+  },
+  quotaCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
   quotaText: {
-    color: Colors.inkDisabled,
-    fontSize: 12,
-    fontFamily: 'Inter_500Medium',
-    letterSpacing: 0.5,
-  },
-  primaryButton: {
-    height: 54,
-    backgroundColor: Colors.primary,
-    borderRadius: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  primaryButtonText: {
-    color: Colors.ink,
-    fontSize: 16,
-    fontFamily: 'Inter_600SemiBold',
-  },
-  ghostButton: {
-    height: 48,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.10)',
-    borderRadius: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  ghostButtonText: {
     color: Colors.inkSecondary,
-    fontSize: 15,
-    fontFamily: 'Inter_500Medium',
+    fontSize: 12,
+    fontFamily: Fonts.interMedium,
+    letterSpacing: 0.5,
   },
 })

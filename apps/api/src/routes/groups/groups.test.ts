@@ -15,6 +15,7 @@ vi.mock('../../db/schema', () => ({
   users: { id: 'id', clerkUserId: 'clerk_user_id' },
   groups: { id: 'id' },
   groupMemberships: { role: 'role' },
+  players: { id: 'id' },
 }))
 
 vi.mock('../../middleware/require-group-member', () => ({

@@ -17,6 +17,8 @@ export const matches = pgTable('matches', {
   id: uuid('id').defaultRandom().primaryKey(),
   groupId: uuid('group_id').notNull().references(() => groups.id),
   organizerId: uuid('organizer_id').notNull().references(() => users.id),
+  // Set when this match is a materialized occurrence of a recurring series.
+  seriesId: uuid('series_id'),
   status: matchStatusEnum('status').notNull().default('attendance_open'),
   scheduledAt: timestamp('scheduled_at', { withTimezone: true }).notNull(),
   location: text('location'),

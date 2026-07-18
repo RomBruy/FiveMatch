@@ -1,12 +1,17 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native'
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native'
 import { Stack, useRouter } from 'expo-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { useController, useForm } from 'react-hook-form'
 import { useEffect, useState } from 'react'
 import { Colors } from '../../constants/colors'
+import { Fonts, Radius, Type } from '../../constants/tokens'
 import { httpClient } from '../../lib/api-client'
 import { useGroupContext } from '../../contexts/GroupContext'
+import { DuotoneAvatar } from '../../components/ui/DuotoneAvatar'
+import { PrimaryButton } from '../../components/ui/PrimaryButton'
+import { RatingSlider } from '../../components/ui/RatingSlider'
+import { SecondaryButton } from '../../components/ui/SecondaryButton'
 
 const ATTRIBUTES = [
   'pace',
@@ -46,28 +51,7 @@ function AttributePicker({
   control: ReturnType<typeof useForm<RatingFormValues>>['control']
 }) {
   const { field } = useController({ control, name, defaultValue: 5 })
-  const value = field.value
-
-  return (
-    <View style={styles.attrRow}>
-      <Text style={styles.attrLabel}>{label}</Text>
-      <View style={styles.pickerRow}>
-        {Array.from({ length: 10 }, (_, i) => i + 1).map((n) => (
-          <TouchableOpacity
-            key={n}
-            style={[styles.pickerBtn, value === n && styles.pickerBtnActive]}
-            onPress={() => field.onChange(n)}
-            accessibilityLabel={`${label}: ${n}`}
-            accessibilityRole="button"
-          >
-            <Text style={[styles.pickerBtnText, value === n && styles.pickerBtnTextActive]}>
-              {n}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-    </View>
-  )
+  return <RatingSlider label={label} value={field.value} onChange={field.onChange} />
 }
 
 export default function InitialRatingScreen() {
@@ -158,6 +142,9 @@ export default function InitialRatingScreen() {
     }
   }
 
+  const total = data?.total ?? 0
+  const progressPct = total > 0 ? Math.min(100, Math.round((ratedCount / total) * 100)) : 0
+
   if (!groupId || isLoading) {
     return (
       <View style={styles.centered}>
@@ -169,9 +156,7 @@ export default function InitialRatingScreen() {
   if (showDone) {
     return (
       <View style={styles.centered}>
-        <Text style={[styles.doneText, { fontFamily: 'BebasNeue_400Regular' }]}>
-          {t('rating.initial.done')}
-        </Text>
+        <Text style={styles.doneText}>{t('rating.initial.done')}</Text>
       </View>
     )
   }
@@ -188,71 +173,53 @@ export default function InitialRatingScreen() {
     <>
       <Stack.Screen options={{ headerShown: false }} />
       <View style={styles.container}>
-        {/* Progress */}
-        <Text style={styles.progress}>
-          {t('rating.initial.progress', {
-            rated: ratedCount,
-            total: data?.total ?? 0,
-          })}
-        </Text>
-
         {/* Header */}
-        <Text style={[styles.title, { fontFamily: 'BebasNeue_400Regular' }]}>
-          {t('rating.initial.title')}
-        </Text>
+        <Text style={styles.title}>{t('rating.initial.title')}</Text>
         <Text style={styles.subtitle}>{t('rating.initial.subtitle')}</Text>
 
-        {/* Player avatar + name */}
-        <View style={styles.playerCard}>
-          <View style={styles.avatar}>
-            <Text style={[styles.avatarText, { fontFamily: 'BebasNeue_400Regular' }]}>
-              {currentPlayer.avatarInitials}
+        {/* Per-player progress */}
+        <View style={styles.progressRow}>
+          <View style={styles.progressTrack}>
+            <View style={[styles.progressFill, { width: `${progressPct}%` }]} />
+          </View>
+          <View style={styles.progressPill}>
+            <Text style={styles.progressText}>
+              {t('rating.initial.progress', { rated: ratedCount, total })}
             </Text>
           </View>
-          <Text style={[styles.playerName, { fontFamily: 'BebasNeue_400Regular' }]}>
-            {currentPlayer.displayName}
-          </Text>
         </View>
 
-        {/* Attribute pickers */}
-        <ScrollView style={styles.attrsScroll} contentContainerStyle={styles.attrsContent} showsVerticalScrollIndicator={false}>
-          {ATTRIBUTES.map((attr) => (
-            <AttributePicker
-              key={attr}
-              name={attr}
-              label={t(`rating.initial.attr.${attr}`)}
-              control={control}
-            />
-          ))}
-        </ScrollView>
+        {/* Rating card: featured player + attribute sliders */}
+        <View style={styles.card}>
+          <View style={styles.playerCard}>
+            <DuotoneAvatar displayName={currentPlayer.displayName} size={56} variant="ember" />
+            <Text style={styles.playerName}>{currentPlayer.displayName}</Text>
+          </View>
+
+          <ScrollView style={styles.attrsScroll} contentContainerStyle={styles.attrsContent} showsVerticalScrollIndicator={false}>
+            {ATTRIBUTES.map((attr) => (
+              <AttributePicker
+                key={attr}
+                name={attr}
+                label={t(`rating.initial.attr.${attr}`)}
+                control={control}
+              />
+            ))}
+          </ScrollView>
+        </View>
 
         {/* Actions */}
         <View style={styles.actions}>
-          <TouchableOpacity
-            style={[styles.submitBtn, submitMutation.isPending && styles.submitBtnDisabled]}
+          <PrimaryButton
+            label={t('rating.initial.next')}
             onPress={onSubmit}
-            disabled={submitMutation.isPending}
-            accessibilityRole="button"
-            accessibilityLabel={t('rating.initial.next')}
-          >
-            {submitMutation.isPending ? (
-              <ActivityIndicator color={Colors.ink} size="small" />
-            ) : (
-              <Text style={[styles.submitBtnText, { fontFamily: 'BebasNeue_400Regular' }]}>
-                {t('rating.initial.next')}
-              </Text>
-            )}
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.skipBtn}
+            loading={submitMutation.isPending}
+          />
+          <SecondaryButton
+            label={t('rating.initial.skip')}
             onPress={onSkip}
             disabled={submitMutation.isPending}
-            accessibilityRole="button"
-            accessibilityLabel={t('rating.initial.skip')}
-          >
-            <Text style={styles.skipBtnText}>{t('rating.initial.skip')}</Text>
-          </TouchableOpacity>
+          />
         </View>
       </View>
     </>
@@ -274,127 +241,93 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 32,
   },
-  progress: {
-    color: Colors.inkSecondary,
-    fontSize: 13,
-    fontFamily: 'Inter_400Regular',
-    textAlign: 'center',
-    marginBottom: 8,
-  },
   title: {
     color: Colors.ink,
+    fontFamily: Type.display.fontFamily,
     fontSize: 36,
+    letterSpacing: Type.display.letterSpacing,
     textAlign: 'center',
-    letterSpacing: 1.5,
   },
   subtitle: {
     color: Colors.inkSecondary,
+    fontFamily: Fonts.inter,
     fontSize: 14,
-    fontFamily: 'Inter_400Regular',
     textAlign: 'center',
     marginTop: 4,
-    marginBottom: 24,
+    marginBottom: 18,
+  },
+  progressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 18,
+  },
+  progressTrack: {
+    flex: 1,
+    height: 6,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.surfaceRaised,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: Radius.full,
+    backgroundColor: Colors.primary,
+  },
+  progressPill: {
+    borderRadius: Radius.full,
+    backgroundColor: Colors.surfaceRaised,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  progressText: {
+    color: Colors.inkSecondary,
+    fontFamily: Type.labelCaps.fontFamily,
+    fontSize: 11,
+    letterSpacing: 0.4,
+  },
+  card: {
+    flex: 1,
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.card,
+    padding: 16,
+    marginBottom: 16,
   },
   playerCard: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 20,
-    gap: 12,
-  },
-  avatar: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: Colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: {
-    color: Colors.ink,
-    fontSize: 20,
+    gap: 14,
+    marginBottom: 16,
   },
   playerName: {
+    flex: 1,
     color: Colors.ink,
+    fontFamily: Type.heading.fontFamily,
     fontSize: 24,
-    letterSpacing: 0.15,
+    letterSpacing: Type.heading.letterSpacing,
   },
   attrsScroll: {
     flex: 1,
   },
   attrsContent: {
-    gap: 16,
+    gap: 14,
     paddingBottom: 8,
-  },
-  attrRow: {
-    gap: 8,
-  },
-  attrLabel: {
-    color: Colors.inkSecondary,
-    fontSize: 11,
-    fontFamily: 'Inter_600SemiBold',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-  pickerRow: {
-    flexDirection: 'row',
-    gap: 4,
-  },
-  pickerBtn: {
-    flex: 1,
-    height: 44,
-    borderRadius: 2,
-    backgroundColor: Colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pickerBtnActive: {
-    backgroundColor: Colors.primary,
-  },
-  pickerBtnText: {
-    color: Colors.inkSecondary,
-    fontSize: 13,
-    fontFamily: 'Inter_600SemiBold',
-  },
-  pickerBtnTextActive: {
-    color: Colors.ink,
   },
   actions: {
     gap: 12,
-    marginTop: 16,
-  },
-  submitBtn: {
-    height: 52,
-    borderRadius: 4,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  submitBtnDisabled: {
-    opacity: 0.5,
-  },
-  submitBtnText: {
-    color: Colors.ink,
-    fontSize: 20,
-    letterSpacing: 0.07,
-  },
-  skipBtn: {
-    alignItems: 'center',
-    paddingVertical: 12,
-  },
-  skipBtnText: {
-    color: Colors.inkSecondary,
-    fontSize: 14,
-    fontFamily: 'Inter_400Regular',
+    marginTop: 4,
   },
   doneText: {
     color: Colors.ink,
+    fontFamily: Type.display.fontFamily,
     fontSize: 28,
+    letterSpacing: Type.display.letterSpacing,
     textAlign: 'center',
-    letterSpacing: 0.5,
   },
   emptyText: {
     color: Colors.inkSecondary,
+    fontFamily: Fonts.inter,
     fontSize: 16,
-    fontFamily: 'Inter_400Regular',
     textAlign: 'center',
   },
 })

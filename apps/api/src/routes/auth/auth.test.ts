@@ -7,6 +7,7 @@ vi.mock('../../db', () => ({
   db: {
     insert: vi.fn(),
     select: vi.fn(),
+    update: vi.fn(),
   },
 }))
 
@@ -110,5 +111,93 @@ describe('GET /auth/me', () => {
 
     expect(res.status).toBe(404)
     expect(res.body.error.code).toBe('NOT_FOUND')
+  })
+})
+
+describe('PATCH /auth/me', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('completes the football profile', async () => {
+    const updatedUser = {
+      id: 'uuid-1',
+      clerkUserId: 'user_abc',
+      name: 'Nico',
+      email: 'nico@example.com',
+      languagePreference: 'fr',
+      profilePhotoUrl: null,
+      currentClub: 'FC Five',
+      formerClub: 'ES Lanfonnet',
+      preferredPosition: 'midfielder',
+      strongFoot: 'right',
+      playerStyle: 'playmaker',
+      specialSkill: 'Frappe en tribune',
+      favoriteExcuse: "J'ai pris une cuite hier",
+      badFaithLevel: 2,
+      lockerRoomStyle: 'Clown',
+      thirdHalfProfile: "C'est moi qui ferme",
+      onboardingCompletedAt: new Date(),
+    }
+    const returningMock = vi.fn().mockResolvedValue([updatedUser])
+    const whereMock = vi.fn().mockReturnValue({ returning: returningMock })
+    const setMock = vi.fn().mockReturnValue({ where: whereMock })
+    vi.mocked(db.update).mockReturnValue({ set: setMock } as unknown as ReturnType<typeof db.update>)
+
+    const res = await request(buildApp())
+      .patch('/auth/me')
+      .send({
+        name: 'Nico',
+        languagePreference: 'fr',
+        profilePhotoUrl: null,
+        currentClub: 'FC Five',
+        formerClub: 'ES Lanfonnet',
+        preferredPosition: 'midfielder',
+        strongFoot: 'right',
+        playerStyle: 'playmaker',
+        specialSkill: 'Frappe en tribune',
+        favoriteExcuse: "J'ai pris une cuite hier",
+        badFaithLevel: 2,
+        lockerRoomStyle: 'Clown',
+        thirdHalfProfile: "C'est moi qui ferme",
+      })
+
+    expect(res.status).toBe(200)
+    expect(res.body.data.onboardingCompletedAt).toBeTruthy()
+    expect(setMock).toHaveBeenCalledWith(expect.objectContaining({
+      currentClub: 'FC Five',
+      preferredPosition: 'midfielder',
+      playerStyle: 'playmaker',
+      specialSkill: 'Frappe en tribune',
+      badFaithLevel: 2,
+      lockerRoomStyle: 'Clown',
+    }))
+  })
+
+  it('rejects a bad-faith level outside 1 to 5', async () => {
+    const app = buildApp()
+    app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+      res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: err.message, statusCode: 400 } })
+    })
+
+    const res = await request(app)
+      .patch('/auth/me')
+      .send({
+        name: 'Nico',
+        languagePreference: 'fr',
+        profilePhotoUrl: null,
+        currentClub: null,
+        formerClub: null,
+        preferredPosition: 'midfielder',
+        strongFoot: 'right',
+        playerStyle: 'playmaker',
+        specialSkill: null,
+        favoriteExcuse: null,
+        badFaithLevel: 6,
+        lockerRoomStyle: null,
+        thirdHalfProfile: null,
+      })
+
+    expect(res.status).toBe(400)
   })
 })

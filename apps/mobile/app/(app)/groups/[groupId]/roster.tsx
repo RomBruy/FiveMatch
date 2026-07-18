@@ -2,8 +2,14 @@ import { View, Text, Pressable, ScrollView, StyleSheet, ActivityIndicator, Alert
 import { useLocalSearchParams } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Colors } from '../../../../constants/colors'
+import { Fonts, Radius } from '../../../../constants/tokens'
+import { DuotoneAvatar } from '../../../../components/ui/DuotoneAvatar'
+import { DOCK_CLEARANCE } from '../../../../components/ui/TabDock'
 import { httpClient } from '../../../../lib/api-client'
+
+const SEPARATOR = ' · '
 
 interface RosterMember {
   userId: string
@@ -13,9 +19,16 @@ interface RosterMember {
   role: 'organizer' | 'member'
 }
 
+interface JoinRequest {
+  userId: string
+  displayName: string | null
+  requestedAt: string
+}
+
 export default function RosterScreen() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { groupId } = useLocalSearchParams<{ groupId: string }>()
+  const insets = useSafeAreaInsets()
   const queryClient = useQueryClient()
 
   const { data: myStatus } = useQuery({
@@ -36,6 +49,34 @@ export default function RosterScreen() {
       return data.data.items
     },
     enabled: Boolean(groupId),
+  })
+
+  // Approval queue — same query key + endpoints the group home uses (shared cache).
+  const { data: joinRequests } = useQuery({
+    queryKey: ['groups', groupId, 'join-requests'],
+    queryFn: async () => {
+      const { data } = await httpClient.get<{ data: { items: JoinRequest[] } }>(
+        `/v1/groups/${groupId}/join-requests`,
+      )
+      return data.data.items
+    },
+    enabled: Boolean(groupId) && isOrganizer,
+  })
+
+  const approveMutation = useMutation({
+    mutationFn: (userId: string) =>
+      httpClient.post(`/v1/groups/${groupId}/members/${userId}/approve`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['groups', groupId, 'join-requests'] })
+      queryClient.invalidateQueries({ queryKey: ['groups', groupId, 'roster'] })
+    },
+  })
+
+  const rejectMutation = useMutation({
+    mutationFn: (userId: string) =>
+      httpClient.post(`/v1/groups/${groupId}/members/${userId}/reject`),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ['groups', groupId, 'join-requests'] }),
   })
 
   const removeMutation = useMutation({
@@ -84,6 +125,19 @@ export default function RosterScreen() {
     )
   }
 
+  const formatMemberMeta = (member: RosterMember) => {
+    const parts: string[] = []
+    if (member.joinedAt) {
+      parts.push(
+        t('groups.roster.joinedAt', {
+          date: new Date(member.joinedAt).toLocaleDateString(i18n.language, { day: 'numeric', month: 'short' }),
+        }),
+      )
+    }
+    parts.push(t('groups.roster.matchCount', { count: member.matchCount ?? 0 }))
+    return parts.join(SEPARATOR)
+  }
+
   if (isLoading) {
     return (
       <View style={styles.center}>
@@ -101,51 +155,91 @@ export default function RosterScreen() {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
-      <Text style={styles.title}>{t('groups.roster.title')}</Text>
-      {rosterData.map((item) => (
-        <View key={item.userId} style={styles.memberRow}>
-          <View style={styles.memberInfo}>
-            <Text style={styles.memberName}>{item.displayName ?? '—'}</Text>
-            <View style={styles.memberMeta}>
-              <View style={[styles.roleBadge, item.role === 'organizer' ? styles.organizerBadge : styles.memberBadge]}>
-                <Text style={styles.roleBadgeText}>
-                  {item.role === 'organizer'
-                    ? t('groups.roster.role.organizer')
-                    : t('groups.roster.role.member')}
-                </Text>
-              </View>
-              {item.joinedAt && (
-                <Text style={styles.metaText}>
-                  {t('groups.roster.joinedAt', { date: new Date(item.joinedAt).toLocaleDateString() })}
-                </Text>
-              )}
-              <Text style={styles.metaText}>
-                {t('groups.roster.matchCount', { count: item.matchCount ?? 0 })}
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 12 }]}
+    >
+      <View style={styles.header}>
+        <Text style={styles.title}>{t('groups.roster.title')}</Text>
+        <View style={styles.countPill}>
+          <Text style={styles.countPillText}>{rosterData.length}</Text>
+        </View>
+      </View>
+
+      {isOrganizer && joinRequests && joinRequests.length > 0 && (
+        <View style={styles.requestsSection}>
+          <Text style={styles.sectionLabel}>{t('groups.requests.title')}</Text>
+          {joinRequests.map((req) => (
+            <View key={req.userId} style={styles.requestCard}>
+              <DuotoneAvatar displayName={req.displayName ?? ''} size={40} />
+              <Text style={styles.requestName} numberOfLines={1}>
+                {req.displayName ?? '—'}
+              </Text>
+              <Pressable
+                style={[styles.acceptPill, (approveMutation.isPending || rejectMutation.isPending) && styles.pillDisabled]}
+                onPress={() => approveMutation.mutate(req.userId)}
+                disabled={approveMutation.isPending || rejectMutation.isPending}
+                accessibilityRole="button"
+              >
+                <Text style={styles.acceptPillText}>{t('groups.requests.accept')}</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.declinePill, (approveMutation.isPending || rejectMutation.isPending) && styles.pillDisabled]}
+                onPress={() => rejectMutation.mutate(req.userId)}
+                disabled={approveMutation.isPending || rejectMutation.isPending}
+                accessibilityRole="button"
+              >
+                <Text style={styles.declinePillText}>{t('groups.requests.reject')}</Text>
+              </Pressable>
+            </View>
+          ))}
+        </View>
+      )}
+
+      <View style={styles.membersCard}>
+        {rosterData.map((item, index) => (
+          <View key={item.userId} style={[styles.memberRow, index > 0 && styles.memberRowBorder]}>
+            <DuotoneAvatar displayName={item.displayName ?? ''} size={40} />
+            <View style={styles.memberInfo}>
+              <Text style={styles.memberName} numberOfLines={1}>
+                {item.displayName ?? '—'}
+              </Text>
+              <Text style={styles.memberMeta} numberOfLines={1}>
+                {formatMemberMeta(item)}
               </Text>
             </View>
-          </View>
 
-          {isOrganizer && item.role !== 'organizer' && (
-            <View style={styles.actions}>
-              <Pressable
-                style={styles.transferButton}
-                onPress={() => handleTransfer(item.userId, item.displayName ?? '—')}
-                disabled={transferMutation.isPending || removeMutation.isPending}
-              >
-                <Text style={styles.transferButtonText}>{t('groups.roster.transferButton')}</Text>
-              </Pressable>
-              <Pressable
-                style={styles.removeButton}
-                onPress={() => handleRemove(item.userId, item.displayName ?? '—')}
-                disabled={removeMutation.isPending || transferMutation.isPending}
-              >
-                <Text style={styles.removeButtonText}>{t('groups.roster.removeButton')}</Text>
-              </Pressable>
-            </View>
-          )}
-        </View>
-      ))}
+            {item.role === 'organizer' && (
+              <View style={styles.rolePill}>
+                <Text style={styles.rolePillText}>{t('groups.roster.role.organizer')}</Text>
+              </View>
+            )}
+
+            {isOrganizer && item.role !== 'organizer' && (
+              <View style={styles.actions}>
+                <Pressable
+                  style={[styles.ghostActionPill, (transferMutation.isPending || removeMutation.isPending) && styles.pillDisabled]}
+                  onPress={() => handleTransfer(item.userId, item.displayName ?? '—')}
+                  disabled={transferMutation.isPending || removeMutation.isPending}
+                  accessibilityRole="button"
+                  hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
+                >
+                  <Text style={styles.ghostActionPillText}>{t('groups.roster.transferButton')}</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.removePill, (removeMutation.isPending || transferMutation.isPending) && styles.pillDisabled]}
+                  onPress={() => handleRemove(item.userId, item.displayName ?? '—')}
+                  disabled={removeMutation.isPending || transferMutation.isPending}
+                  accessibilityRole="button"
+                  hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
+                >
+                  <Text style={styles.removePillText}>{t('groups.roster.removeButton')}</Text>
+                </Pressable>
+              </View>
+            )}
+          </View>
+        ))}
+      </View>
     </ScrollView>
   )
 }
@@ -157,7 +251,8 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    paddingBottom: 32,
+    paddingHorizontal: 20,
+    paddingBottom: DOCK_CLEARANCE,
   },
   center: {
     flex: 1,
@@ -165,93 +260,166 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 16,
+  },
   title: {
     color: Colors.ink,
-    fontSize: 22,
-    fontWeight: '700',
-    paddingHorizontal: 24,
-    paddingTop: 24,
-    paddingBottom: 16,
+    fontFamily: Fonts.bebas,
+    fontSize: 36,
+    letterSpacing: 1.44, // 0.04em @ 36 (display register)
+    textTransform: 'uppercase',
+  },
+  countPill: {
+    backgroundColor: Colors.surfaceRaised,
+    borderRadius: Radius.full,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  countPillText: {
+    color: Colors.inkSecondary,
+    fontSize: 12,
+    fontFamily: Fonts.interSemiBold,
+    fontVariant: ['tabular-nums'],
+  },
+  sectionLabel: {
+    color: Colors.inkSecondary,
+    fontSize: 11,
+    fontFamily: Fonts.interSemiBold,
+    letterSpacing: 1.54,
+    textTransform: 'uppercase',
+    marginBottom: 12,
+  },
+  requestsSection: {
+    marginBottom: 24,
+  },
+  requestCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 8,
+  },
+  requestName: {
+    flex: 1,
+    color: Colors.ink,
+    fontSize: 15,
+    fontFamily: Fonts.interBold,
+    letterSpacing: 0.3,
+  },
+  acceptPill: {
+    height: 44,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  acceptPillText: {
+    color: Colors.onPrimary,
+    fontSize: 13,
+    fontFamily: Fonts.interBold,
+  },
+  declinePill: {
+    height: 44,
+    borderRadius: Radius.full,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.16)',
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  declinePillText: {
+    color: Colors.inkSecondary,
+    fontSize: 13,
+    fontFamily: Fonts.interSemiBold,
+  },
+  pillDisabled: {
+    opacity: 0.4,
+  },
+  membersCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    paddingHorizontal: 16,
   },
   memberRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 24,
+    gap: 12,
     paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.surface,
+  },
+  memberRowBorder: {
+    borderTopWidth: 1,
+    borderTopColor: Colors.hairline,
   },
   memberInfo: {
     flex: 1,
-    gap: 4,
+    gap: 3,
   },
   memberName: {
     color: Colors.ink,
     fontSize: 15,
-    fontWeight: '600',
+    fontFamily: Fonts.interBold,
+    letterSpacing: 0.3,
   },
   memberMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    flexWrap: 'wrap',
-  },
-  roleBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 2,
-  },
-  organizerBadge: {
-    backgroundColor: Colors.primary,
-  },
-  memberBadge: {
-    backgroundColor: Colors.surface,
-  },
-  roleBadgeText: {
-    color: Colors.bg,
-    fontSize: 10,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  metaText: {
     color: Colors.inkSecondary,
     fontSize: 12,
+    fontFamily: Fonts.interMedium,
+  },
+  rolePill: {
+    backgroundColor: Colors.surfaceRaised,
+    borderRadius: Radius.full,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  rolePillText: {
+    color: Colors.inkSecondary,
+    fontSize: 10,
+    fontFamily: Fonts.interSemiBold,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
   },
   actions: {
     flexDirection: 'row',
     gap: 8,
-    marginLeft: 12,
   },
-  removeButton: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 4,
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.primary,
+  ghostActionPill: {
+    height: 36,
+    borderRadius: Radius.full,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.16)',
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  removeButtonText: {
-    color: Colors.primary,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  transferButton: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 4,
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.inkSecondary,
-  },
-  transferButtonText: {
+  ghostActionPillText: {
     color: Colors.inkSecondary,
     fontSize: 12,
-    fontWeight: '500',
+    fontFamily: Fonts.interSemiBold,
+  },
+  removePill: {
+    height: 36,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.primarySubtle,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  removePillText: {
+    color: Colors.primary,
+    fontSize: 12,
+    fontFamily: Fonts.interBold,
   },
   errorText: {
     color: Colors.primary,
     fontSize: 15,
+    fontFamily: Fonts.inter,
   },
 })

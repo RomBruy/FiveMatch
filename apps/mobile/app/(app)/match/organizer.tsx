@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { View, Text, ScrollView, StyleSheet, ActivityIndicator, Pressable } from 'react-native'
+import { View, Text, ScrollView, StyleSheet, ActivityIndicator } from 'react-native'
 import { useLocalSearchParams, useFocusEffect, useRouter } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Ionicons } from '@expo/vector-icons'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Colors } from '../../../constants/colors'
+import { Fonts, Radius } from '../../../constants/tokens'
 import { httpClient } from '../../../lib/api-client'
 import { useGroupContext } from '../../../contexts/GroupContext'
 import { PhaseStepper } from '../../../components/shared/PhaseStepper'
@@ -11,6 +14,11 @@ import { AttendanceSwiperRow } from '../../../components/match/AttendanceSwiperR
 import { NarrativeLoader } from '../../../components/shared/NarrativeLoader'
 import { TeamDisplay } from '../../../components/match/TeamDisplay'
 import type { TeamPlayer, TeamSwap } from '../../../components/match/TeamDisplay'
+import { LockedPitchBoard } from '../../../components/match/PitchBoard'
+import { PrimaryButton } from '../../../components/ui/PrimaryButton'
+import { SecondaryButton } from '../../../components/ui/SecondaryButton'
+import { CountdownPill } from '../../../components/ui/CountdownPill'
+import { DOCK_CLEARANCE } from '../../../components/ui/TabDock'
 import { TEAM_GEN_MAX_GENERATIONS } from '@fivematch/types/algorithm-constants'
 
 interface MatchDetail {
@@ -69,10 +77,11 @@ interface MvpResult {
 }
 
 export default function MatchOrganizerScreen() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { matchId } = useLocalSearchParams<{ matchId: string }>()
   const { activeGroupId } = useGroupContext()
   const router = useRouter()
+  const insets = useSafeAreaInsets()
   const queryClient = useQueryClient()
 
   const [teamResult, setTeamResult] = useState<TeamResult | null>(null)
@@ -329,10 +338,10 @@ export default function MatchOrganizerScreen() {
     )
   }
 
-  const scheduledDate = new Date(match.scheduledAt).toLocaleDateString('fr-FR', {
-    weekday: 'long',
+  const scheduledDate = new Date(match.scheduledAt).toLocaleDateString(i18n.language, {
+    weekday: 'short',
     day: 'numeric',
-    month: 'long',
+    month: 'short',
     hour: '2-digit',
     minute: '2-digit',
   })
@@ -356,37 +365,50 @@ export default function MatchOrganizerScreen() {
 
   const isTeamsLocked = match.status === 'in_progress'
 
+  const isUpcoming =
+    new Date(match.scheduledAt).getTime() > Date.now() &&
+    match.status !== 'completed' &&
+    match.status !== 'cancelled'
+
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}
+    >
       <PhaseStepper status={match.status} />
 
-      <View style={styles.card}>
-        <Text style={styles.dateText}>{scheduledDate}</Text>
-        {match.location && <Text style={styles.locationText}>{match.location}</Text>}
-        <Text style={styles.formatText}>
-          {`${match.format.toUpperCase()} · ${match.playersPerTeam}v${match.playersPerTeam}`}
+      <View style={styles.headerRow}>
+        <Text style={styles.dateLabel}>{scheduledDate}</Text>
+        <Text style={styles.headerCount}>
+          {t('attendance.summary', { confirmed: confirmedCount, total })}
         </Text>
       </View>
 
-      <View style={styles.attendanceCard}>
-        <View style={styles.attendanceRow}>
-          <View style={styles.attendanceStat}>
-            <Text style={[styles.attendanceCount, styles.inCount]}>{inCount}</Text>
-            <Text style={styles.attendanceLabel}>{t('attendance.toggle.in')}</Text>
+      {isUpcoming && (
+        <View style={styles.countdownWrap}>
+          <CountdownPill targetAt={match.scheduledAt} label={t('pronos.countdownLabel')} />
+        </View>
+      )}
+
+      <View style={styles.statsCard}>
+        <View style={styles.statsRow}>
+          <View style={styles.stat}>
+            <Text style={[styles.statCount, styles.statCountIn]}>{inCount}</Text>
+            <Text style={styles.statLabel}>{t('attendance.toggle.in')}</Text>
           </View>
-          <View style={styles.attendanceStat}>
-            <Text style={[styles.attendanceCount, styles.outCount]}>{outCount}</Text>
-            <Text style={styles.attendanceLabel}>{t('attendance.toggle.out')}</Text>
+          <View style={styles.stat}>
+            <Text style={[styles.statCount, styles.statCountOut]}>{outCount}</Text>
+            <Text style={styles.statLabel}>{t('attendance.toggle.out')}</Text>
           </View>
-          <View style={styles.attendanceStat}>
-            <Text style={styles.attendanceCount}>{unknownCount}</Text>
-            <Text style={styles.attendanceLabel}>{t('attendance.toggle.unknown')}</Text>
+          <View style={styles.stat}>
+            <Text style={styles.statCount}>{unknownCount}</Text>
+            <Text style={styles.statLabel}>{t('attendance.toggle.unknown')}</Text>
           </View>
         </View>
       </View>
 
       {myPlayerId && (
-        <View style={styles.myRowCard}>
+        <View style={styles.rowsCard}>
           <AttendanceSwiperRow
             playerId={myPlayerId}
             displayName={null}
@@ -401,52 +423,57 @@ export default function MatchOrganizerScreen() {
         </View>
       )}
 
-      <Text style={styles.summaryText}>
-        {t('attendance.summary', { confirmed: confirmedCount, total })}
-      </Text>
-
       {(attendances?.confirmed.length ?? 0) > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>{t('attendance.section.confirmed')}</Text>
-          {attendances!.confirmed.map((row) => (
-            <AttendanceSwiperRow
-              key={row.playerId}
-              playerId={row.playerId}
-              displayName={row.displayName}
-              status={row.status}
-              disabled
-            />
-          ))}
+        <View>
+          <Text style={styles.sectionLabel}>{t('attendance.section.confirmed')}</Text>
+          <View style={styles.rowsCard}>
+            {attendances!.confirmed.map((row) => (
+              <AttendanceSwiperRow
+                key={row.playerId}
+                playerId={row.playerId}
+                displayName={row.displayName}
+                status={row.status}
+                disabled
+              />
+            ))}
+          </View>
         </View>
       )}
 
       {(attendances?.waitlist.length ?? 0) > 0 && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>{t('attendance.section.waitlist')}</Text>
-          {attendances!.waitlist.map((row) => (
-            <View key={row.playerId} style={styles.waitlistRow}>
-              <Text style={styles.positionBadge}>#{row.waitlistPosition}</Text>
-              <Text style={styles.waitlistName}>{row.displayName}</Text>
-            </View>
-          ))}
+        <View>
+          <Text style={styles.sectionLabel}>{t('attendance.section.waitlist')}</Text>
+          <View style={styles.rowsCard}>
+            {attendances!.waitlist.map((row) => (
+              <View key={row.playerId} style={styles.waitlistRow}>
+                <Text style={styles.positionBadge}>{`#${row.waitlistPosition}`}</Text>
+                <Text style={styles.waitlistName} numberOfLines={1}>
+                  {row.displayName}
+                </Text>
+              </View>
+            ))}
+          </View>
         </View>
       )}
 
       {isAttendanceOpen && (
-        <Pressable
-          style={[
-            styles.lockButton,
-            (inCount < required || isLocking) && styles.lockButtonDisabled,
-          ]}
-          onPress={() => lockAttendance()}
-          disabled={inCount < required || isLocking}
-          accessibilityRole="button"
-          accessibilityLabel={t('attendance.lock.cta')}
-        >
-          <Text style={styles.lockButtonText}>
-            {isLocking ? t('attendance.lock.loading') : t('attendance.lock.cta')}
+        <View style={styles.hintCard}>
+          <Ionicons name="time-outline" size={17} color={Colors.inkSecondary} style={styles.hintIcon} />
+          <Text style={styles.hintText}>
+            {`${t('match.organizer.swipeHint')} ${t('attendance.reminderAuto')}`}
           </Text>
-        </Pressable>
+        </View>
+      )}
+
+      {isAttendanceOpen && (
+        // Lock-roster is this screen's PrimaryButton; the tab dock owns the glow.
+        <PrimaryButton
+          label={isLocking ? t('attendance.lock.loading') : t('attendance.lock.cta')}
+          onPress={() => lockAttendance()}
+          disabled={inCount < required}
+          loading={isLocking}
+          glow={false}
+        />
       )}
 
       {isAttendanceOpen && inCount < required && (
@@ -463,17 +490,15 @@ export default function MatchOrganizerScreen() {
         </View>
       )}
 
+      {isTeamsLocked && activeGroupId && matchId && (
+        <LockedPitchBoard groupId={activeGroupId} matchId={matchId} />
+      )}
+
       {isTeamsLocked && (
-        <Pressable
-          style={styles.recordResultButton}
+        <SecondaryButton
+          label={t('match.result.enterResult')}
           onPress={() => router.push(`/(app)/match/result?matchId=${matchId}&groupId=${activeGroupId}`)}
-          accessibilityRole="button"
-          accessibilityLabel={t('match.result.enterResult')}
-        >
-          <Text style={styles.recordResultButtonText}>
-            {t('match.result.enterResult')}
-          </Text>
-        </Pressable>
+        />
       )}
 
       {canGenerate && (
@@ -499,36 +524,23 @@ export default function MatchOrganizerScreen() {
           )}
 
           {!isGenerating && !adjustedTeams && (
-            <Pressable
-              style={[
-                styles.generateButton,
-                match.generationCount >= TEAM_GEN_MAX_GENERATIONS && styles.generateButtonDisabled,
-              ]}
+            <PrimaryButton
+              label={t(match.generationCount >= TEAM_GEN_MAX_GENERATIONS ? 'match.generate.limitReached' : 'match.teamGen.generateButton')}
               onPress={() => { void generateTeams() }}
               disabled={match.generationCount >= TEAM_GEN_MAX_GENERATIONS}
-              accessibilityRole="button"
-              accessibilityLabel={t(match.generationCount >= TEAM_GEN_MAX_GENERATIONS ? 'match.generate.limitReached' : 'match.generate.cta')}
-            >
-              <Text style={styles.generateButtonText}>
-                {t(match.generationCount >= TEAM_GEN_MAX_GENERATIONS ? 'match.generate.limitReached' : 'match.teamGen.generateButton')}
-              </Text>
-            </Pressable>
+              glow={false}
+            />
           )}
 
           {adjustedTeams && !isTeamsLocked && (
             <>
               {lockTeamsError && <Text style={styles.lockTeamsError}>{lockTeamsError}</Text>}
-              <Pressable
-                style={[styles.lockTeamsButton, isLockingTeams && styles.lockTeamsButtonDisabled]}
+              <PrimaryButton
+                label={isLockingTeams ? t('match.teamLock.locking') : t('match.teamLock.lockButton')}
                 onPress={() => { void lockTeams() }}
-                disabled={isLockingTeams}
-                accessibilityRole="button"
-                accessibilityLabel={t('match.teamLock.lockButton')}
-              >
-                <Text style={styles.lockTeamsButtonText}>
-                  {isLockingTeams ? t('match.teamLock.locking') : t('match.teamLock.lockButton')}
-                </Text>
-              </Pressable>
+                loading={isLockingTeams}
+                glow={false}
+              />
             </>
           )}
         </View>
@@ -557,8 +569,8 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.bg,
   },
   content: {
-    padding: 16,
-    paddingBottom: 48,
+    paddingHorizontal: 20,
+    paddingBottom: DOCK_CLEARANCE,
     gap: 16,
   },
   centered: {
@@ -570,81 +582,73 @@ const styles = StyleSheet.create({
   errorText: {
     color: Colors.inkSecondary,
     fontSize: 15,
+    fontFamily: Fonts.inter,
   },
-  card: {
-    backgroundColor: Colors.surface,
-    borderRadius: 8,
-    padding: 16,
-    gap: 6,
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  dateText: {
-    color: Colors.ink,
-    fontSize: 16,
-    fontWeight: '600',
-    textTransform: 'capitalize',
-  },
-  locationText: {
+  dateLabel: {
     color: Colors.inkSecondary,
-    fontSize: 14,
+    fontSize: 11,
+    fontFamily: Fonts.interSemiBold,
+    letterSpacing: 1.54,
+    textTransform: 'uppercase',
   },
-  formatText: {
+  headerCount: {
     color: Colors.inkSecondary,
-    fontSize: 12,
-    fontWeight: '500',
-    letterSpacing: 0.5,
-    marginTop: 4,
+    fontSize: 12.5,
+    fontFamily: Fonts.interSemiBold,
   },
-  attendanceCard: {
+  countdownWrap: {
+    alignItems: 'flex-start',
+  },
+  statsCard: {
     backgroundColor: Colors.surface,
-    borderRadius: 8,
+    borderRadius: Radius.md,
     padding: 16,
   },
-  attendanceRow: {
+  statsRow: {
     flexDirection: 'row',
     justifyContent: 'space-around',
   },
-  attendanceStat: {
+  stat: {
     alignItems: 'center',
     gap: 4,
   },
-  attendanceCount: {
-    color: Colors.ink,
+  statCount: {
+    fontFamily: Fonts.bebas,
     fontSize: 28,
-    fontWeight: '700',
+    letterSpacing: 1.12, // 0.04em @ 28 (stat register)
+    color: Colors.ink,
+    fontVariant: ['tabular-nums'],
   },
-  inCount: {
+  statCountIn: {
     color: Colors.success,
   },
-  outCount: {
+  statCountOut: {
     color: Colors.primary,
   },
-  attendanceLabel: {
+  statLabel: {
     color: Colors.inkSecondary,
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  myRowCard: {
-    backgroundColor: Colors.surface,
-    marginHorizontal: 16,
-    borderRadius: 8,
-    overflow: 'hidden',
-  },
-  summaryText: {
-    color: Colors.inkSecondary,
-    fontSize: 13,
-    paddingHorizontal: 16,
-  },
-  section: {
-    gap: 1,
-  },
-  sectionTitle: {
-    color: Colors.inkSecondary,
-    fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: 0.5,
+    fontSize: 10,
+    fontFamily: Fonts.interSemiBold,
+    letterSpacing: 1.2,
     textTransform: 'uppercase',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+  },
+  sectionLabel: {
+    color: Colors.inkSecondary,
+    fontSize: 11,
+    fontFamily: Fonts.interSemiBold,
+    letterSpacing: 1.54,
+    textTransform: 'uppercase',
+    marginBottom: 10,
+  },
+  rowsCard: {
+    borderRadius: Radius.md,
+    overflow: 'hidden',
+    gap: 1,
   },
   waitlistRow: {
     flexDirection: 'row',
@@ -655,144 +659,95 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   positionBadge: {
+    fontFamily: Fonts.bebas,
+    fontSize: 16,
+    letterSpacing: 0.64, // 0.04em @ 16 (stat register)
     color: Colors.inkDisabled,
-    fontSize: 12,
-    fontWeight: '700',
-    width: 24,
+    width: 28,
+    fontVariant: ['tabular-nums'],
   },
   waitlistName: {
     color: Colors.inkDisabled,
     fontSize: 15,
+    fontFamily: Fonts.interMedium,
     flex: 1,
   },
-  lockButton: {
-    backgroundColor: Colors.primary,
-    borderRadius: 4,
-    paddingVertical: 14,
+  hintCard: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginHorizontal: 16,
+    gap: 12,
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    padding: 14,
   },
-  lockButtonDisabled: {
-    opacity: 0.35,
+  hintIcon: {
+    flexShrink: 0,
   },
-  lockButtonText: {
-    color: Colors.ink,
-    fontSize: 14,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
+  hintText: {
+    flex: 1,
+    color: Colors.inkSecondary,
+    fontSize: 12.5,
+    fontFamily: Fonts.interMedium,
+    lineHeight: 19,
   },
   insufficientText: {
     color: Colors.inkSecondary,
     fontSize: 13,
+    fontFamily: Fonts.inter,
     textAlign: 'center',
-    paddingHorizontal: 16,
   },
   surplusCard: {
-    backgroundColor: Colors.surfaceRaised,
-    borderRadius: 2,
-    padding: 12,
-    marginHorizontal: 16,
-    borderLeftWidth: 2,
-    borderLeftColor: Colors.primary,
+    backgroundColor: Colors.primarySubtle,
+    borderRadius: Radius.md,
+    padding: 14,
   },
   surplusText: {
     color: Colors.primary,
     fontSize: 13,
-    fontWeight: '500',
+    fontFamily: Fonts.interSemiBold,
   },
-  generateButton: {
-    borderRadius: 4,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginHorizontal: 16,
-    backgroundColor: Colors.primary,
+  generateSection: {
+    gap: 12,
   },
-  generateButtonDisabled: {
-    opacity: 0.35,
-  },
-  generateButtonText: {
-    color: Colors.ink,
-    fontSize: 14,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-  },
-  generateSection: { marginTop: 16 },
   generateError: {
     color: Colors.primary,
-    fontFamily: 'Inter_400Regular',
+    fontFamily: Fonts.inter,
     fontSize: 14,
     textAlign: 'center',
-    marginBottom: 12,
-  },
-  lockTeamsButton: {
-    backgroundColor: Colors.success,
-    borderRadius: 4,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginHorizontal: 16,
-    marginTop: 12,
-  },
-  lockTeamsButtonDisabled: {
-    opacity: 0.35,
-  },
-  lockTeamsButtonText: {
-    color: Colors.ink,
-    fontSize: 14,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
   },
   lockTeamsError: {
     color: Colors.primary,
-    fontFamily: 'Inter_400Regular',
+    fontFamily: Fonts.inter,
     fontSize: 14,
     textAlign: 'center',
-    marginTop: 8,
-  },
-  recordResultButton: {
-    backgroundColor: Colors.surfaceRaised,
-    borderRadius: 4,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginHorizontal: 16,
-    borderWidth: 1,
-    borderColor: Colors.primary,
-  },
-  recordResultButtonText: {
-    color: Colors.primary,
-    fontSize: 14,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
   },
   mvpCard: {
     backgroundColor: Colors.surface,
-    borderRadius: 8,
+    borderRadius: Radius.md,
     padding: 16,
     gap: 6,
-    marginHorizontal: 16,
   },
   mvpTitle: {
     color: Colors.inkSecondary,
-    fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: 0.5,
+    fontSize: 11,
+    fontFamily: Fonts.interSemiBold,
+    letterSpacing: 1.54,
     textTransform: 'uppercase',
   },
   mvpPending: {
     color: Colors.inkSecondary,
     fontSize: 14,
-    fontStyle: 'italic',
+    fontFamily: Fonts.inter,
   },
   mvpWinner: {
     color: Colors.ink,
-    fontSize: 20,
-    fontWeight: '700',
+    fontFamily: Fonts.bebas,
+    fontSize: 24,
+    letterSpacing: 2.4, // 0.10em @ 24 (heading register)
   },
   mvpNoVotes: {
     color: Colors.inkSecondary,
     fontSize: 14,
+    fontFamily: Fonts.inter,
   },
 })

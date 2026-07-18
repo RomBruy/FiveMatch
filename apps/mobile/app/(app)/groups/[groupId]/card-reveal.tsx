@@ -1,7 +1,6 @@
 import {
   View,
   Text,
-  Pressable,
   StyleSheet,
   AccessibilityInfo,
 } from 'react-native'
@@ -24,7 +23,12 @@ import * as Haptics from 'expo-haptics'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { posthog } from '../../../../lib/posthog'
 import { Colors } from '../../../../constants/colors'
+import { Fonts, Type } from '../../../../constants/tokens'
 import { PaniniCard } from '../../../../components/cards/PaniniCard'
+import { CardExport, CARD_EXPORT_WIDTH, CARD_EXPORT_HEIGHT } from '../../../../components/share/CardExport'
+import { TextureType } from '../../../../components/ui/TextureType'
+import { PrimaryButton } from '../../../../components/ui/PrimaryButton'
+import { SecondaryButton } from '../../../../components/ui/SecondaryButton'
 import { httpClient } from '../../../../lib/api-client'
 import {
   REVEAL_LABEL_DURATION_MS,
@@ -94,6 +98,16 @@ export default function CardRevealScreen() {
     queryFn: () =>
       httpClient
         .get<{ data: GroupData }>(`/v1/groups/${groupId}`)
+        .then((r) => r.data.data),
+    enabled: !!groupId,
+  })
+
+  // Member count for the card serial — same endpoint/key the Joueurs grid caches.
+  const { data: playersData } = useQuery({
+    queryKey: ['players', groupId],
+    queryFn: () =>
+      httpClient
+        .get<{ data: { items: { playerId: string }[] } }>(`/v1/groups/${groupId}/players`)
         .then((r) => r.data.data),
     enabled: !!groupId,
   })
@@ -235,10 +249,13 @@ export default function CardRevealScreen() {
     if (!cardCaptureRef.current || isSharing) return
     setIsSharing(true)
     try {
+      // Export spec: exactly 1080×1350 (4:5) — view-shot resizes the off-screen frame.
       const uri = await captureRef(cardCaptureRef, {
         format: 'png',
         quality: 1,
         result: 'tmpfile',
+        width: 1080,
+        height: 1350,
       })
       await Sharing.shareAsync(uri, {
         mimeType: 'image/png',
@@ -264,53 +281,51 @@ export default function CardRevealScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Background red spotlight */}
-      <View style={styles.spotlight} pointerEvents="none" />
+      {/* The screen's ONE texture element: outline LÉGENDE watermark on the ceremonial dark ground. */}
+      <TextureType lines={[{ text: t('card.reveal.legende') }]} fontSize={200} style={styles.legendeTexture} />
 
       {/* Unlock label */}
       <Animated.View style={[styles.labelContainer, labelStyle]}>
         <Text style={styles.unlockLabel}>{t('card.reveal.unlockLabel')}</Text>
       </Animated.View>
 
-      {/* Card */}
-      <Animated.View style={[styles.cardWrapper, cardWrapperStyle]}>
+      {/* Card — the bone relic lands on the dark ground; the screen's glow belongs to it */}
+      <Animated.View style={[styles.cardWrapper, styles.cardGlow, cardWrapperStyle]}>
         {player ? (
-          <View ref={cardCaptureRef} collapsable={false} style={styles.cardCaptureWrapper}>
-            <PaniniCard
-              player={player}
-              groupName={group?.name}
-              groupTier={group?.tier}
-              ovrStyle={ovrAnimatedStyle}
-              isMvp={player.isMvp}
-            />
-            <View style={styles.watermark}>
-              <Text style={styles.watermarkText}>{t('app.name')}</Text>
-            </View>
-          </View>
+          <PaniniCard
+            player={player}
+            groupName={group?.name}
+            groupTier={group?.tier}
+            ovrStyle={ovrAnimatedStyle}
+            isMvp={player.isMvp}
+            serialTotal={playersData?.items.length}
+          />
         ) : (
           <View style={styles.cardSkeleton} />
         )}
       </Animated.View>
 
-      {/* CTA area */}
+      {/* Off-screen 4:5 export frame (paper default) — the share capture target */}
+      {player && (
+        <View ref={cardCaptureRef} collapsable={false} style={styles.exportOffscreen} pointerEvents="none">
+          <CardExport
+            player={player}
+            groupName={group?.name}
+            isMvp={player.isMvp}
+            serialTotal={playersData?.items.length}
+          />
+        </View>
+      )}
+
+      {/* CTA area — card owns the glow, so the primary button goes without */}
       <Animated.View style={[styles.ctaArea, ctaStyle]}>
-        <Pressable
-          style={[styles.primaryButton, isSharing && { opacity: 0.6 }]}
+        <PrimaryButton
+          label={t('card.reveal.cta.share')}
           onPress={handleShare}
           disabled={isSharing}
-          accessibilityRole="button"
-          accessibilityLabel={t('card.reveal.cta.share')}
-        >
-          <Text style={styles.primaryButtonText}>{t('card.reveal.cta.share')}</Text>
-        </Pressable>
-        <Pressable
-          style={styles.secondaryButton}
-          onPress={handleHistory}
-          accessibilityRole="button"
-          accessibilityLabel={t('card.reveal.cta.history')}
-        >
-          <Text style={styles.secondaryButtonText}>{t('card.reveal.cta.history')}</Text>
-        </Pressable>
+          glow={false}
+        />
+        <SecondaryButton label={t('card.reveal.cta.history')} onPress={handleHistory} />
       </Animated.View>
 
       {/* Meta section */}
@@ -328,49 +343,45 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 24,
+    overflow: 'hidden',
   },
-  spotlight: {
-    position: 'absolute',
-    width: 400,
-    height: 400,
-    borderRadius: 200,
-    backgroundColor: 'rgba(255,59,71,0.07)',
-    alignSelf: 'center',
-    top: '20%',
+  legendeTexture: {
+    top: 80,
+    left: -46,
   },
   labelContainer: {
     marginBottom: 24,
     alignItems: 'center',
   },
   unlockLabel: {
-    color: Colors.inkSecondary,
-    fontSize: 11,
-    fontFamily: 'Inter_600SemiBold',
-    letterSpacing: 2,
+    color: Colors.primary,
+    fontSize: 12,
+    fontFamily: Fonts.interSemiBold,
+    letterSpacing: 3.6, // 0.3em @ 12
     textTransform: 'uppercase',
   },
   cardWrapper: {
     alignItems: 'center',
   },
-  cardCaptureWrapper: {
-    position: 'relative',
-    backgroundColor: Colors.bg,
+  cardGlow: {
+    // The screen's single glow — it belongs to the card, not the CTA.
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.35,
+    shadowRadius: 30,
+    elevation: 14,
   },
-  watermark: {
+  exportOffscreen: {
     position: 'absolute',
-    bottom: 6,
-    right: 8,
-  },
-  watermarkText: {
-    fontFamily: 'BebasNeue_400Regular',
-    fontSize: 9,
-    color: Colors.inkDisabled,
-    letterSpacing: 1.5,
+    left: -CARD_EXPORT_WIDTH * 30,
+    top: 0,
+    width: CARD_EXPORT_WIDTH,
+    height: CARD_EXPORT_HEIGHT,
   },
   cardSkeleton: {
-    width: 252,
-    height: 398,
-    borderRadius: 4,
+    width: 272,
+    height: 440,
+    borderRadius: 20,
     backgroundColor: Colors.surface,
     opacity: 0.4,
   },
@@ -380,37 +391,6 @@ const styles = StyleSheet.create({
     gap: 12,
     alignItems: 'stretch',
   },
-  primaryButton: {
-    height: 54,
-    backgroundColor: Colors.primary,
-    borderRadius: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.30,
-    shadowRadius: 10,
-    elevation: 6,
-  },
-  primaryButtonText: {
-    color: Colors.ink,
-    fontSize: 16,
-    fontFamily: 'Inter_600SemiBold',
-    letterSpacing: 0.5,
-  },
-  secondaryButton: {
-    height: 48,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.10)',
-    borderRadius: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  secondaryButtonText: {
-    color: Colors.inkSecondary,
-    fontSize: 15,
-    fontFamily: 'Inter_500Medium',
-  },
   metaSection: {
     marginTop: 16,
     alignItems: 'center',
@@ -418,7 +398,7 @@ const styles = StyleSheet.create({
   metaText: {
     color: Colors.inkDisabled,
     fontSize: 10,
-    fontFamily: 'Inter_500Medium',
-    letterSpacing: 2,
+    fontFamily: Type.labelCaps.fontFamily,
+    letterSpacing: 1.4, // 0.14em @ 10 (label-caps register)
   },
 })

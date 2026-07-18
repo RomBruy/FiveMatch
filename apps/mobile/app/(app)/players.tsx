@@ -1,13 +1,18 @@
-import { View, Text, Pressable, FlatList, StyleSheet } from 'react-native'
+import { View, Text, FlatList, Pressable, StyleSheet, useWindowDimensions } from 'react-native'
 import { useTranslation } from 'react-i18next'
 import { useRouter } from 'expo-router'
 import { useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '@clerk/expo'
 import AsyncStorage from '@react-native-async-storage/async-storage'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Colors } from '../../constants/colors'
+import { Fonts, Radius, Type } from '../../constants/tokens'
 import { useGroupContext } from '../../contexts/GroupContext'
 import { PaniniCard } from '../../components/cards/PaniniCard'
+import { DOCK_CLEARANCE } from '../../components/ui/TabDock'
+import { PrimaryButton } from '../../components/ui/PrimaryButton'
+import { SecondaryButton } from '../../components/ui/SecondaryButton'
 import { httpClient } from '../../lib/api-client'
 import { usePreviousValue } from '../../hooks/use-previous-value'
 
@@ -34,19 +39,23 @@ interface GroupData {
   tier: string
 }
 
-function CardSkeleton() {
-  return (
-    <View style={styles.cardSkeletonWrapper}>
-      <View style={styles.cardSkeleton} />
-    </View>
-  )
+const GRID_PADDING = 16
+const GRID_GAP = 14
+
+function CardSkeleton({ width }: { width: number }) {
+  return <View style={[styles.cardSkeleton, { width }]} />
 }
 
 export default function PlayersTab() {
   const { t } = useTranslation()
   const router = useRouter()
+  const insets = useSafeAreaInsets()
+  const { width: windowWidth } = useWindowDimensions()
   const { activeGroupId } = useGroupContext()
   const { userId: clerkUserId } = useAuth()
+
+  // Two-column grid of minis — earned cards are bone, locked slots stay dark.
+  const cellWidth = (windowWidth - GRID_PADDING * 2 - GRID_GAP) / 2
 
   const { data: playersData, isLoading: playersLoading, isError: playersError } = useQuery({
     queryKey: ['players', activeGroupId],
@@ -56,6 +65,17 @@ export default function PlayersTab() {
         .then((r) => r.data.data),
     enabled: !!activeGroupId,
   })
+
+  // Shared key with roster/settings — served from cache when warm.
+  const { data: myStatusData } = useQuery({
+    queryKey: ['groups', activeGroupId, 'my-status'],
+    queryFn: () =>
+      httpClient
+        .get<{ data: { role: string } }>(`/v1/groups/${activeGroupId}/my-status`)
+        .then((r) => r.data.data),
+    enabled: !!activeGroupId,
+  })
+  const isOrganizer = myStatusData?.role === 'organizer'
 
   const { data: groupData } = useQuery({
     queryKey: ['group', activeGroupId],
@@ -110,24 +130,28 @@ export default function PlayersTab() {
     return (
       <View style={styles.emptyContainer}>
         <Text style={styles.message}>{t('auth.shell.noGroup')}</Text>
-        <Pressable style={styles.button} onPress={() => router.push('/(app)/groups/new' as never)}>
-          <Text style={styles.buttonText}>{t('auth.shell.createGroup')}</Text>
-        </Pressable>
+        {/* The tab dock owns this screen's one glow. */}
+        <PrimaryButton
+          label={t('auth.shell.createGroup')}
+          glow={false}
+          onPress={() => router.push('/(app)/groups/new' as never)}
+        />
       </View>
     )
   }
 
+  const header = (
+    <Text style={[styles.title, { paddingTop: insets.top + 12 }]}>{t('auth.shell.tabPlayers')}</Text>
+  )
+
   if (playersLoading) {
     return (
       <View style={styles.container}>
-        <FlatList
-          data={[1, 2, 3]}
-          keyExtractor={(i) => String(i)}
-          renderItem={() => <CardSkeleton />}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.listContent}
-        />
+        {header}
+        <View style={styles.skeletonGrid}>
+          <CardSkeleton width={cellWidth} />
+          <CardSkeleton width={cellWidth} />
+        </View>
       </View>
     )
   }
@@ -146,6 +170,13 @@ export default function PlayersTab() {
     return (
       <View style={styles.emptyContainer}>
         <Text style={styles.emptyCards}>{t('card.empty.noCards')}</Text>
+        <Text style={styles.emptyBody}>{t('card.empty.body')}</Text>
+        {isOrganizer && activeGroupId && (
+          <SecondaryButton
+            label={t('card.empty.cta')}
+            onPress={() => router.push(`/(app)/groups/${activeGroupId}/settings` as never)}
+          />
+        )}
       </View>
     )
   }
@@ -155,17 +186,26 @@ export default function PlayersTab() {
       <FlatList
         data={players}
         keyExtractor={(p) => p.playerId}
-        horizontal
-        showsHorizontalScrollIndicator={false}
+        numColumns={2}
+        ListHeaderComponent={header}
+        columnWrapperStyle={styles.gridRow}
         contentContainerStyle={styles.listContent}
-        ItemSeparatorComponent={() => <View style={{ width: 16 }} />}
         renderItem={({ item }) => (
-          <PaniniCard
-            player={item}
-            groupName={groupData?.name}
-            groupTier={groupData?.tier}
-            isMvp={item.isMvp}
-          />
+          <Pressable
+            onPress={() => router.push(`/(app)/player/${item.playerId}` as never)}
+            accessibilityRole="button"
+            accessibilityLabel={t('profile.openPlayer', { name: item.displayName })}
+          >
+            <PaniniCard
+              player={item}
+              groupName={groupData?.name}
+              groupTier={groupData?.tier}
+              isMvp={item.isMvp}
+              variant="mini"
+              width={cellWidth}
+              serialTotal={players.length}
+            />
+          </Pressable>
         )}
       />
     </View>
@@ -176,50 +216,59 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.bg,
-    justifyContent: 'center',
   },
   emptyContainer: {
     flex: 1,
     backgroundColor: Colors.bg,
     justifyContent: 'center',
-    alignItems: 'center',
     padding: 24,
+    gap: 24,
   },
   message: {
     color: Colors.ink,
-    fontSize: 17,
+    fontSize: 15,
+    fontFamily: Fonts.inter,
     textAlign: 'center',
-    marginBottom: 24,
   },
   emptyCards: {
     color: Colors.inkDisabled,
     fontSize: 24,
-    fontFamily: 'BebasNeue_400Regular',
+    fontFamily: Type.heading.fontFamily,
+    letterSpacing: Type.heading.letterSpacing,
     textAlign: 'center',
   },
-  button: {
-    backgroundColor: Colors.primary,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 4,
+  emptyBody: {
+    color: Colors.inkSecondary,
+    fontSize: 14.5,
+    fontFamily: Fonts.inter,
+    lineHeight: 21,
+    textAlign: 'center',
+    marginTop: -8,
   },
-  buttonText: {
+  title: {
     color: Colors.ink,
-    fontSize: 16,
-    fontWeight: '600',
+    fontFamily: Type.display.fontFamily,
+    fontSize: 40,
+    letterSpacing: 1.8, // 0.045em @ 40 (display register)
+    paddingHorizontal: GRID_PADDING,
+    marginBottom: 16,
   },
   listContent: {
-    paddingHorizontal: 24,
-    paddingVertical: 32,
-    alignItems: 'center',
+    paddingBottom: DOCK_CLEARANCE,
   },
-  cardSkeletonWrapper: {
-    marginHorizontal: 8,
+  gridRow: {
+    paddingHorizontal: GRID_PADDING,
+    gap: GRID_GAP,
+    marginBottom: GRID_GAP,
+  },
+  skeletonGrid: {
+    flexDirection: 'row',
+    paddingHorizontal: GRID_PADDING,
+    gap: GRID_GAP,
   },
   cardSkeleton: {
-    width: 252,
-    height: 398,
-    borderRadius: 4,
+    height: 210,
+    borderRadius: Radius.md,
     backgroundColor: Colors.surface,
     opacity: 0.4,
   },

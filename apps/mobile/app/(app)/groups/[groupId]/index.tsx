@@ -3,7 +3,12 @@ import { useLocalSearchParams, useRouter } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
+import { Ionicons } from '@expo/vector-icons'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Colors } from '../../../../constants/colors'
+import { Fonts, Radius } from '../../../../constants/tokens'
+import { DuotoneAvatar, getInitials } from '../../../../components/ui/DuotoneAvatar'
+import { TextureType } from '../../../../components/ui/TextureType'
 import { httpClient } from '../../../../lib/api-client'
 import { useGroupContext } from '../../../../contexts/GroupContext'
 
@@ -27,6 +32,7 @@ interface JoinRequest {
 export default function GroupHomeScreen() {
   const { t } = useTranslation()
   const router = useRouter()
+  const insets = useSafeAreaInsets()
   const { groupId } = useLocalSearchParams<{ groupId: string }>()
   const { setActiveGroupId } = useGroupContext()
   const queryClient = useQueryClient()
@@ -101,63 +107,80 @@ export default function GroupHomeScreen() {
   const tierKey = `groups.home.tier.${group.tier}` as const
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <Text style={styles.groupName}>{group.name}</Text>
-          <View style={styles.tierBadge}>
-            <Text style={styles.tierBadgeText}>{t(tierKey)}</Text>
+    <View style={styles.container}>
+      {/* The screen's ONE texture element: crest-initials outline watermark (shared Accueil composition). */}
+      <TextureType lines={[{ text: getInitials(group.name) }]} fontSize={200} style={styles.crestTexture} />
+
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 12 }]}
+      >
+        <View style={styles.header}>
+          <DuotoneAvatar displayName={group.name} size={42} />
+          <View style={styles.headerText}>
+            <Text style={styles.groupName} numberOfLines={1}>
+              {group.name}
+            </Text>
+            <View style={styles.tierPill}>
+              <Text style={styles.tierPillText}>{t(tierKey)}</Text>
+            </View>
           </View>
-        </View>
-        <View style={styles.headerButtons}>
           {isOrganizer && (
             <Pressable
               onPress={() => router.push(`/(app)/groups/${groupId}/roster`)}
-              style={styles.settingsButton}
+              style={styles.iconButton}
+              accessibilityRole="button"
+              accessibilityLabel={t('groups.roster.viewButton')}
             >
-              <Text style={styles.settingsButtonText}>{t('groups.roster.viewButton')}</Text>
+              <Ionicons name="people-outline" size={19} color={Colors.inkSecondary} />
             </Pressable>
           )}
           <Pressable
             onPress={() => router.push(`/(app)/groups/${groupId}/settings`)}
-            style={styles.settingsButton}
+            style={styles.iconButton}
+            accessibilityRole="button"
+            accessibilityLabel={t('groups.home.settingsButton')}
           >
-            <Text style={styles.settingsButtonText}>{t('groups.home.settingsButton')}</Text>
+            <Ionicons name="settings-outline" size={19} color={Colors.inkSecondary} />
           </Pressable>
         </View>
-      </View>
 
-      {isOrganizer && joinRequests && joinRequests.length > 0 && (
-        <View style={styles.joinRequestsSection}>
-          <Text style={styles.joinRequestsTitle}>{t('groups.requests.title')}</Text>
-          {joinRequests.map((req) => (
-            <View key={req.userId} style={styles.joinRequestRow}>
-              <Text style={styles.joinRequestName}>{req.displayName ?? '—'}</Text>
-              <View style={styles.joinRequestActions}>
-                <Pressable
-                  style={[styles.actionButton, styles.acceptButton]}
-                  onPress={() => approveMutation.mutate(req.userId)}
-                  disabled={approveMutation.isPending || rejectMutation.isPending}
-                >
-                  <Text style={styles.acceptButtonText}>{t('groups.requests.accept')}</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.actionButton, styles.rejectButton]}
-                  onPress={() => rejectMutation.mutate(req.userId)}
-                  disabled={approveMutation.isPending || rejectMutation.isPending}
-                >
-                  <Text style={styles.rejectButtonText}>{t('groups.requests.reject')}</Text>
-                </Pressable>
+        {isOrganizer && joinRequests && joinRequests.length > 0 && (
+          <View style={styles.joinRequestsSection}>
+            <Text style={styles.sectionLabel}>{t('groups.requests.title')}</Text>
+            {joinRequests.map((req) => (
+              <View key={req.userId} style={styles.joinRequestRow}>
+                <Text style={styles.joinRequestName} numberOfLines={1}>
+                  {req.displayName ?? '—'}
+                </Text>
+                <View style={styles.joinRequestActions}>
+                  <Pressable
+                    style={[styles.actionPill, styles.acceptPill]}
+                    onPress={() => approveMutation.mutate(req.userId)}
+                    disabled={approveMutation.isPending || rejectMutation.isPending}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.acceptPillText}>{t('groups.requests.accept')}</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.actionPill, styles.rejectPill]}
+                    onPress={() => rejectMutation.mutate(req.userId)}
+                    disabled={approveMutation.isPending || rejectMutation.isPending}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.rejectPillText}>{t('groups.requests.reject')}</Text>
+                  </Pressable>
+                </View>
               </View>
-            </View>
-          ))}
-        </View>
-      )}
+            ))}
+          </View>
+        )}
 
-      <View style={styles.emptyState}>
-        <Text style={styles.emptyStateText}>{t('groups.home.emptyRoster')}</Text>
-      </View>
-    </ScrollView>
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyStateText}>{t('groups.home.emptyRoster')}</Text>
+        </View>
+      </ScrollView>
+    </View>
   )
 }
 
@@ -165,9 +188,19 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.bg,
+    overflow: 'hidden',
+  },
+  crestTexture: {
+    top: 30,
+    right: -70,
+  },
+  scroll: {
+    flex: 1,
   },
   scrollContent: {
     flexGrow: 1,
+    paddingHorizontal: 20,
+    paddingBottom: 32,
   },
   center: {
     flex: 1,
@@ -177,100 +210,100 @@ const styles = StyleSheet.create({
   },
   header: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    padding: 24,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.surface,
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 8,
   },
-  headerLeft: {
+  headerText: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
   groupName: {
+    flexShrink: 1,
+    fontFamily: Fonts.bebas,
+    fontSize: 24,
+    letterSpacing: 1.92, // 0.08em @ 24 (heading register)
     color: Colors.ink,
-    fontSize: 22,
-    fontWeight: '700',
-    marginBottom: 6,
   },
-  tierBadge: {
-    alignSelf: 'flex-start',
-    backgroundColor: Colors.surface,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 2,
+  tierPill: {
+    backgroundColor: Colors.surfaceRaised,
+    borderRadius: Radius.full,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
   },
-  tierBadgeText: {
+  tierPillText: {
+    fontFamily: Fonts.interSemiBold,
+    fontSize: 10,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    color: Colors.inkSecondary,
+  },
+  iconButton: {
+    width: 42,
+    height: 42,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.surfaceRaised,
+    borderWidth: 1,
+    borderColor: Colors.hairline,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sectionLabel: {
     color: Colors.inkSecondary,
     fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 0.12 * 11,
+    fontFamily: Fonts.interSemiBold,
+    letterSpacing: 1.54,
     textTransform: 'uppercase',
-  },
-  headerButtons: {
-    flexDirection: 'column',
-    gap: 8,
-    marginLeft: 12,
-  },
-  settingsButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: Colors.inkSecondary,
-  },
-  settingsButtonText: {
-    color: Colors.inkSecondary,
-    fontSize: 13,
-    fontWeight: '500',
+    marginBottom: 12,
   },
   joinRequestsSection: {
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.surface,
-    paddingHorizontal: 24,
-    paddingVertical: 16,
-    gap: 12,
-  },
-  joinRequestsTitle: {
-    color: Colors.ink,
-    fontSize: 15,
-    fontWeight: '600',
-    marginBottom: 4,
+    marginTop: 28,
   },
   joinRequestRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 8,
+    gap: 12,
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginBottom: 8,
   },
   joinRequestName: {
+    flex: 1,
     color: Colors.ink,
     fontSize: 15,
-    flex: 1,
+    fontFamily: Fonts.interSemiBold,
   },
   joinRequestActions: {
     flexDirection: 'row',
     gap: 8,
   },
-  actionButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 4,
+  actionPill: {
+    height: 30,
+    borderRadius: Radius.full,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  acceptButton: {
-    backgroundColor: Colors.success,
+  acceptPill: {
+    backgroundColor: Colors.successSubtle,
   },
-  acceptButtonText: {
-    color: Colors.bg,
+  acceptPillText: {
+    color: Colors.success,
     fontSize: 13,
-    fontWeight: '600',
+    fontFamily: Fonts.interBold,
   },
-  rejectButton: {
-    backgroundColor: Colors.surface,
+  rejectPill: {
+    backgroundColor: Colors.primarySubtle,
   },
-  rejectButtonText: {
-    color: Colors.inkSecondary,
+  rejectPillText: {
+    color: Colors.primary,
     fontSize: 13,
-    fontWeight: '500',
+    fontFamily: Fonts.interSemiBold,
   },
   emptyState: {
     flex: 1,
@@ -281,11 +314,13 @@ const styles = StyleSheet.create({
   },
   emptyStateText: {
     color: Colors.inkSecondary,
-    fontSize: 17,
+    fontSize: 15,
+    fontFamily: Fonts.inter,
     textAlign: 'center',
   },
   errorText: {
     color: Colors.primary,
     fontSize: 15,
+    fontFamily: Fonts.inter,
   },
 })

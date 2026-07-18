@@ -1,13 +1,17 @@
-import {
-  View, Text, TextInput, Pressable, ScrollView, StyleSheet,
-  ActivityIndicator, Switch, Share,
-} from 'react-native'
+import { View, Text, Pressable, ScrollView, StyleSheet, ActivityIndicator, Switch, Share } from 'react-native'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useForm, Controller } from 'react-hook-form'
 import { useEffect, useState } from 'react'
+import { Ionicons } from '@expo/vector-icons'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Colors } from '../../../../constants/colors'
+import { Fonts, Radius } from '../../../../constants/tokens'
+import { Chip } from '../../../../components/ui/Chip'
+import { Input } from '../../../../components/ui/Input'
+import { PrimaryButton } from '../../../../components/ui/PrimaryButton'
+import { DOCK_CLEARANCE } from '../../../../components/ui/TabDock'
 import { httpClient } from '../../../../lib/api-client'
 
 type FormatPreset = '5v5' | '6v6' | '7v7' | 'custom'
@@ -34,27 +38,25 @@ interface GroupData {
   searchable: boolean
 }
 
-function OptionPicker<T extends string>({
+function ChipRow<T extends string>({
   value,
   onChange,
   options,
 }: {
   value: T
   onChange: (v: T) => void
-  options: { value: T; label: string }[]
+  options: { value: T; label: string; outlined?: boolean }[]
 }) {
   return (
-    <View style={styles.pickerRow}>
+    <View style={styles.chipRow}>
       {options.map((opt) => (
-        <Pressable
+        <Chip
           key={opt.value}
+          label={opt.label}
+          active={value === opt.value}
+          variant={opt.outlined ? 'outlined' : 'filled'}
           onPress={() => onChange(opt.value)}
-          style={[styles.pickerOption, value === opt.value && styles.pickerOptionActive]}
-        >
-          <Text style={[styles.pickerOptionText, value === opt.value && styles.pickerOptionTextActive]}>
-            {opt.label}
-          </Text>
-        </Pressable>
+        />
       ))}
     </View>
   )
@@ -64,6 +66,7 @@ export default function GroupSettingsScreen() {
   const { t } = useTranslation()
   const router = useRouter()
   const { groupId } = useLocalSearchParams<{ groupId: string }>()
+  const insets = useSafeAreaInsets()
   const queryClient = useQueryClient()
   const [saveError, setSaveError] = useState<string | null>(null)
   const [joinCode, setJoinCode] = useState('')
@@ -175,7 +178,10 @@ export default function GroupSettingsScreen() {
   const currentInviteCode = generateInviteMutation.data?.inviteCode ?? group?.inviteCode
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}
+    >
       <Text style={styles.title}>{t('groups.settings.title')}</Text>
 
       {saveError && <Text style={styles.errorText}>{saveError}</Text>}
@@ -186,12 +192,10 @@ export default function GroupSettingsScreen() {
         name="name"
         rules={{ required: true, minLength: 1, maxLength: 100 }}
         render={({ field: { onChange, value } }) => (
-          <TextInput
-            style={styles.input}
+          <Input
             value={value}
             onChangeText={onChange}
             placeholder={t('groups.create.namePlaceholder')}
-            placeholderTextColor={Colors.inkSecondary}
             autoCapitalize="words"
             maxLength={100}
           />
@@ -203,14 +207,14 @@ export default function GroupSettingsScreen() {
         control={control}
         name="formatPreset"
         render={({ field: { onChange, value } }) => (
-          <OptionPicker
+          <ChipRow
             value={value}
             onChange={onChange}
             options={[
               { value: '5v5', label: t('groups.create.format5v5') },
               { value: '6v6', label: t('groups.create.format6v6') },
               { value: '7v7', label: t('groups.create.format7v7') },
-              { value: 'custom', label: t('groups.create.formatCustom') },
+              { value: 'custom', label: t('groups.create.formatCustom'), outlined: true },
             ]}
           />
         )}
@@ -221,7 +225,7 @@ export default function GroupSettingsScreen() {
         control={control}
         name="goalkeeperMode"
         render={({ field: { onChange, value } }) => (
-          <OptionPicker
+          <ChipRow
             value={value}
             onChange={onChange}
             options={[
@@ -238,7 +242,7 @@ export default function GroupSettingsScreen() {
         control={control}
         name="generatorStyle"
         render={({ field: { onChange, value } }) => (
-          <OptionPicker
+          <ChipRow
             value={value}
             onChange={onChange}
             options={[
@@ -252,34 +256,51 @@ export default function GroupSettingsScreen() {
 
       {isOrganizer && (
         <>
-          <View style={styles.sectionDivider} />
+          <View style={styles.inviteCard}>
+            <Text style={styles.cardLabel}>{t('groups.settings.inviteSection')}</Text>
 
-          <Text style={styles.sectionTitle}>{t('groups.settings.inviteSection')}</Text>
+            {currentInviteCode && (
+              <View style={styles.codeBoxRow}>
+                {currentInviteCode.split('').map((char, i) => (
+                  <View key={`${char}-${i}`} style={styles.codeBox}>
+                    <Text style={styles.codeBoxChar}>{char}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
 
-          {currentInviteCode && (
-            <View style={styles.inviteCodeRow}>
-              <Text style={styles.inviteCode}>{currentInviteCode}</Text>
-              <Pressable style={styles.secondaryButton} onPress={handleShareInvite}>
-                <Text style={styles.secondaryButtonText}>{t('groups.settings.shareLink')}</Text>
+            <View style={styles.inviteToolbar}>
+              {currentInviteCode && (
+                <Pressable
+                  style={styles.toolbarPill}
+                  onPress={handleShareInvite}
+                  accessibilityRole="button"
+                >
+                  <Ionicons name="share-outline" size={15} color={Colors.ink} />
+                  <Text style={styles.toolbarPillText}>{t('groups.settings.shareLink')}</Text>
+                </Pressable>
+              )}
+              <Pressable
+                style={[styles.toolbarPill, generateInviteMutation.isPending && styles.pillDisabled]}
+                onPress={() => generateInviteMutation.mutate()}
+                disabled={generateInviteMutation.isPending}
+                accessibilityRole="button"
+              >
+                {generateInviteMutation.isPending ? (
+                  <ActivityIndicator color={Colors.ink} size="small" />
+                ) : (
+                  <>
+                    <Ionicons name="refresh-outline" size={15} color={Colors.ink} />
+                    <Text style={styles.toolbarPillText}>
+                      {currentInviteCode ? t('groups.settings.regenerate') : t('groups.settings.inviteCode')}
+                    </Text>
+                  </>
+                )}
               </Pressable>
             </View>
-          )}
+          </View>
 
-          <Pressable
-            style={[styles.secondaryButton, generateInviteMutation.isPending && styles.buttonDisabled]}
-            onPress={() => generateInviteMutation.mutate()}
-            disabled={generateInviteMutation.isPending}
-          >
-            {generateInviteMutation.isPending ? (
-              <ActivityIndicator color={Colors.ink} size="small" />
-            ) : (
-              <Text style={styles.secondaryButtonText}>
-                {currentInviteCode ? t('groups.settings.regenerate') : t('groups.settings.inviteCode')}
-              </Text>
-            )}
-          </Pressable>
-
-          <View style={styles.switchRow}>
+          <View style={styles.switchCard}>
             <Text style={styles.switchLabel}>{t('groups.settings.searchable')}</Text>
             <Controller
               control={control}
@@ -288,7 +309,7 @@ export default function GroupSettingsScreen() {
                 <Switch
                   value={value ?? false}
                   onValueChange={(val) => onChange(val)}
-                  trackColor={{ true: Colors.primary, false: Colors.surface }}
+                  trackColor={{ true: Colors.primary, false: Colors.surfaceRaised }}
                   thumbColor={Colors.ink}
                 />
               )}
@@ -297,19 +318,14 @@ export default function GroupSettingsScreen() {
         </>
       )}
 
-      <View style={styles.sectionDivider} />
-
-      <Text style={styles.sectionTitle}>{t('groups.join.byCode')}</Text>
-
-      <TextInput
-        style={styles.input}
+      <Text style={styles.label}>{t('groups.join.byCode')}</Text>
+      <Input
         value={joinCode}
         onChangeText={(v) => {
           setJoinCode(v.toUpperCase())
           setJoinError(null)
         }}
         placeholder={t('groups.join.codePlaceholder')}
-        placeholderTextColor={Colors.inkSecondary}
         autoCapitalize="characters"
         maxLength={8}
       />
@@ -317,31 +333,31 @@ export default function GroupSettingsScreen() {
       {joinError && <Text style={styles.errorText}>{joinError}</Text>}
 
       <Pressable
-        style={[styles.secondaryButton, (!joinCode.trim() || joinByCodeMutation.isPending) && styles.buttonDisabled]}
+        style={[styles.ghostButton, (!joinCode.trim() || joinByCodeMutation.isPending) && styles.pillDisabled]}
         onPress={() => {
           setJoinError(null)
           joinByCodeMutation.mutate(joinCode.trim())
         }}
         disabled={!joinCode.trim() || joinByCodeMutation.isPending}
+        accessibilityRole="button"
       >
         {joinByCodeMutation.isPending ? (
           <ActivityIndicator color={Colors.ink} size="small" />
         ) : (
-          <Text style={styles.secondaryButtonText}>{t('groups.join.cta')}</Text>
+          <Text style={styles.ghostButtonText}>{t('groups.join.cta')}</Text>
         )}
       </Pressable>
 
-      <Pressable
-        style={[styles.saveButton, (!isDirty || mutation.isPending) && styles.saveButtonDisabled]}
-        onPress={handleSubmit(onSubmit)}
-        disabled={!isDirty || mutation.isPending}
-      >
-        {mutation.isPending ? (
-          <ActivityIndicator color={Colors.ink} />
-        ) : (
-          <Text style={styles.saveButtonText}>{t('groups.settings.save')}</Text>
-        )}
-      </Pressable>
+      <View style={styles.saveWrap}>
+        {/* The tab dock owns this screen's one glow; save is the screen's ONE PrimaryButton. */}
+        <PrimaryButton
+          label={t('groups.settings.save')}
+          onPress={handleSubmit(onSubmit)}
+          disabled={!isDirty}
+          loading={mutation.isPending}
+          glow={false}
+        />
+      </View>
     </ScrollView>
   )
 }
@@ -352,8 +368,8 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.bg,
   },
   content: {
-    padding: 24,
-    paddingBottom: 48,
+    paddingHorizontal: 20,
+    paddingBottom: DOCK_CLEARANCE,
   },
   center: {
     flex: 1,
@@ -363,121 +379,123 @@ const styles = StyleSheet.create({
   },
   title: {
     color: Colors.ink,
-    fontSize: 24,
-    fontWeight: '700',
-    marginBottom: 24,
-  },
-  sectionDivider: {
-    height: 1,
-    backgroundColor: Colors.surface,
-    marginVertical: 24,
-  },
-  sectionTitle: {
-    color: Colors.ink,
-    fontSize: 16,
-    fontWeight: '600',
+    fontFamily: Fonts.bebas,
+    fontSize: 36,
+    letterSpacing: 1.44, // 0.04em @ 36 (display register)
+    textTransform: 'uppercase',
     marginBottom: 12,
   },
   label: {
     color: Colors.inkSecondary,
     fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 0.12 * 11,
+    fontFamily: Fonts.interSemiBold,
+    letterSpacing: 1.54,
     textTransform: 'uppercase',
-    marginBottom: 8,
-    marginTop: 20,
+    marginBottom: 10,
+    marginTop: 24,
   },
-  switchRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 12,
-    marginTop: 8,
-  },
-  switchLabel: {
-    color: Colors.ink,
-    fontSize: 15,
-    flex: 1,
-  },
-  inviteCodeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 8,
-  },
-  inviteCode: {
-    color: Colors.ink,
-    fontSize: 20,
-    fontWeight: '700',
-    letterSpacing: 2,
-    flex: 1,
-  },
-  input: {
-    backgroundColor: Colors.surface,
-    color: Colors.ink,
-    padding: 12,
-    borderRadius: 4,
-    fontSize: 15,
-  },
-  pickerRow: {
+  chipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
   },
-  pickerOption: {
+  inviteCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.lg,
+    padding: 18,
+    marginTop: 28,
+  },
+  cardLabel: {
+    color: Colors.inkSecondary,
+    fontSize: 11,
+    fontFamily: Fonts.interSemiBold,
+    letterSpacing: 1.54,
+    textTransform: 'uppercase',
+    marginBottom: 12,
+  },
+  codeBoxRow: {
+    flexDirection: 'row',
+    gap: 4,
+    marginBottom: 12,
+  },
+  codeBox: {
+    flex: 1,
+    height: 54,
+    borderRadius: Radius.sm,
+    backgroundColor: Colors.surfaceRaised,
+    borderWidth: 1.5,
+    borderColor: Colors.hairline,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  codeBoxChar: {
+    // Invite-code register: --type-stat Bebas; the 0.34em tracking is carried by the box gaps.
+    fontFamily: Fonts.bebas,
+    fontSize: 22,
+    color: Colors.ink,
+  },
+  inviteToolbar: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  toolbarPill: {
+    flex: 1,
+    height: 44,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.surfaceRaised,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    paddingHorizontal: 14,
+  },
+  toolbarPillText: {
+    color: Colors.ink,
+    fontSize: 13,
+    fontFamily: Fonts.interSemiBold,
+  },
+  switchCard: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
     paddingHorizontal: 16,
     paddingVertical: 10,
-    backgroundColor: Colors.surface,
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: 'transparent',
+    marginTop: 12,
   },
-  pickerOptionActive: {
-    borderColor: Colors.primary,
-  },
-  pickerOptionText: {
-    color: Colors.inkSecondary,
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  pickerOptionTextActive: {
-    color: Colors.ink,
-  },
-  saveButton: {
-    backgroundColor: Colors.primary,
-    paddingVertical: 14,
-    borderRadius: 4,
-    alignItems: 'center',
-    marginTop: 32,
-  },
-  saveButtonDisabled: {
-    opacity: 0.4,
-  },
-  saveButtonText: {
-    color: Colors.ink,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  secondaryButton: {
-    backgroundColor: Colors.surfaceRaised,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 4,
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  buttonDisabled: {
-    opacity: 0.4,
-  },
-  secondaryButtonText: {
+  switchLabel: {
     color: Colors.ink,
     fontSize: 15,
-    fontWeight: '500',
+    fontFamily: Fonts.interSemiBold,
+    flex: 1,
+  },
+  ghostButton: {
+    height: 50,
+    borderRadius: Radius.full,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.16)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+    marginTop: 12,
+  },
+  ghostButtonText: {
+    color: Colors.ink,
+    fontSize: 15,
+    fontFamily: Fonts.interSemiBold,
+  },
+  pillDisabled: {
+    opacity: 0.4,
+  },
+  saveWrap: {
+    marginTop: 36,
   },
   errorText: {
     color: Colors.primary,
     fontSize: 14,
-    marginBottom: 16,
+    fontFamily: Fonts.inter,
     marginTop: 8,
+    marginBottom: 8,
   },
 })

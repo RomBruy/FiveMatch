@@ -6,6 +6,7 @@ import { useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { httpClient } from '../../lib/api-client'
 import { GroupContextProvider, useGroupContext } from '../../contexts/GroupContext'
+import { TabDock } from '../../components/ui/TabDock'
 import { usePushRegistration } from '../../hooks/use-push-registration'
 import * as Notifications from 'expo-notifications'
 
@@ -13,8 +14,17 @@ function useCurrentUser() {
   return useQuery({
     queryKey: ['auth', 'me'],
     queryFn: async () => {
-      const { data } = await httpClient.get<{ data: { name: string | null; userId: string; email: string } }>('/v1/auth/me')
-      return data.data
+      try {
+        const { data } = await httpClient.get<{
+          data: { name: string | null; userId: string; email: string; onboardingCompletedAt: string | null }
+        }>('/v1/auth/me')
+        return data.data
+      } catch (err) {
+        // A Clerk session may exist before the corresponding app user has been
+        // synced (notably after OAuth). Send that account through onboarding.
+        if ((err as { response?: { status?: number } }).response?.status === 404) return null
+        throw err
+      }
     },
   })
 }
@@ -52,7 +62,7 @@ function AppLayoutInner() {
   const { data: user, isSuccess } = useCurrentUser()
 
   useEffect(() => {
-    if (isSuccess && user.name === null) {
+    if (isSuccess && (!user || user.name === null || user.onboardingCompletedAt === null)) {
       router.replace('/(auth)/profile-completion')
     }
   }, [isSuccess, user])
@@ -84,10 +94,8 @@ function AppLayoutInner() {
   return (
     <View style={styles.container}>
       <Tabs
+        tabBar={(props) => <TabDock {...props} />}
         screenOptions={{
-          tabBarActiveTintColor: Colors.primary,
-          tabBarInactiveTintColor: Colors.inkSecondary,
-          tabBarStyle: { backgroundColor: Colors.surface },
           headerShown: false,
         }}
       >
@@ -96,6 +104,7 @@ function AppLayoutInner() {
         <Tabs.Screen name="match" options={{ title: t('auth.shell.tabMatch') }} />
         <Tabs.Screen name="vestiaire" options={{ title: t('auth.shell.tabVestiaire') }} />
         <Tabs.Screen name="profile/index" options={{ title: t('auth.shell.tabProfile') }} />
+        <Tabs.Screen name="player" options={{ href: null }} />
         <Tabs.Screen name="groups" options={{ href: null }} />
         <Tabs.Screen name="admin" options={{ href: null }} />
       </Tabs>

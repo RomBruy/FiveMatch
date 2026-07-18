@@ -1,6 +1,7 @@
 import { Image, StyleSheet, Text, View } from 'react-native'
 import { LinearGradient } from 'expo-linear-gradient'
 import { Colors } from '../../constants/colors'
+import { Gradients, RenderColors } from '../../constants/gradients'
 import { Fonts } from '../../constants/tokens'
 
 type RingColor = 'gold' | 'silver' | 'bronze' | 'red'
@@ -24,11 +25,11 @@ const RING_COLORS: Record<RingColor, string> = {
 
 // Duotone grounds — a render treatment of the avatar slot, not an AI pipeline (DESIGN-PROCESS.md assumption 4).
 const GRADIENTS = {
-  default: { colors: ['#3B3B44', '#222227'] as const, initials: Colors.inkSecondary },
-  ember: { colors: ['#4A2320', '#2A1512', '#1A0E0C'] as const, initials: '#E8A9A2' },
+  default: { colors: Gradients.duotoneDefault, initials: Colors.inkSecondary },
+  ember: { colors: Gradients.duotoneEmber, initials: RenderColors.emberInitials },
 }
 
-function getInitials(displayName: string): string {
+export function getInitials(displayName: string): string {
   return displayName
     .trim()
     .split(/\s+/)

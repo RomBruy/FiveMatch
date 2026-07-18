@@ -1,6 +1,6 @@
-import { eq, and, isNull, sql, ne } from 'drizzle-orm'
+import { eq, and, isNull, sql, ne, gte, asc } from 'drizzle-orm'
 import { db } from '../../db'
-import { matches, matchAttendances, players, groups, matchParticipants } from '../../db/schema'
+import { matches, matchAttendances, matchSeries, players, groups, matchParticipants } from '../../db/schema'
 import { notificationService } from '../notifications/notification.service'
 
 export interface CreateMatchInput {
@@ -10,38 +10,104 @@ export interface CreateMatchInput {
   playersPerTeam: number
   goalkeeperMode: 'fixed' | 'rotating' | 'none'
   generatorStyle?: 'pure_ovr' | 'position_aware' | 'mixed'
+  recurrence?: { frequency: 'weekly' | 'biweekly' } | null
+}
+
+// Occurrences are materialized this far ahead, extended lazily on read.
+const MATERIALIZE_HORIZON_DAYS = 31
+const FREQUENCY_DAYS = { weekly: 7, biweekly: 14 } as const
+
+/** Wall-clock date arithmetic — setDate keeps the kickoff hour across DST. */
+function addDays(base: Date, days: number): Date {
+  const next = new Date(base)
+  next.setDate(next.getDate() + days)
+  return next
+}
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0]
+
+/** Insert one match with its seeded attendance rows. Shared by direct creation and series materialization. */
+async function insertOccurrence(
+  tx: Tx,
+  groupId: string,
+  organizerInternalId: string,
+  data: Omit<CreateMatchInput, 'scheduledAt' | 'recurrence'>,
+  scheduledAt: Date,
+  seriesId: string | null,
+) {
+  const [newMatch] = await tx
+    .insert(matches)
+    .values({
+      groupId,
+      organizerId: organizerInternalId,
+      seriesId,
+      status: 'attendance_open',
+      scheduledAt,
+      location: data.location ?? null,
+      format: data.format,
+      playersPerTeam: data.playersPerTeam,
+      goalkeeperMode: data.goalkeeperMode,
+      generatorStyle: data.generatorStyle ?? 'pure_ovr',
+    })
+    .returning()
+
+  const activePlayers = await tx
+    .select({ id: players.id })
+    .from(players)
+    .where(and(eq(players.groupId, groupId), isNull(players.deletedAt)))
+
+  if (activePlayers.length > 0) {
+    await tx.insert(matchAttendances).values(
+      activePlayers.map((p) => ({
+        matchId: newMatch.id,
+        playerId: p.id,
+        status: 'unknown' as const,
+      })),
+    )
+  }
+
+  return newMatch
 }
 
 async function createMatch(groupId: string, organizerInternalId: string, data: CreateMatchInput) {
+  const firstAt = new Date(data.scheduledAt)
+
   const match = await db.transaction(async (tx) => {
-    const [newMatch] = await tx
-      .insert(matches)
-      .values({
-        groupId,
-        organizerId: organizerInternalId,
-        status: 'attendance_open',
-        scheduledAt: new Date(data.scheduledAt),
-        location: data.location ?? null,
-        format: data.format,
-        playersPerTeam: data.playersPerTeam,
-        goalkeeperMode: data.goalkeeperMode,
-        generatorStyle: data.generatorStyle ?? 'pure_ovr',
-      })
-      .returning()
+    let seriesId: string | null = null
 
-    const activePlayers = await tx
-      .select({ id: players.id })
-      .from(players)
-      .where(and(eq(players.groupId, groupId), isNull(players.deletedAt)))
+    if (data.recurrence) {
+      const [series] = await tx
+        .insert(matchSeries)
+        .values({
+          groupId,
+          organizerId: organizerInternalId,
+          frequency: data.recurrence.frequency,
+          location: data.location ?? null,
+          format: data.format,
+          playersPerTeam: data.playersPerTeam,
+          goalkeeperMode: data.goalkeeperMode,
+          generatorStyle: data.generatorStyle ?? 'pure_ovr',
+          lastOccurrenceAt: firstAt,
+        })
+        .returning()
+      seriesId = series.id
+    }
 
-    if (activePlayers.length > 0) {
-      await tx.insert(matchAttendances).values(
-        activePlayers.map((p) => ({
-          matchId: newMatch.id,
-          playerId: p.id,
-          status: 'unknown' as const,
-        })),
-      )
+    const newMatch = await insertOccurrence(tx, groupId, organizerInternalId, data, firstAt, seriesId)
+
+    // Materialize the rest of the first month up front; reads extend it later.
+    if (seriesId && data.recurrence) {
+      const horizon = addDays(new Date(), MATERIALIZE_HORIZON_DAYS)
+      const step = FREQUENCY_DAYS[data.recurrence.frequency]
+      let cursor = addDays(firstAt, step)
+      while (cursor <= horizon) {
+        await insertOccurrence(tx, groupId, organizerInternalId, data, cursor, seriesId)
+        cursor = addDays(cursor, step)
+      }
+      await tx
+        .update(matchSeries)
+        .set({ lastOccurrenceAt: addDays(cursor, -step) })
+        .where(eq(matchSeries.id, seriesId))
     }
 
     return newMatch
@@ -160,6 +226,7 @@ async function getActiveMatch(groupId: string) {
         ne(matches.status, 'cancelled'),
       ),
     )
+    .orderBy(asc(matches.scheduledAt))
     .limit(1)
 
   if (!match) return null
@@ -174,8 +241,79 @@ async function getActiveMatch(groupId: string) {
   }
 }
 
+/** Materialize any live series of the group up to the rolling horizon. */
+async function extendDueSeries(groupId: string) {
+  const horizon = addDays(new Date(), MATERIALIZE_HORIZON_DAYS)
+
+  const dueSeries = await db
+    .select()
+    .from(matchSeries)
+    .where(and(eq(matchSeries.groupId, groupId), isNull(matchSeries.endedAt)))
+
+  for (const series of dueSeries) {
+    const step = FREQUENCY_DAYS[series.frequency]
+    if (addDays(series.lastOccurrenceAt, step) > horizon) continue
+
+    await db.transaction(async (tx) => {
+      let cursor = addDays(series.lastOccurrenceAt, step)
+      let last = series.lastOccurrenceAt
+      while (cursor <= horizon) {
+        await insertOccurrence(
+          tx,
+          groupId,
+          series.organizerId,
+          {
+            location: series.location,
+            format: series.format,
+            playersPerTeam: series.playersPerTeam,
+            goalkeeperMode: series.goalkeeperMode,
+            generatorStyle: series.generatorStyle,
+          },
+          cursor,
+          series.id,
+        )
+        last = cursor
+        cursor = addDays(cursor, step)
+      }
+      await tx.update(matchSeries).set({ lastOccurrenceAt: last }).where(eq(matchSeries.id, series.id))
+    })
+  }
+}
+
+// Today's match stays listed a few hours past kickoff (it may be in progress).
+const UPCOMING_GRACE_MS = 6 * 60 * 60 * 1000
+
+async function getUpcomingMatches(groupId: string, limit: number) {
+  await extendDueSeries(groupId)
+
+  const rows = await db
+    .select()
+    .from(matches)
+    .where(
+      and(
+        eq(matches.groupId, groupId),
+        ne(matches.status, 'completed'),
+        ne(matches.status, 'cancelled'),
+        gte(matches.scheduledAt, new Date(Date.now() - UPCOMING_GRACE_MS)),
+      ),
+    )
+    .orderBy(asc(matches.scheduledAt))
+    .limit(limit)
+
+  return rows.map((match) => ({
+    matchId: match.id,
+    status: match.status,
+    scheduledAt: match.scheduledAt,
+    location: match.location,
+    format: match.format,
+    playersPerTeam: match.playersPerTeam,
+    seriesId: match.seriesId,
+  }))
+}
+
 export const matchService = {
   createMatch,
   getMatch,
   getActiveMatch,
+  getUpcomingMatches,
 }

@@ -3,8 +3,11 @@ import { useTranslation } from 'react-i18next'
 import { useQuery } from '@tanstack/react-query'
 import { useRouter } from 'expo-router'
 import { useEffect } from 'react'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { httpClient } from '../../lib/api-client'
 import { Colors } from '../../constants/colors'
+import { Fonts, Radius, Type } from '../../constants/tokens'
+import { StatTile } from '../../components/ui/StatTile'
 
 interface AdminMetrics {
   totalGroups: number
@@ -30,11 +33,17 @@ interface AdminMetrics {
   }
 }
 
-function StatRow({ label, value }: { label: string; value: number }) {
+function CountRows({ rows }: { rows: { label: string; value: number }[] }) {
   return (
-    <View style={styles.statRow}>
-      <Text style={styles.statLabel}>{label}</Text>
-      <Text style={styles.statValue}>{value}</Text>
+    <View style={styles.card}>
+      {rows.map((row, idx) => (
+        <View key={row.label} style={[styles.countRow, idx < rows.length - 1 && styles.countRowBorder]}>
+          <Text style={styles.countLabel}>{row.label}</Text>
+          <View style={styles.countPill}>
+            <Text style={styles.countPillText}>{row.value}</Text>
+          </View>
+        </View>
+      ))}
     </View>
   )
 }
@@ -42,6 +51,7 @@ function StatRow({ label, value }: { label: string; value: number }) {
 export default function AdminMetricsScreen() {
   const { t } = useTranslation()
   const router = useRouter()
+  const insets = useSafeAreaInsets()
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['admin', 'metrics'],
@@ -69,49 +79,109 @@ export default function AdminMetricsScreen() {
 
   if (!data) return null
 
+  const tiles: { label: string; value: number }[] = [
+    { label: t('admin.metrics.totalGroups'), value: data.totalGroups },
+    { label: t('admin.metrics.totalActiveUsers'), value: data.totalActiveUsers },
+    { label: t('admin.metrics.totalDeletedUsers'), value: data.totalDeletedUsers },
+    { label: t('admin.metrics.totalMatches'), value: data.totalMatches },
+    { label: t('admin.metrics.activeGroupsLast30Days'), value: data.activeGroupsLast30Days },
+    { label: t('admin.metrics.totalRatingsSubmitted'), value: data.totalRatingsSubmitted },
+    { label: t('admin.metrics.totalCardPhotoJobs'), value: data.totalCardPhotoJobs },
+  ]
+
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}
+    >
       <Text style={styles.title}>{t('admin.metrics.title')}</Text>
 
-      <View style={styles.section}>
-        <StatRow label={t('admin.metrics.totalGroups')} value={data.totalGroups} />
-        <StatRow label={t('admin.metrics.totalActiveUsers')} value={data.totalActiveUsers} />
-        <StatRow label={t('admin.metrics.totalDeletedUsers')} value={data.totalDeletedUsers} />
-        <StatRow label={t('admin.metrics.totalMatches')} value={data.totalMatches} />
-        <StatRow label={t('admin.metrics.activeGroupsLast30Days')} value={data.activeGroupsLast30Days} />
-        <StatRow label={t('admin.metrics.totalRatingsSubmitted')} value={data.totalRatingsSubmitted} />
-        <StatRow label={t('admin.metrics.totalCardPhotoJobs')} value={data.totalCardPhotoJobs} />
+      <View style={styles.tileGrid}>
+        {tiles.map((tile) => (
+          <StatTile key={tile.label} value={tile.value} label={tile.label} style={styles.tile} />
+        ))}
       </View>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionLabel}>{t('admin.metrics.matchesByStatus.planning')}</Text>
-        <StatRow label={t('admin.metrics.matchesByStatus.planning')} value={data.matchesByStatus.planning} />
-        <StatRow label={t('admin.metrics.matchesByStatus.attendanceLocked')} value={data.matchesByStatus.attendanceLocked} />
-        <StatRow label={t('admin.metrics.matchesByStatus.inProgress')} value={data.matchesByStatus.inProgress} />
-        <StatRow label={t('admin.metrics.matchesByStatus.completed')} value={data.matchesByStatus.completed} />
-        <StatRow label={t('admin.metrics.matchesByStatus.cancelled')} value={data.matchesByStatus.cancelled} />
-      </View>
+      <Text style={styles.sectionLabel}>{t('admin.metrics.sections.matchesByStatus').toUpperCase()}</Text>
+      <CountRows
+        rows={[
+          { label: t('admin.metrics.matchesByStatus.planning'), value: data.matchesByStatus.planning },
+          { label: t('admin.metrics.matchesByStatus.attendanceLocked'), value: data.matchesByStatus.attendanceLocked },
+          { label: t('admin.metrics.matchesByStatus.inProgress'), value: data.matchesByStatus.inProgress },
+          { label: t('admin.metrics.matchesByStatus.completed'), value: data.matchesByStatus.completed },
+          { label: t('admin.metrics.matchesByStatus.cancelled'), value: data.matchesByStatus.cancelled },
+        ]}
+      />
 
-      <View style={styles.section}>
-        <StatRow label={t('admin.metrics.cardPhotoJobsByState.idle')} value={data.cardPhotoJobsByState.idle} />
-        <StatRow label={t('admin.metrics.cardPhotoJobsByState.pending')} value={data.cardPhotoJobsByState.pending} />
-        <StatRow label={t('admin.metrics.cardPhotoJobsByState.processing')} value={data.cardPhotoJobsByState.processing} />
-        <StatRow label={t('admin.metrics.cardPhotoJobsByState.complete')} value={data.cardPhotoJobsByState.complete} />
-        <StatRow label={t('admin.metrics.cardPhotoJobsByState.failed')} value={data.cardPhotoJobsByState.failed} />
-      </View>
+      <Text style={styles.sectionLabel}>{t('admin.metrics.sections.cardPhotoJobs').toUpperCase()}</Text>
+      <CountRows
+        rows={[
+          { label: t('admin.metrics.cardPhotoJobsByState.idle'), value: data.cardPhotoJobsByState.idle },
+          { label: t('admin.metrics.cardPhotoJobsByState.pending'), value: data.cardPhotoJobsByState.pending },
+          { label: t('admin.metrics.cardPhotoJobsByState.processing'), value: data.cardPhotoJobsByState.processing },
+          { label: t('admin.metrics.cardPhotoJobsByState.complete'), value: data.cardPhotoJobsByState.complete },
+          { label: t('admin.metrics.cardPhotoJobsByState.failed'), value: data.cardPhotoJobsByState.failed },
+        ]}
+      />
     </ScrollView>
   )
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.bg },
-  content: { padding: 16 },
+  content: { padding: 16, paddingBottom: 32 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.bg, gap: 12 },
-  loadingText: { color: Colors.inkSecondary, fontSize: 14 },
-  title: { color: Colors.ink, fontSize: 24, fontFamily: 'BebasNeue_400Regular', letterSpacing: 2, marginBottom: 20 },
-  section: { marginBottom: 24 },
-  sectionLabel: { color: Colors.inkSecondary, fontSize: 11, fontWeight: '600', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 8 },
-  statRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: Colors.surfaceRaised },
-  statLabel: { color: Colors.inkSecondary, fontSize: 14 },
-  statValue: { color: Colors.ink, fontSize: 16, fontWeight: '600' },
+  loadingText: { color: Colors.inkSecondary, fontSize: 14, fontFamily: Fonts.inter },
+  title: {
+    color: Colors.ink,
+    fontFamily: Type.heading.fontFamily,
+    fontSize: Type.heading.maxSize,
+    letterSpacing: Type.heading.letterSpacing,
+    marginBottom: 20,
+  },
+  tileGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  tile: {
+    flexBasis: '45%',
+    flexGrow: 1,
+  },
+  sectionLabel: {
+    color: Colors.inkDisabled,
+    fontFamily: Type.labelCaps.fontFamily,
+    fontSize: 10.5,
+    letterSpacing: 1.68, // 0.16em @ 10.5 (label-caps register)
+    marginTop: 22,
+    marginBottom: 10,
+  },
+  card: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    paddingHorizontal: 18,
+  },
+  countRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  countRowBorder: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.hairline,
+  },
+  countLabel: { color: Colors.ink, fontSize: 13.5, fontFamily: Fonts.interSemiBold, flex: 1 },
+  countPill: {
+    backgroundColor: Colors.surfaceRaised,
+    borderRadius: Radius.full,
+    paddingHorizontal: 13,
+    paddingVertical: 6,
+  },
+  countPillText: {
+    color: Colors.inkSecondary,
+    fontSize: 11,
+    fontFamily: Fonts.interSemiBold,
+    letterSpacing: 0.66, // 0.06em @ 11
+  },
 })

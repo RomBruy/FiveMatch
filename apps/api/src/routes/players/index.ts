@@ -1,9 +1,9 @@
 import { Router } from 'express'
-import { eq, and, isNull, isNotNull, desc } from 'drizzle-orm'
+import { eq, and, isNull, isNotNull, desc, sql } from 'drizzle-orm'
 import { asyncHandler } from '../../middleware/async-handler'
 import { requireGroupMember } from '../../middleware/require-group-member'
 import { db } from '../../db'
-import { players, users, matches } from '../../db/schema'
+import { players, users, matches, matchParticipants } from '../../db/schema'
 import { ovrService } from '../../services/players/ovr.service'
 import { ErrorCode } from '@fivematch/types'
 import { logger } from '../../lib/logger'
@@ -98,6 +98,17 @@ router.get(
         avgPhysicality: players.avgPhysicality,
         avgEffort: players.avgEffort,
         profilePhotoCardUrl: players.profilePhotoCardUrl,
+        profilePhotoUrl: users.profilePhotoUrl,
+        currentClub: users.currentClub,
+        formerClub: users.formerClub,
+        preferredPosition: users.preferredPosition,
+        strongFoot: users.strongFoot,
+        playerStyle: users.playerStyle,
+        specialSkill: users.specialSkill,
+        favoriteExcuse: users.favoriteExcuse,
+        badFaithLevel: users.badFaithLevel,
+        lockerRoomStyle: users.lockerRoomStyle,
+        thirdHalfProfile: users.thirdHalfProfile,
       })
       .from(players)
       .innerJoin(users, eq(users.id, players.userId))
@@ -148,6 +159,26 @@ router.get(
 
     const isMvp = recentMvpMatch[0]?.mvpPlayerId === row.id
 
+    const [tightestMatch] = await db
+      .select({
+        scheduledAt: matches.scheduledAt,
+        scoreA: matches.scoreA,
+        scoreB: matches.scoreB,
+      })
+      .from(matchParticipants)
+      .innerJoin(matches, eq(matches.id, matchParticipants.matchId))
+      .where(
+        and(
+          eq(matchParticipants.playerId, row.id),
+          eq(matches.groupId, groupId),
+          eq(matches.status, 'completed'),
+          isNotNull(matches.scoreA),
+          isNotNull(matches.scoreB),
+        ),
+      )
+      .orderBy(sql`ABS(${matches.scoreA} - ${matches.scoreB}) ASC`, desc(matches.scheduledAt))
+      .limit(1)
+
     return res.json({
       data: {
         playerId: row.id,
@@ -157,8 +188,29 @@ router.get(
         ovrScore: ovrService.getOvrForDisplay(currentFloat, row.matchCount),
         trend,
         attributes,
-        photoUrl: row.profilePhotoCardUrl ?? null,
+        photoUrl: row.profilePhotoCardUrl ?? row.profilePhotoUrl ?? null,
         isMvp,
+        footballIdentity: {
+          currentClub: row.currentClub,
+          formerClub: row.formerClub,
+          preferredPosition: row.preferredPosition,
+          strongFoot: row.strongFoot,
+          playerStyle: row.playerStyle,
+        },
+        personality: {
+          specialSkill: row.specialSkill,
+          favoriteExcuse: row.favoriteExcuse,
+          badFaithLevel: row.badFaithLevel,
+          lockerRoomStyle: row.lockerRoomStyle,
+          thirdHalfProfile: row.thirdHalfProfile,
+        },
+        memory: {
+          tightestMatch: tightestMatch && tightestMatch.scoreA !== null && tightestMatch.scoreB !== null ? {
+            scheduledAt: tightestMatch.scheduledAt,
+            scoreA: tightestMatch.scoreA,
+            scoreB: tightestMatch.scoreB,
+          } : null,
+        },
       },
     })
   }),

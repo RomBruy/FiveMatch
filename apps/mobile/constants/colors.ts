@@ -36,7 +36,7 @@ export const Colors = {
   paper: '#EDEAE3',
   paperCard: '#F6F4EF',
   paperInk: '#141412',
-  paperInk2: '#6E6A61',
+  paperInk2: '#6D6960', // one step darker than the original #6E6A61 — 4.55:1 vs paper (9.12 contrast floor)
   paperDot: '#D8D4CA',
   paperRed: '#D42D22', // primary deepens on paper for contrast; carries prestige on paper (no gold on bone)
 } as const

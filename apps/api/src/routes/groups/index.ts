@@ -45,7 +45,7 @@ router.post(
     const body = createGroupSchema.parse(req.body)
     const clerkUserId = req.user.userId
 
-    const [user] = await db.select({ id: users.id }).from(users).where(eq(users.clerkUserId, clerkUserId))
+    const [user] = await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.clerkUserId, clerkUserId))
     if (!user) {
       return res.status(404).json({
         error: { code: ErrorCode.USER_NOT_FOUND, message: 'User not found', statusCode: 404 },
@@ -72,6 +72,16 @@ router.post(
         userId: user.id,
         role: 'organizer',
         joinedAt: new Date(),
+      })
+
+      // The organizer plays too — without this row they are invisible to
+      // attendance, the leaderboard, and cards (the approve flow creates it
+      // for every other member).
+      await tx.insert(players).values({
+        groupId: newGroup.id,
+        userId: user.id,
+        displayName: user.name ?? 'Player',
+        matchCount: 0,
       })
 
       return newGroup

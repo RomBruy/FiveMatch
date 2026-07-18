@@ -45,9 +45,15 @@ router.get(
     const status = req.query['status'] as string | undefined
     const limit = Math.min(parseInt((req.query['limit'] as string) ?? '10', 10), 50)
 
+    // Upcoming list — also lazily extends any live recurring series.
+    if (status === 'upcoming') {
+      const upcoming = await matchService.getUpcomingMatches(groupId, limit)
+      return res.json({ data: { matches: upcoming } })
+    }
+
     if (status !== 'completed') {
       return res.status(400).json({
-        error: { code: ErrorCode.VALIDATION_ERROR, statusCode: 400, message: 'status=completed is required' },
+        error: { code: ErrorCode.VALIDATION_ERROR, statusCode: 400, message: 'status=completed or status=upcoming is required' },
       })
     }
 
@@ -916,6 +922,17 @@ router.get(
       .from(matchParticipants)
       .where(eq(matchParticipants.matchId, matchId))
 
+    // Fairness score of the split that was locked — the same last-completed-job
+    // rule as lock-teams. Manual swaps don't recompute it (matches the pre-lock display).
+    const [lastJob] = await db
+      .select({ fairnessScore: teamGenerationJobs.fairnessScore })
+      .from(teamGenerationJobs)
+      .where(and(eq(teamGenerationJobs.matchId, matchId), eq(teamGenerationJobs.status, 'complete')))
+      .orderBy(sql`${teamGenerationJobs.generationNumber} DESC`)
+      .limit(1)
+
+    const fairnessScore = lastJob?.fairnessScore != null ? Number(lastJob.fairnessScore) : null
+
     // Determine current user's team side (null if not a participant)
     const [myPlayer] = await db
       .select({ id: players.id })
@@ -930,6 +947,7 @@ router.get(
       data: {
         myPlayerId,
         myTeamSide,
+        fairnessScore,
         teamA: participants.filter((p) => p.teamSide === 'A').map((p) => ({ playerId: p.playerId, displayName: p.displayName })),
         teamB: participants.filter((p) => p.teamSide === 'B').map((p) => ({ playerId: p.playerId, displayName: p.displayName })),
       },

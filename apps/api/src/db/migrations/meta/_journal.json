@@ -78,6 +78,20 @@
       "when": 1782762892504,
       "tag": "0010_yummy_iron_monger",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1784300777694,
+      "tag": "0011_long_star_brand",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1784372337015,
+      "tag": "0012_demonic_thunderball",
+      "breakpoints": true
     }
   ]
 }

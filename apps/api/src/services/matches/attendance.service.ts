@@ -32,12 +32,20 @@ async function markAttendance(
     throw Object.assign(new Error('ATTENDANCE_CLOSED'), { code: 'ATTENDANCE_CLOSED', statusCode: 422 })
   }
 
-  const [attendance] = await db
+  let [attendance] = await db
     .select()
     .from(matchAttendances)
     .where(and(eq(matchAttendances.matchId, matchId), eq(matchAttendances.playerId, player.id)))
     .limit(1)
 
+  // Rows are seeded at match creation — players who joined the group after
+  // that have none. First response creates it instead of locking them out.
+  if (!attendance) {
+    ;[attendance] = await db
+      .insert(matchAttendances)
+      .values({ matchId, playerId: player.id, status: 'unknown' })
+      .returning()
+  }
   if (!attendance) {
     throw Object.assign(new Error('NOT_IN_MATCH'), { code: 'NOT_IN_MATCH', statusCode: 404 })
   }
