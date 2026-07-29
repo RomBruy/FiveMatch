@@ -19,8 +19,8 @@ import Animated, {
   runOnJS,
   Easing,
 } from 'react-native-reanimated'
-import * as Haptics from 'expo-haptics'
 import AsyncStorage from '@react-native-async-storage/async-storage'
+import { haptics } from '../../../../lib/haptics'
 import { posthog } from '../../../../lib/posthog'
 import { Colors } from '../../../../constants/colors'
 import { Fonts, Type } from '../../../../constants/tokens'
@@ -67,11 +67,11 @@ const REVEAL_SEEN_KEY = (groupId: string, playerId: string) =>
   `card_reveal_seen_${groupId}_${playerId}`
 
 function fireCardHaptic() {
-  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {})
+  haptics.impact('Medium')
 }
 
 function fireOvrHaptic() {
-  Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {})
+  haptics.success()
 }
 
 export default function CardRevealScreen() {
@@ -81,6 +81,10 @@ export default function CardRevealScreen() {
 
   const [reduceMotion, setReduceMotion] = useState(false)
   const [isSharing, setIsSharing] = useState(false)
+  // Story 10.4 — the card only becomes a living, tilting object AFTER the 5.2 reveal
+  // settles. Gated on the reveal's final (meta) completion; PaniniCard itself no-ops
+  // this under reduced motion or a zeroed sensor.
+  const [cardInteractive, setCardInteractive] = useState(false)
   const hasMarkedSeen = useRef(false)
   const cardCaptureRef = useRef<View>(null)
 
@@ -159,6 +163,10 @@ export default function CardRevealScreen() {
     )
   }
 
+  const enableCardInteractive = () => {
+    setCardInteractive(true)
+  }
+
   useEffect(() => {
     posthog.capture('card_unlocked', {})
   }, [])
@@ -199,6 +207,7 @@ export default function CardRevealScreen() {
       ctaOpacity.value = withDelay(REVEAL_CTA_DELAY_MS, withTiming(1, { duration: dur }))
       metaOpacity.value = withDelay(REVEAL_META_DELAY_MS, withTiming(1, { duration: dur }, () => {
         runOnJS(announceAccessibility)()
+        runOnJS(enableCardInteractive)()
       }))
     } else {
       // 1. Unlock label
@@ -240,6 +249,7 @@ export default function CardRevealScreen() {
       // 5. Meta fade-down — fires accessibility announcement on complete
       metaOpacity.value = withDelay(REVEAL_META_DELAY_MS, withTiming(1, { duration: REVEAL_META_DURATION_MS, easing: easeOut }, () => {
         runOnJS(announceAccessibility)()
+        runOnJS(enableCardInteractive)()
       }))
       metaTranslateY.value = withDelay(REVEAL_META_DELAY_MS, withTiming(0, { duration: REVEAL_META_DURATION_MS, easing: easeOut }))
     }
@@ -299,6 +309,7 @@ export default function CardRevealScreen() {
             ovrStyle={ovrAnimatedStyle}
             isMvp={player.isMvp}
             serialTotal={playersData?.items.length}
+            interactive={cardInteractive}
           />
         ) : (
           <View style={styles.cardSkeleton} />

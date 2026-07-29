@@ -1,4 +1,4 @@
-import { eq, and, isNull, sql, ne, gte, asc } from 'drizzle-orm'
+import { eq, and, isNull, sql, ne, gte, asc, inArray } from 'drizzle-orm'
 import { db } from '../../db'
 import { matches, matchAttendances, matchSeries, players, groups, matchParticipants } from '../../db/schema'
 import { notificationService } from '../notifications/notification.service'
@@ -311,9 +311,57 @@ async function getUpcomingMatches(groupId: string, limit: number) {
   }))
 }
 
+/**
+ * Stop a recurring series: no further occurrences are materialized, and
+ * already-created future matches are cancelled — except those someone has
+ * confirmed IN for, which stay on the calendar.
+ */
+async function endSeries(groupId: string, seriesId: string) {
+  const [series] = await db
+    .select()
+    .from(matchSeries)
+    .where(and(eq(matchSeries.id, seriesId), eq(matchSeries.groupId, groupId), isNull(matchSeries.endedAt)))
+
+  if (!series) return null
+
+  const cancelledCount = await db.transaction(async (tx) => {
+    await tx.update(matchSeries).set({ endedAt: new Date() }).where(eq(matchSeries.id, seriesId))
+
+    const future = await tx
+      .select({ id: matches.id })
+      .from(matches)
+      .where(
+        and(
+          eq(matches.seriesId, seriesId),
+          gte(matches.scheduledAt, new Date()),
+          inArray(matches.status, ['planning', 'attendance_open']),
+        ),
+      )
+
+    if (future.length === 0) return 0
+    const futureIds = future.map((m) => m.id)
+
+    const confirmedRows = await tx
+      .select({ matchId: matchAttendances.matchId })
+      .from(matchAttendances)
+      .where(and(inArray(matchAttendances.matchId, futureIds), eq(matchAttendances.status, 'in')))
+
+    const keep = new Set(confirmedRows.map((r) => r.matchId))
+    const toCancel = futureIds.filter((id) => !keep.has(id))
+
+    if (toCancel.length > 0) {
+      await tx.update(matches).set({ status: 'cancelled' }).where(inArray(matches.id, toCancel))
+    }
+    return toCancel.length
+  })
+
+  return { seriesId, cancelledCount }
+}
+
 export const matchService = {
   createMatch,
   getMatch,
   getActiveMatch,
   getUpcomingMatches,
+  endSeries,
 }

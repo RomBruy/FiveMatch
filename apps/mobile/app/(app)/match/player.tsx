@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { View, Text, ScrollView, StyleSheet, ActivityIndicator, Pressable } from 'react-native'
-import { useLocalSearchParams, useFocusEffect } from 'expo-router'
+import { useLocalSearchParams, useFocusEffect, useRouter } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Ionicons } from '@expo/vector-icons'
@@ -19,8 +19,7 @@ import { PrimaryButton } from '../../../components/ui/PrimaryButton'
 import { CountdownPill } from '../../../components/ui/CountdownPill'
 import { DuotoneAvatar } from '../../../components/ui/DuotoneAvatar'
 import { DOCK_CLEARANCE } from '../../../components/ui/TabDock'
-import { PronosForm } from '../../../components/match/PronosForm'
-import { PronosReveal } from '../../../components/match/PronosReveal'
+import { PressableScale } from '../../../components/ui/PressableScale'
 import { PostMatchRatings } from '../../../components/match/PostMatchRatings'
 import { LockedPitchBoard } from '../../../components/match/PitchBoard'
 
@@ -74,6 +73,7 @@ interface ParticipantsData {
 export default function MatchPlayerScreen() {
   const { t, i18n } = useTranslation()
   const { matchId } = useLocalSearchParams<{ matchId: string }>()
+  const router = useRouter()
   const { activeGroupId } = useGroupContext()
   const insets = useSafeAreaInsets()
   const queryClient = useQueryClient()
@@ -259,15 +259,24 @@ export default function MatchPlayerScreen() {
           </View>
         )}
 
-        {match.status !== 'completed' && match.status !== 'cancelled' && activeGroupId && (
-          <PronosForm matchId={matchId} groupId={activeGroupId} scheduledAt={match.scheduledAt} />
-        )}
-
-        {match.status === 'completed' && activeGroupId && (
-          <View style={styles.section}>
-            <Text style={styles.sectionLabel}>{t('pronos.reveal.title')}</Text>
-            <PronosReveal matchId={matchId} groupId={activeGroupId} currentPlayerId={myPlayerId ?? ''} />
-          </View>
+        {/*
+          One destination for both states: the Pronos screen renders the odds board before
+          kick-off and the settlement reveal afterwards (Story 11.6), so branching on status
+          here would duplicate that decision in a second place and drift from it.
+        */}
+        {activeGroupId && (
+          <PressableScale
+            style={styles.pronosLink}
+            onPress={() => router.push(`/(app)/pronos/${matchId}` as never)}
+            accessibilityRole="button"
+            accessibilityLabel={t('pronos.matchLink.a11y')}
+          >
+            <View style={styles.pronosLinkText}>
+              <Text style={styles.pronosLinkTitle}>{t('pronos.matchLink.title')}</Text>
+              <Text style={styles.pronosLinkMeta}>{t('pronos.matchLink.meta')}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={15} color={Colors.inkDisabled} />
+          </PressableScale>
         )}
 
         {(attendances?.confirmed.length ?? 0) > 0 && (
@@ -474,6 +483,22 @@ const styles = StyleSheet.create({
   section: {
     paddingHorizontal: 20,
   },
+  // Pronos Shortcut Card language (DESIGN.md#Components). Spends nothing from this
+  // screen's budget: no glow, no numeral, no gold, no texture.
+  pronosLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginHorizontal: 20,
+    minHeight: 64,
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+  },
+  pronosLinkText: { flex: 1, minWidth: 0, gap: 3 },
+  pronosLinkTitle: { color: Colors.ink, fontSize: 14.5, fontFamily: Fonts.interSemiBold },
+  pronosLinkMeta: { color: Colors.inkSecondary, fontSize: 12, fontFamily: Fonts.inter },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',

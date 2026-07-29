@@ -8,6 +8,7 @@ import { Gradients } from '../../constants/gradients'
 import { Fonts, Motion, Radius } from '../../constants/tokens'
 import { DuotoneAvatar, getInitials } from '../ui/DuotoneAvatar'
 import { TextureType } from '../ui/TextureType'
+import { CountUpNumber } from '../ui/CountUpNumber'
 
 interface MvpCeremonyCardProps {
   scoreA: number | null
@@ -119,7 +120,13 @@ export function MvpCeremonyCard({
             </View>
           </View>
           <View style={styles.scoreBlock}>
-            <Text style={styles.score}>{score}</Text>
+            {scoreA !== null && scoreB !== null ? (
+              <View style={styles.scoreRow}>
+                <CountUpNumber value={scoreA} style={styles.score} />
+                <Text style={styles.scoreSeparator}>–</Text>
+                <CountUpNumber value={scoreB} style={styles.score} />
+              </View>
+            ) : <Text style={styles.score}>{score}</Text>}
             <Text style={styles.date}>{dateLabel}</Text>
           </View>
         </View>
@@ -191,12 +198,21 @@ const styles = StyleSheet.create({
   scoreBlock: {
     alignItems: 'flex-end',
   },
+  scoreRow: { flexDirection: 'row', alignItems: 'center' },
   score: {
     fontFamily: Fonts.bebas,
     fontSize: 46,
     lineHeight: 46 * 0.9 + 4,
     color: Colors.onPrimary,
     fontVariant: ['tabular-nums'],
+    height: 46,
+    minWidth: 22,
+  },
+  scoreSeparator: {
+    fontFamily: Fonts.bebas,
+    fontSize: 46,
+    lineHeight: 46 * 0.9 + 4,
+    color: Colors.onPrimary,
   },
   date: {
     fontFamily: Fonts.interSemiBold,

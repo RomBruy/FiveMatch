@@ -2,147 +2,231 @@ import { Router } from 'express'
 import { asyncHandler } from '../../middleware/async-handler'
 import { requireGroupMember } from '../../middleware/require-group-member'
 import { db } from '../../db'
-import { pronos, matches, players, matchAttendances } from '../../db/schema'
-import { eq, and, isNull, inArray } from 'drizzle-orm'
+import { matches, players, pronoBets } from '../../db/schema'
+import { eq, and, isNull, inArray, asc } from 'drizzle-orm'
 import { ErrorCode } from '@fivematch/types'
-import { SubmitPronosSchema } from './schemas'
+import { PlaceBetSchema } from './schemas'
+import { betService } from '../../services/pronos/bet.service'
+import { bankrollService } from '../../services/pronos/bankroll.service'
+import { resultOf } from '../../services/pronos/odds-engine'
 
 const router = Router({ mergeParams: true })
 
-// POST /v1/groups/:groupId/matches/:matchId/pronos — submit or upsert prono
-router.post(
-  '/',
+/** The reveal's zero state — a match nobody bet on, or one not yet played. */
+const EMPTY_TOTALS = { staked: 0, returned: 0, net: 0 } as const
+
+// Bankroll failures arrive as thrown errors carrying { code, statusCode } — map them to
+// the standard error envelope; anything unrecognised belongs to the error handler.
+const BANKROLL_ERROR_STATUS: Record<string, number> = {
+  INSUFFICIENT_BALANCE: 422,
+  STAKE_LIMIT_EXCEEDED: 422,
+  INVALID_STAKE: 422,
+  INVALID_SELECTION: 422,
+  PLAYER_NOT_FOUND: 404,
+}
+
+// ─── Story 11.3 — betting ────────────────────────────────────────────────────
+
+/** Resolve the caller's player row for this group. */
+async function resolveCallerPlayer(userInternalId: string, groupId: string) {
+  const [callerPlayer] = await db
+    .select({ id: players.id })
+    .from(players)
+    .where(and(eq(players.userId, userInternalId), eq(players.groupId, groupId), isNull(players.deletedAt)))
+  return callerPlayer ?? null
+}
+
+/** Load the match scoped to its group, with everything the betting routes need. */
+async function loadBettableMatch(matchId: string, groupId: string) {
+  const [match] = await db
+    .select({
+      id: matches.id,
+      scheduledAt: matches.scheduledAt,
+      teamAOvrAtLock: matches.teamAOvrAtLock,
+      teamBOvrAtLock: matches.teamBOvrAtLock,
+    })
+    .from(matches)
+    .where(and(eq(matches.id, matchId), eq(matches.groupId, groupId)))
+  return match ?? null
+}
+
+// GET /v1/groups/:groupId/matches/:matchId/pronos/odds — the live board
+router.get(
+  '/odds',
   requireGroupMember,
   asyncHandler(async (req, res) => {
     const { groupId, matchId } = req.params as { groupId: string; matchId: string }
-    const data = SubmitPronosSchema.parse(req.body)
 
-    // Resolve caller's player for this group
-    const [callerPlayer] = await db
-      .select({ id: players.id })
-      .from(players)
-      .where(and(eq(players.userId, req.user.internalId!), eq(players.groupId, groupId), isNull(players.deletedAt)))
-
-    if (!callerPlayer) {
-      return res.status(403).json({ error: { code: ErrorCode.NOT_A_MEMBER, statusCode: 403 } })
-    }
-
-    // Load match and verify it belongs to this group
-    const [match] = await db
-      .select({ id: matches.id, scheduledAt: matches.scheduledAt })
-      .from(matches)
-      .where(and(eq(matches.id, matchId), eq(matches.groupId, groupId)))
-
+    const match = await loadBettableMatch(matchId, groupId)
     if (!match) {
       return res.status(404).json({ error: { code: ErrorCode.MATCH_NOT_FOUND, statusCode: 404 } })
     }
-
-    // Check pronos window
-    if (new Date() >= match.scheduledAt) {
-      return res.status(422).json({
-        error: { code: ErrorCode.PRONOS_WINDOW_CLOSED, message: 'Pronos window is closed', statusCode: 422 },
-      })
+    if (match.teamAOvrAtLock === null || match.teamBOvrAtLock === null) {
+      return res.status(422).json({ error: { code: ErrorCode.ODDS_NOT_AVAILABLE, statusCode: 422 } })
     }
 
-    const submittedAt = new Date()
-
-    await db
-      .insert(pronos)
-      .values({
-        matchId,
-        playerId: callerPlayer.id,
-        predictionResult: data.predictionResult,
-        predictionMvpPlayerId: data.predictionMvpPlayerId,
-        predictionScore: `${data.predictionScoreA}-${data.predictionScoreB}`,
-        submittedAt,
-      })
-      .onConflictDoUpdate({
-        target: [pronos.matchId, pronos.playerId],
-        set: {
-          predictionResult: data.predictionResult,
-          predictionMvpPlayerId: data.predictionMvpPlayerId,
-          predictionScore: `${data.predictionScoreA}-${data.predictionScoreB}`,
-          submittedAt,
-        },
-      })
-
-    return res.json({ data: { submittedAt: submittedAt.toISOString() } })
-  }),
-)
-
-// GET /v1/groups/:groupId/matches/:matchId/pronos/my — return caller's prono (null if none)
-router.get(
-  '/my',
-  requireGroupMember,
-  asyncHandler(async (req, res) => {
-    const { groupId, matchId } = req.params as { groupId: string; matchId: string }
-
-    const [callerPlayer] = await db
-      .select({ id: players.id })
-      .from(players)
-      .where(and(eq(players.userId, req.user.internalId!), eq(players.groupId, groupId), isNull(players.deletedAt)))
-
-    if (!callerPlayer) {
-      return res.json({ data: { prono: null } })
-    }
-
-    const [prono] = await db
-      .select({
-        predictionResult: pronos.predictionResult,
-        predictionMvpPlayerId: pronos.predictionMvpPlayerId,
-        predictionScore: pronos.predictionScore,
-        submittedAt: pronos.submittedAt,
-        pointsEarned: pronos.pointsEarned,
-      })
-      .from(pronos)
-      .where(and(eq(pronos.matchId, matchId), eq(pronos.playerId, callerPlayer.id)))
-
-    return res.json({ data: { prono: prono ?? null } })
-  }),
-)
-
-// GET /v1/groups/:groupId/matches/:matchId/pronos/attendees-in — players with status='in'
-router.get(
-  '/attendees-in',
-  requireGroupMember,
-  asyncHandler(async (req, res) => {
-    const { groupId, matchId } = req.params as { groupId: string; matchId: string }
-
-    const rows = await db
-      .select({
-        playerId: matchAttendances.playerId,
-        displayName: players.displayName,
-      })
-      .from(matchAttendances)
-      .innerJoin(players, eq(players.id, matchAttendances.playerId))
-      .innerJoin(matches, eq(matches.id, matchAttendances.matchId))
-      .where(
-        and(
-          eq(matchAttendances.matchId, matchId),
-          eq(matches.groupId, groupId),
-          eq(matchAttendances.status, 'in'),
-          isNull(matchAttendances.waitlistPosition),
-        ),
-      )
+    const roster = await betService.getLockedRoster(matchId)
+    const board = betService.buildOddsBoard(
+      Number(match.teamAOvrAtLock),
+      Number(match.teamBOvrAtLock),
+      roster,
+    )
 
     return res.json({
       data: {
-        players: rows
-          .filter((r) => r.playerId !== null)
-          .map((r) => ({ playerId: r.playerId, displayName: r.displayName })),
+        ...board,
+        // The locked OVR pair the board above was priced from. Exposed so the screen's
+        // header can never show a live OVR that contradicts its own cotes (Story 11.5).
+        teams: {
+          teamAOvr: Number(match.teamAOvrAtLock),
+          teamBOvr: Number(match.teamBOvrAtLock),
+        },
+        window: {
+          open: new Date() < match.scheduledAt,
+          closesAt: match.scheduledAt.toISOString(),
+        },
       },
     })
   }),
 )
 
-// GET /v1/groups/:groupId/matches/:matchId/pronos/reveal
+// POST /v1/groups/:groupId/matches/:matchId/pronos/bets — stake points on a market
+router.post(
+  '/bets',
+  requireGroupMember,
+  asyncHandler(async (req, res) => {
+    const { groupId, matchId } = req.params as { groupId: string; matchId: string }
+    const data = PlaceBetSchema.parse(req.body)
+
+    const callerPlayer = await resolveCallerPlayer(req.user.internalId!, groupId)
+    if (!callerPlayer) {
+      return res.status(403).json({ error: { code: ErrorCode.NOT_A_MEMBER, statusCode: 403 } })
+    }
+
+    const match = await loadBettableMatch(matchId, groupId)
+    if (!match) {
+      return res.status(404).json({ error: { code: ErrorCode.MATCH_NOT_FOUND, statusCode: 404 } })
+    }
+    if (match.teamAOvrAtLock === null || match.teamBOvrAtLock === null) {
+      return res.status(422).json({ error: { code: ErrorCode.ODDS_NOT_AVAILABLE, statusCode: 422 } })
+    }
+    if (new Date() >= match.scheduledAt) {
+      return res.status(422).json({ error: { code: ErrorCode.PRONOS_WINDOW_CLOSED, statusCode: 422 } })
+    }
+
+    // Price the board server-side, then find the caller's selection ON it. A selection
+    // that is well-shaped but not on the board (an off-grid scoreline, a player who is
+    // not in the locked teams) is rejected here rather than silently priced.
+    const roster = await betService.getLockedRoster(matchId)
+    const board = betService.buildOddsBoard(
+      Number(match.teamAOvrAtLock),
+      Number(match.teamBOvrAtLock),
+      roster,
+    )
+
+    let oddsAtBet: number | undefined
+    if (data.market === 'result') {
+      if (data.selection === 'teamA' || data.selection === 'draw' || data.selection === 'teamB') {
+        oddsAtBet = board.result[data.selection]
+      }
+    } else if (data.market === 'score') {
+      oddsAtBet = board.scores.find((s) => s.selection === data.selection)?.odds
+    } else {
+      oddsAtBet = board.mvp.find((m) => m.playerId === data.selection)?.odds
+    }
+
+    if (oddsAtBet === undefined) {
+      return res.status(422).json({ error: { code: ErrorCode.INVALID_SELECTION, statusCode: 422 } })
+    }
+
+    try {
+      const { bet, balance } = await bankrollService.placeBet({
+        playerId: callerPlayer.id,
+        matchId,
+        market: data.market,
+        selection: data.selection,
+        stake: data.stake,
+        oddsAtBet,
+      })
+
+      return res.status(201).json({
+        data: {
+          bet: { ...bet, oddsAtBet: Number(bet.oddsAtBet) },
+          balance,
+        },
+      })
+    } catch (err: unknown) {
+      const code = (err as { code?: string }).code
+      const status = code ? BANKROLL_ERROR_STATUS[code] : undefined
+      if (code && status) {
+        return res.status(status).json({ error: { code, statusCode: status } })
+      }
+      throw err
+    }
+  }),
+)
+
+// GET /v1/groups/:groupId/matches/:matchId/pronos/bets/my — caller's bets + balance
 router.get(
-  '/reveal',
+  '/bets/my',
   requireGroupMember,
   asyncHandler(async (req, res) => {
     const { groupId, matchId } = req.params as { groupId: string; matchId: string }
 
-    // Verify match belongs to this group and is completed
+    const callerPlayer = await resolveCallerPlayer(req.user.internalId!, groupId)
+    if (!callerPlayer) {
+      return res.status(403).json({ error: { code: ErrorCode.NOT_A_MEMBER, statusCode: 403 } })
+    }
+
+    const rows = await db
+      .select()
+      .from(pronoBets)
+      .where(and(eq(pronoBets.matchId, matchId), eq(pronoBets.playerId, callerPlayer.id)))
+      .orderBy(asc(pronoBets.placedAt))
+
+    const balance = await bankrollService.getBalance(callerPlayer.id)
+    const netPayout = rows.reduce((sum, b) => sum + ((b.payout ?? 0) - b.stake), 0)
+
+    return res.json({
+      data: {
+        bets: rows.map((b) => ({
+          id: b.id,
+          market: b.market,
+          selection: b.selection,
+          stake: b.stake,
+          oddsAtBet: Number(b.oddsAtBet),
+          status: b.status,
+          payout: b.payout,
+          placedAt: b.placedAt.toISOString(),
+          settledAt: b.settledAt ? b.settledAt.toISOString() : null,
+        })),
+        balance,
+        netPayout,
+      },
+    })
+  }),
+)
+
+// ─── Story 11.6 — settlement reveal ──────────────────────────────────────────
+
+// GET /v1/groups/:groupId/matches/:matchId/pronos/bets/reveal
+//
+// Unlike the legacy flat `GET /reveal` (which 403s until the match completes), this route
+// always answers 200 and states the case in `settled`. The betting screen fires it in
+// PARALLEL with `GET /odds` to choose between board and reveal mode: a 403 would be
+// indistinguishable from a real permission failure, and gating it behind a status the
+// client does not yet know would force a render-blocking waterfall.
+router.get(
+  '/bets/reveal',
+  requireGroupMember,
+  asyncHandler(async (req, res) => {
+    const { groupId, matchId } = req.params as { groupId: string; matchId: string }
+
+    const callerPlayer = await resolveCallerPlayer(req.user.internalId!, groupId)
+    if (!callerPlayer) {
+      return res.status(403).json({ error: { code: ErrorCode.NOT_A_MEMBER, statusCode: 403 } })
+    }
+
     const [match] = await db
       .select({
         id: matches.id,
@@ -157,86 +241,122 @@ router.get(
     if (!match) {
       return res.status(404).json({ error: { code: ErrorCode.MATCH_NOT_FOUND, statusCode: 404 } })
     }
-    if (match.status !== 'completed') {
-      return res.status(403).json({ error: { code: ErrorCode.REVEAL_NOT_AVAILABLE, statusCode: 403 } })
+
+    const settled = match.status === 'completed' && match.scoreA !== null && match.scoreB !== null
+
+    if (!settled) {
+      return res.json({
+        data: {
+          settled: false,
+          match: {
+            status: match.status,
+            scoreA: match.scoreA,
+            scoreB: match.scoreB,
+            actualResult: null,
+            actualScore: null,
+            mvpPlayerId: match.mvpPlayerId,
+            mvpDisplayName: null,
+          },
+          myBets: [],
+          myTotals: EMPTY_TOTALS,
+          group: [],
+        },
+      })
     }
 
-    // Derive actual result
-    const actualResult =
-      match.scoreA! > match.scoreB! ? 'teamA'
-      : match.scoreB! > match.scoreA! ? 'teamB'
-      : 'draw'
-    const actualScore = `${match.scoreA}-${match.scoreB}`
-
-    // Resolve actual MVP display name
-    let actualMvpDisplayName: string | null = null
-    if (match.mvpPlayerId) {
-      const [mvpPlayer] = await db
-        .select({ displayName: players.displayName })
-        .from(players)
-        .where(eq(players.id, match.mvpPlayerId))
-      actualMvpDisplayName = mvpPlayer?.displayName ?? null
-    }
-
-    // Fetch all pronos rows for this match with player display names
     const rows = await db
       .select({
-        playerId: pronos.playerId,
+        id: pronoBets.id,
+        playerId: pronoBets.playerId,
         displayName: players.displayName,
-        predictionResult: pronos.predictionResult,
-        predictionMvpPlayerId: pronos.predictionMvpPlayerId,
-        predictionScore: pronos.predictionScore,
-        pointsEarned: pronos.pointsEarned,
+        market: pronoBets.market,
+        selection: pronoBets.selection,
+        stake: pronoBets.stake,
+        oddsAtBet: pronoBets.oddsAtBet,
+        status: pronoBets.status,
+        payout: pronoBets.payout,
+        placedAt: pronoBets.placedAt,
+        settledAt: pronoBets.settledAt,
       })
-      .from(pronos)
-      .innerJoin(players, eq(players.id, pronos.playerId))
-      .where(eq(pronos.matchId, matchId))
+      .from(pronoBets)
+      .innerJoin(players, and(eq(players.id, pronoBets.playerId), isNull(players.deletedAt)))
+      .where(eq(pronoBets.matchId, matchId))
+      .orderBy(asc(pronoBets.placedAt))
 
-    // Resolve MVP display names for predictions (batch)
-    const mvpPlayerIds = [...new Set(
-      rows
-        .map((r) => r.predictionMvpPlayerId)
-        .filter((id): id is string => id !== null)
-    )]
-    const mvpPlayerMap = new Map<string, string>()
-    if (mvpPlayerIds.length > 0) {
-      const mvpPlayers = await db
+    // One batched lookup for every display name the payload needs: the MVP selections on
+    // mvp-market bets plus the actual MVP. Never one query per bet.
+    const nameIds = [
+      ...new Set([
+        ...rows.filter((r) => r.market === 'mvp').map((r) => r.selection),
+        ...(match.mvpPlayerId ? [match.mvpPlayerId] : []),
+      ]),
+    ]
+    const nameMap = new Map<string, string>()
+    if (nameIds.length > 0) {
+      const named = await db
         .select({ id: players.id, displayName: players.displayName })
         .from(players)
-        .where(inArray(players.id, mvpPlayerIds))
-      for (const p of mvpPlayers) {
-        mvpPlayerMap.set(p.id, p.displayName)
-      }
+        .where(inArray(players.id, nameIds))
+      for (const p of named) nameMap.set(p.id, p.displayName)
     }
 
-    // Build response rows with breakdown
-    const responseRows = rows
-      .map((row) => {
-        const scoreCorrect = row.predictionScore === actualScore
-        const resultCorrect = row.predictionResult === actualResult
-        const mvpCorrect =
-          match.mvpPlayerId !== null &&
-          row.predictionMvpPlayerId === match.mvpPlayerId
-        return {
-          playerId: row.playerId,
-          displayName: row.displayName,
-          predictionResult: row.predictionResult,
-          predictionMvpDisplayName: row.predictionMvpPlayerId
-            ? (mvpPlayerMap.get(row.predictionMvpPlayerId) ?? null)
-            : null,
-          predictionScore: row.predictionScore,
-          pointsEarned: row.pointsEarned ?? 0,
-          breakdown: { scoreCorrect, resultCorrect, mvpCorrect },
-        }
-      })
-      .sort((a, b) => b.pointsEarned - a.pointsEarned)
+    // An mvp bet stores a playerId; every other market stores its own label. A purged or
+    // unresolvable player falls back to the raw selection rather than emitting null.
+    const labelOf = (market: string, selection: string) =>
+      market === 'mvp' ? (nameMap.get(selection) ?? selection) : selection
+
+    const myBets = rows
+      .filter((r) => r.playerId === callerPlayer.id)
+      .map((r) => ({
+        id: r.id,
+        market: r.market,
+        selection: r.selection,
+        selectionLabel: labelOf(r.market, r.selection),
+        stake: r.stake,
+        oddsAtBet: Number(r.oddsAtBet),
+        status: r.status,
+        payout: r.payout,
+        settledAt: r.settledAt ? r.settledAt.toISOString() : null,
+      }))
+
+    // A pending payout is null, meaning "not settled yet" — never zero. Treating it as a
+    // loss would tell a player they lost a bet that is still live (mvp bets settle later).
+    const totals = new Map<string, { playerId: string; displayName: string; staked: number; returned: number }>()
+    for (const r of rows) {
+      const entry = totals.get(r.playerId) ?? {
+        playerId: r.playerId,
+        displayName: r.displayName,
+        staked: 0,
+        returned: 0,
+      }
+      entry.staked += r.stake
+      entry.returned += r.payout ?? 0
+      totals.set(r.playerId, entry)
+    }
+
+    const group = [...totals.values()]
+      .map((e) => ({ ...e, net: e.returned - e.staked, isMe: e.playerId === callerPlayer.id }))
+      .sort((a, b) => b.net - a.net || a.displayName.localeCompare(b.displayName))
+
+    const mine = totals.get(callerPlayer.id)
 
     return res.json({
       data: {
-        rows: responseRows,
-        actualResult,
-        actualScore,
-        actualMvpDisplayName,
+        settled: true,
+        match: {
+          status: match.status,
+          scoreA: match.scoreA,
+          scoreB: match.scoreB,
+          actualResult: resultOf(match.scoreA!, match.scoreB!),
+          actualScore: `${match.scoreA}-${match.scoreB}`,
+          mvpPlayerId: match.mvpPlayerId,
+          mvpDisplayName: match.mvpPlayerId ? (nameMap.get(match.mvpPlayerId) ?? null) : null,
+        },
+        myBets,
+        myTotals: mine
+          ? { staked: mine.staked, returned: mine.returned, net: mine.returned - mine.staked }
+          : EMPTY_TOTALS,
+        group,
       },
     })
   }),

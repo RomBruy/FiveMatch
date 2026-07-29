@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { sql, eq, inArray, and } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
 import { db } from '../../db'
-import { users, groups, players, matches, matchParticipants, ratings, cardPhotoJobs, teamGenerationJobs, teamGenerationPlayers, mvpVotes, groupMemberships } from '../../db/schema'
+import { users, groups, players, matches, matchParticipants, ratings, cardPhotoJobs, teamGenerationJobs, teamGenerationPlayers, mvpVotes, groupMemberships, pronos } from '../../db/schema'
 import { gdprService } from '../../services/gdpr/gdpr.service'
 import { GdprPurgeJob } from '../../jobs/gdpr-purge.job'
 
@@ -413,6 +413,18 @@ describe('GDPR cascade anonymization', () => {
         ovrAtGeneration: '70',
       })
 
+      // Seed a legacy flat-Pronos prediction. The table is retired but retained
+      // (Story 11.7), so an erasure request must still reach its rows.
+      await db.insert(pronos).values({
+        matchId: match.id,
+        playerId: player!.id,
+        predictionResult: 'teamA',
+        predictionMvpPlayerId: null,
+        predictionScore: '2-1',
+        pointsEarned: 30,
+        submittedAt: new Date('2025-01-01T00:00:00Z'),
+      })
+
       // Seed a card_photo_job
       await db.insert(cardPhotoJobs).values({
         playerId: player!.id,
@@ -447,6 +459,13 @@ describe('GDPR cascade anonymization', () => {
         .from(cardPhotoJobs)
         .where(eq(cardPhotoJobs.playerId, player!.id))
       expect(remainingCpj).toHaveLength(0)
+
+      // Assert: archived legacy pronos rows deleted
+      const remainingPronos = await db
+        .select()
+        .from(pronos)
+        .where(eq(pronos.playerId, player!.id))
+      expect(remainingPronos).toHaveLength(0)
 
       // Assert: users.purgedAt is set
       const [userRow] = await db

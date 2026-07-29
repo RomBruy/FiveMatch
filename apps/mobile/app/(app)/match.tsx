@@ -1,7 +1,8 @@
-import { View, Text, Pressable, StyleSheet, ActivityIndicator, ScrollView } from 'react-native'
+import { View, Text, StyleSheet, ScrollView, Alert, RefreshControl } from 'react-native'
+import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useRouter } from 'expo-router'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Colors } from '../../constants/colors'
 import { Fonts, Radius } from '../../constants/tokens'
@@ -9,6 +10,9 @@ import { useGroupContext } from '../../contexts/GroupContext'
 import { InfoStrip } from '../../components/shared/InfoStrip'
 import { PrimaryButton } from '../../components/ui/PrimaryButton'
 import { SecondaryButton } from '../../components/ui/SecondaryButton'
+import { PressableScale } from '../../components/ui/PressableScale'
+import { SkeletonCard, SkeletonRow } from '../../components/ui/Skeleton'
+import { StaggerItem } from '../../components/ui/Stagger'
 import { DOCK_CLEARANCE } from '../../components/ui/TabDock'
 import { httpClient } from '../../lib/api-client'
 
@@ -36,7 +40,22 @@ export default function MatchTab() {
   const { t, i18n } = useTranslation()
   const router = useRouter()
   const insets = useSafeAreaInsets()
+  const queryClient = useQueryClient()
   const { activeGroupId } = useGroupContext()
+  const [refreshing, setRefreshing] = useState(false)
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true)
+    try {
+      await Promise.all([
+        queryClient.refetchQueries({ queryKey: ['matches', activeGroupId] }),
+        queryClient.refetchQueries({ queryKey: ['groups', activeGroupId, 'my-status'] }),
+        queryClient.refetchQueries({ queryKey: ['team-generator-status', activeGroupId] }),
+      ])
+    } finally {
+      setRefreshing(false)
+    }
+  }, [queryClient, activeGroupId])
 
   const { data: myStatus } = useQuery({
     queryKey: ['groups', activeGroupId, 'my-status'],
@@ -74,6 +93,31 @@ export default function MatchTab() {
 
   const upcoming = upcomingData?.matches ?? []
   const [nextMatch, ...laterMatches] = upcoming
+  const activeSeriesId = upcoming.find((m) => m.seriesId)?.seriesId ?? null
+
+  const { mutate: stopSeries, isPending: stoppingSeries } = useMutation({
+    mutationFn: (seriesId: string) =>
+      httpClient.post(`/v1/groups/${activeGroupId}/matches/series/${seriesId}/end`),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ['matches', activeGroupId, 'upcoming'] })
+    },
+  })
+
+  const handleStopSeries = () => {
+    if (!activeSeriesId) return
+    Alert.alert(
+      t('match.series.stopConfirmTitle'),
+      t('match.series.stopConfirmMessage'),
+      [
+        { text: t('match.series.stopCancel'), style: 'cancel' },
+        {
+          text: t('match.series.stopConfirmOk'),
+          style: 'destructive',
+          onPress: () => stopSeries(activeSeriesId),
+        },
+      ],
+    )
+  }
 
   if (!activeGroupId) {
     return (
@@ -114,6 +158,9 @@ export default function MatchTab() {
     <ScrollView
       style={styles.screen}
       contentContainerStyle={[styles.scrollContent, { paddingTop: insets.top + 12 }]}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} colors={[Colors.primary]} />
+      }
     >
       <View style={styles.gateSection}>
         {status?.fairnessConfidenceDisclaimer != null && (
@@ -137,23 +184,29 @@ export default function MatchTab() {
       <Text style={styles.sectionLabel}>{t('match.upcoming.title')}</Text>
 
       {matchLoading ? (
-        <ActivityIndicator color={Colors.primary} style={styles.loader} />
+        <View style={styles.skeletonBlock}>
+          <SkeletonCard />
+          <SkeletonRow card />
+          <SkeletonRow card />
+        </View>
       ) : nextMatch ? (
         <>
-          <Pressable style={styles.activeMatchCard} onPress={() => openMatch(nextMatch)} accessibilityRole="button">
-            <Text style={styles.activeMatchDate}>{formatRowDate(nextMatch.scheduledAt)}</Text>
-            <Text style={styles.activeMatchMeta}>
-              {[
-                nextMatch.format.toUpperCase(),
-                ...(nextMatch.location ? [nextMatch.location] : []),
-                ...(nextMatch.seriesId ? [t('match.upcoming.series')] : []),
-              ].join(SEPARATOR)}
-            </Text>
-          </Pressable>
+          <StaggerItem index={0}>
+            <PressableScale style={styles.activeMatchCard} onPress={() => openMatch(nextMatch)} accessibilityRole="button">
+              <Text style={styles.activeMatchDate}>{formatRowDate(nextMatch.scheduledAt)}</Text>
+              <Text style={styles.activeMatchMeta}>
+                {[
+                  nextMatch.format.toUpperCase(),
+                  ...(nextMatch.location ? [nextMatch.location] : []),
+                  ...(nextMatch.seriesId ? [t('match.upcoming.series')] : []),
+                ].join(SEPARATOR)}
+              </Text>
+            </PressableScale>
+          </StaggerItem>
           {laterMatches.length > 0 && (
-            <View style={styles.laterRows}>
+            <StaggerItem index={1} style={styles.laterRows}>
               {laterMatches.map((match) => (
-                <Pressable
+                <PressableScale
                   key={match.matchId}
                   style={styles.laterRow}
                   onPress={() => openMatch(match)}
@@ -166,9 +219,9 @@ export default function MatchTab() {
                       ...(match.seriesId ? [t('match.upcoming.series')] : []),
                     ].join(SEPARATOR)}
                   </Text>
-                </Pressable>
+                </PressableScale>
               ))}
-            </View>
+            </StaggerItem>
           )}
         </>
       ) : (
@@ -184,6 +237,17 @@ export default function MatchTab() {
             glow={false}
           />
         </View>
+      )}
+
+      {isOrganizer && activeSeriesId && (
+        <PressableScale
+          style={styles.stopSeries}
+          onPress={handleStopSeries}
+          disabled={stoppingSeries}
+          accessibilityRole="button"
+        >
+          <Text style={styles.stopSeriesText}>{t('match.series.stop')}</Text>
+        </PressableScale>
       )}
 
       <View style={styles.actionBlock}>
@@ -252,6 +316,18 @@ const styles = StyleSheet.create({
     width: '100%',
     marginTop: 20,
   },
+  stopSeries: {
+    alignSelf: 'center',
+    marginTop: 18,
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  stopSeriesText: {
+    color: Colors.primary,
+    fontSize: 13,
+    fontFamily: Fonts.interSemiBold,
+  },
   message: {
     color: Colors.inkSecondary,
     fontSize: 15,
@@ -267,8 +343,8 @@ const styles = StyleSheet.create({
     gap: 12,
     alignItems: 'center',
   },
-  loader: {
-    marginVertical: 8,
+  skeletonBlock: {
+    gap: 8,
   },
   emptyText: {
     color: Colors.inkSecondary,

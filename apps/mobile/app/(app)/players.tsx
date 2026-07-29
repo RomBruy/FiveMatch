@@ -1,8 +1,8 @@
-import { View, Text, FlatList, Pressable, StyleSheet, useWindowDimensions } from 'react-native'
+import { View, Text, FlatList, StyleSheet, useWindowDimensions, RefreshControl } from 'react-native'
 import { useTranslation } from 'react-i18next'
 import { useRouter } from 'expo-router'
-import { useEffect, useRef } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@clerk/expo'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -13,6 +13,8 @@ import { PaniniCard } from '../../components/cards/PaniniCard'
 import { DOCK_CLEARANCE } from '../../components/ui/TabDock'
 import { PrimaryButton } from '../../components/ui/PrimaryButton'
 import { SecondaryButton } from '../../components/ui/SecondaryButton'
+import { PressableScale } from '../../components/ui/PressableScale'
+import { Skeleton } from '../../components/ui/Skeleton'
 import { httpClient } from '../../lib/api-client'
 import { usePreviousValue } from '../../hooks/use-previous-value'
 
@@ -43,7 +45,7 @@ const GRID_PADDING = 16
 const GRID_GAP = 14
 
 function CardSkeleton({ width }: { width: number }) {
-  return <View style={[styles.cardSkeleton, { width }]} />
+  return <Skeleton width={width} height={210} radius={Radius.md} />
 }
 
 export default function PlayersTab() {
@@ -53,6 +55,20 @@ export default function PlayersTab() {
   const { width: windowWidth } = useWindowDimensions()
   const { activeGroupId } = useGroupContext()
   const { userId: clerkUserId } = useAuth()
+  const queryClient = useQueryClient()
+  const [refreshing, setRefreshing] = useState(false)
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true)
+    try {
+      await Promise.all([
+        queryClient.refetchQueries({ queryKey: ['players', activeGroupId] }),
+        queryClient.refetchQueries({ queryKey: ['group', activeGroupId] }),
+      ])
+    } finally {
+      setRefreshing(false)
+    }
+  }, [queryClient, activeGroupId])
 
   // Two-column grid of minis — earned cards are bone, locked slots stay dark.
   const cellWidth = (windowWidth - GRID_PADDING * 2 - GRID_GAP) / 2
@@ -190,8 +206,11 @@ export default function PlayersTab() {
         ListHeaderComponent={header}
         columnWrapperStyle={styles.gridRow}
         contentContainerStyle={styles.listContent}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} colors={[Colors.primary]} />
+        }
         renderItem={({ item }) => (
-          <Pressable
+          <PressableScale
             onPress={() => router.push(`/(app)/player/${item.playerId}` as never)}
             accessibilityRole="button"
             accessibilityLabel={t('profile.openPlayer', { name: item.displayName })}
@@ -205,7 +224,7 @@ export default function PlayersTab() {
               width={cellWidth}
               serialTotal={players.length}
             />
-          </Pressable>
+          </PressableScale>
         )}
       />
     </View>
@@ -265,11 +284,5 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     paddingHorizontal: GRID_PADDING,
     gap: GRID_GAP,
-  },
-  cardSkeleton: {
-    height: 210,
-    borderRadius: Radius.md,
-    backgroundColor: Colors.surface,
-    opacity: 0.4,
   },
 })

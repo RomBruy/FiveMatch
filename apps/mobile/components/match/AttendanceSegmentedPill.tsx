@@ -1,6 +1,6 @@
 import { View, Text, Pressable, StyleSheet } from 'react-native'
 import { useTranslation } from 'react-i18next'
-import * as Haptics from 'expo-haptics'
+import { haptics } from '../../lib/haptics'
 import { Colors } from '../../constants/colors'
 import { Fonts, Radius } from '../../constants/tokens'
 
@@ -64,7 +64,7 @@ export function AttendanceSegmentedPill({ status, isWaitlisted, waitlistPosition
 
   const setStatus = (newStatus: 'in' | 'out') => {
     if (!onPress || disabled || newStatus === status) return
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {})
+    haptics.selection()
     onPress(newStatus)
   }
 

@@ -1,13 +1,14 @@
-import { View, Text, Pressable, StyleSheet, ScrollView } from 'react-native'
+import { View, Text, StyleSheet, RefreshControl } from 'react-native'
+import Animated from 'react-native-reanimated'
 import { useTranslation } from 'react-i18next'
 import { useRouter } from 'expo-router'
-import { useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Ionicons } from '@expo/vector-icons'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { captureRef } from 'react-native-view-shot'
 import * as Sharing from 'expo-sharing'
-import * as Haptics from 'expo-haptics'
+import { haptics } from '../../lib/haptics'
 import { Colors } from '../../constants/colors'
 import { Fonts, Radius } from '../../constants/tokens'
 import { GroupSwitcher } from '../../components/GroupSwitcher'
@@ -17,8 +18,13 @@ import { FormDots, type FormResult } from '../../components/ui/FormDots'
 import { TextureType } from '../../components/ui/TextureType'
 import { PrimaryButton } from '../../components/ui/PrimaryButton'
 import { SecondaryButton } from '../../components/ui/SecondaryButton'
+import { PressableScale } from '../../components/ui/PressableScale'
+import { SkeletonHero, SkeletonStrip, SkeletonRow } from '../../components/ui/Skeleton'
+import { StaggerItem } from '../../components/ui/Stagger'
+import { CollapsingHeader, CollapsingHeaderTitle, useCollapsingHeader } from '../../components/ui/CollapsingHeader'
 import { MvpCeremonyCard } from '../../components/match/MvpCeremonyCard'
 import { NextMatchHero } from '../../components/match/NextMatchHero'
+import { PronosShortcutCard } from '../../components/pronos/PronosShortcutCard'
 import { Chip } from '../../components/ui/Chip'
 import { StoryShareGraphic, STORY_EXPORT_WIDTH, STORY_EXPORT_HEIGHT } from '../../components/share/StoryShareGraphic'
 import { useGroupContext } from '../../contexts/GroupContext'
@@ -90,9 +96,11 @@ export default function AccueilTab() {
   const queryClient = useQueryClient()
   const { activeGroupId, isReady: groupContextReady } = useGroupContext()
   const [switcherVisible, setSwitcherVisible] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const { scrollY, scrollHandler } = useCollapsingHeader()
 
   // Same key/shape as the app shell's ContextPill query — served from cache, no new endpoint.
-  const { data: group } = useQuery({
+  const { data: group, isLoading: groupLoading } = useQuery({
     queryKey: ['groups', activeGroupId],
     queryFn: async () => {
       const { data } = await httpClient.get<{ data: { name: string; tier: string } }>(`/v1/groups/${activeGroupId}`)
@@ -113,7 +121,7 @@ export default function AccueilTab() {
   const isOrganizer = myStatusData?.role === 'organizer'
 
   // Shared with the Match tab — soonest upcoming match feeds the hero.
-  const { data: upcomingData } = useQuery({
+  const { data: upcomingData, isLoading: upcomingLoading } = useQuery({
     queryKey: ['matches', activeGroupId, 'upcoming'],
     queryFn: async () => {
       const { data } = await httpClient.get<{ data: { matches: ActiveMatchSummary[] } }>(
@@ -125,6 +133,12 @@ export default function AccueilTab() {
     retry: false,
   })
   const activeMatch = upcomingData?.matches[0] ?? null
+
+  // Markets are live exactly when the odds route can price them: teams generated
+  // (teamOvrAtLock set on the `teams_generated` transition) and kick-off still ahead.
+  const openMarkets = (upcomingData?.matches ?? []).filter(
+    (match) => match.status === 'teams_generated' && new Date(match.scheduledAt).getTime() > Date.now(),
+  )
 
   const attendancesKey = ['attendances', activeMatch?.matchId]
   const { data: attendances } = useQuery({
@@ -138,7 +152,7 @@ export default function AccueilTab() {
     enabled: !!activeGroupId && !!activeMatch,
   })
 
-  const { data: rosterData } = useQuery({
+  const { data: rosterData, isLoading: rosterLoading } = useQuery({
     queryKey: ['groups', activeGroupId, 'roster'],
     queryFn: async () => {
       const { data } = await httpClient.get<{ data: { items: RosterMember[] } }>(
@@ -178,7 +192,7 @@ export default function AccueilTab() {
     },
   })
 
-  const { data: historyData } = useQuery({
+  const { data: historyData, isLoading: historyLoading } = useQuery({
     queryKey: ['match-history', activeGroupId],
     queryFn: () =>
       httpClient
@@ -226,7 +240,7 @@ export default function AccueilTab() {
   const handleShareStory = async () => {
     if (!storyRef.current || isSharingStory) return
     setIsSharingStory(true)
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {})
+    haptics.impact('Medium')
     try {
       // Story export spec: exactly 1080×1920 — view-shot resizes the off-screen frame.
       const uri = await captureRef(storyRef, {
@@ -275,6 +289,25 @@ export default function AccueilTab() {
   const squadTotal = rosterData?.items.length ?? attendances?.confirmed.length ?? 0
   const attendanceOpen = activeMatch?.status === 'attendance_open'
 
+  // Initial-load scaffold: the body (hero/squad/history) shows skeletons until its
+  // primary queries resolve, so nothing pops in and shifts the page.
+  const isBodyLoading = !!activeGroupId && (groupLoading || upcomingLoading || rosterLoading || historyLoading)
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true)
+    try {
+      await Promise.all([
+        queryClient.refetchQueries({ queryKey: ['groups', activeGroupId] }),
+        queryClient.refetchQueries({ queryKey: ['matches', activeGroupId] }),
+        queryClient.refetchQueries({ queryKey: ['match-history', activeGroupId] }),
+        queryClient.refetchQueries({ queryKey: ['leaderboard', activeGroupId] }),
+        ...(activeMatch ? [queryClient.refetchQueries({ queryKey: ['attendances', activeMatch.matchId] })] : []),
+      ])
+    } finally {
+      setRefreshing(false)
+    }
+  }, [queryClient, activeGroupId, activeMatch])
+
   return (
     <View style={styles.container}>
       {/* The screen's ONE texture element: crest-initials outline watermark (R9 mapping). */}
@@ -282,25 +315,36 @@ export default function AccueilTab() {
         <TextureType lines={[{ text: getInitials(group.name) }]} fontSize={200} style={styles.crestTexture} />
       )}
 
-      <ScrollView style={styles.scroll} contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}>
+      <Animated.ScrollView
+        style={styles.scroll}
+        onScroll={scrollHandler}
+        scrollEventThrottle={16}
+        contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} colors={[Colors.primary]} />
+        }
+      >
         {activeGroupId && group && (
-          <Pressable
-            style={styles.header}
-            onPress={() => setSwitcherVisible(true)}
-            accessibilityRole="button"
-            accessibilityLabel={t('accueil.header.switchGroup')}
-          >
-            <DuotoneAvatar displayName={group.name} size={42} />
-            <View style={styles.headerText}>
-              <Text style={styles.groupName} numberOfLines={1}>
-                {group.name}
-              </Text>
-              <View style={styles.tierPill}>
-                <Text style={styles.tierPillText}>{t(`groups.home.tier.${group.tier}`)}</Text>
+          <StaggerItem index={0}>
+            <PressableScale
+              style={styles.header}
+              onPress={() => setSwitcherVisible(true)}
+              accessibilityRole="button"
+              accessibilityLabel={t('accueil.header.switchGroup')}
+            >
+              <DuotoneAvatar displayName={group.name} size={42} />
+              <View style={styles.headerText}>
+                <CollapsingHeaderTitle
+                  title={group.name}
+                  scrollY={scrollY}
+                  subtitle={<View style={styles.tierPill}>
+                  <Text style={styles.tierPillText}>{t(`groups.home.tier.${group.tier}`)}</Text>
+                  </View>}
+                />
               </View>
-            </View>
-            <Ionicons name="chevron-down" size={18} color={Colors.inkSecondary} />
-          </Pressable>
+              <Ionicons name="chevron-down" size={18} color={Colors.inkSecondary} />
+            </PressableScale>
+          </StaggerItem>
         )}
 
         {groupContextReady && !activeGroupId && (
@@ -316,8 +360,31 @@ export default function AccueilTab() {
           </View>
         )}
 
-        {activeGroupId && activeMatch && (
-          <View style={styles.heroSection}>
+        {activeGroupId && isBodyLoading && (
+          <>
+            <View style={styles.heroSection}>
+              <SkeletonHero />
+            </View>
+            <View style={styles.pronosSection}>
+              <Text style={styles.sectionLabel}>{t('pronos.tab.title')}</Text>
+              <SkeletonRow card />
+            </View>
+            <View style={styles.squadSection}>
+              <Text style={styles.sectionLabel}>{t('accueil.squad.title')}</Text>
+              <SkeletonStrip />
+            </View>
+            <View style={styles.historySection}>
+              <Text style={styles.sectionLabel}>{t('accueil.history.title')}</Text>
+              <View style={styles.rows}>
+                <SkeletonRow card />
+                <SkeletonRow card />
+              </View>
+            </View>
+          </>
+        )}
+
+        {activeGroupId && !isBodyLoading && activeMatch && (
+          <StaggerItem index={1} style={styles.heroSection}>
             <NextMatchHero
               scheduledAt={activeMatch.scheduledAt}
               location={activeMatch.location}
@@ -329,11 +396,22 @@ export default function AccueilTab() {
               onSetAttendance={attendanceOpen ? (status) => updateAttendance(status) : undefined}
               onPress={openActiveMatch}
             />
-          </View>
+          </StaggerItem>
         )}
 
-        {activeGroupId && rosterData && rosterData.items.length > 0 && (
-          <View style={styles.squadSection}>
+        {activeGroupId && !isBodyLoading && (
+          <StaggerItem index={2} style={styles.pronosSection}>
+            <Text style={styles.sectionLabel}>{t('pronos.tab.title')}</Text>
+            <PronosShortcutCard
+              openCount={openMarkets.length}
+              closesAt={openMarkets[0]?.scheduledAt ?? null}
+              onPress={() => router.push('/(app)/pronos' as never)}
+            />
+          </StaggerItem>
+        )}
+
+        {activeGroupId && !isBodyLoading && rosterData && rosterData.items.length > 0 && (
+          <StaggerItem index={3} style={styles.squadSection}>
             <Text style={styles.sectionLabel}>{t('accueil.squad.title')}</Text>
             <View style={styles.squadCard}>
               <View style={styles.squadStack}>
@@ -354,11 +432,11 @@ export default function AccueilTab() {
                 />
               )}
             </View>
-          </View>
+          </StaggerItem>
         )}
 
-        {activeGroupId && (
-          <View style={styles.historySection}>
+        {activeGroupId && !isBodyLoading && (
+          <StaggerItem index={4} style={styles.historySection}>
             <Text style={styles.sectionLabel}>{t('accueil.history.title')}</Text>
             {!lastMatch ? (
               <View style={styles.historyEmptyBlock}>
@@ -383,7 +461,7 @@ export default function AccueilTab() {
                 />
                 <View style={styles.rows}>
                   {olderMatches.map((match) => (
-                    <Pressable key={match.matchId} style={styles.matchRow} onPress={() => openMatch(match.matchId)}>
+                    <PressableScale key={match.matchId} style={styles.matchRow} onPress={() => openMatch(match.matchId)} accessibilityRole="button">
                       <Text style={styles.rowDate}>{formatRowDate(match.scheduledAt)}</Text>
                       <View style={styles.rowMvp}>
                         {match.mvpDisplayName && (
@@ -401,14 +479,25 @@ export default function AccueilTab() {
                       <View style={styles.rowDot}>
                         {match.userResult && <FormDots results={[RESULT_TO_DOT[match.userResult]]} size={24} />}
                       </View>
-                    </Pressable>
+                    </PressableScale>
                   ))}
                 </View>
               </>
             )}
-          </View>
+          </StaggerItem>
         )}
-      </ScrollView>
+      </Animated.ScrollView>
+
+      {activeGroupId && group && (
+        <CollapsingHeader
+          title={group.name}
+          scrollY={scrollY}
+          compactLeading={<DuotoneAvatar displayName={group.name} size={30} />}
+          compactTrailing={<Ionicons name="chevron-down" size={18} color={Colors.inkSecondary} />}
+          onPress={() => setSwitcherVisible(true)}
+          accessibilityLabel={t('accueil.header.switchGroup')}
+        />
+      )}
 
       {/* Off-screen 9:16 story frame — the share capture target */}
       {lastMatch && group && (
@@ -468,13 +557,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
   },
-  groupName: {
-    flexShrink: 1,
-    fontFamily: Fonts.bebas,
-    fontSize: 24,
-    letterSpacing: 1.92, // 0.08em @ 24 (heading register)
-    color: Colors.ink,
-  },
   tierPill: {
     backgroundColor: Colors.surfaceRaised,
     borderRadius: Radius.full,
@@ -516,6 +598,9 @@ const styles = StyleSheet.create({
   },
   heroSection: {
     marginTop: 20,
+  },
+  pronosSection: {
+    marginTop: 26,
   },
   squadSection: {
     marginTop: 26,

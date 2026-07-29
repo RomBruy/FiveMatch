@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto'
 import { and, eq, inArray, isNull, or } from 'drizzle-orm'
 import { db } from '../../db'
-import { cardPhotoJobs, groupMemberships, matchParticipants, players, ratings, rawInitialSeedRatings, teamGenerationPlayers, users } from '../../db/schema'
+import { cardPhotoJobs, groupMemberships, matchParticipants, players, pronoBets, pronos, ratings, rawInitialSeedRatings, teamGenerationPlayers, users } from '../../db/schema'
 
 // Anonymize all match_participants rows for a deleted user.
 // userId and playerId are set to null; displayName is replaced with a random placeholder
@@ -111,6 +111,15 @@ async function purgeUser(userId: string, purgedAt: Date): Promise<void> {
       // Hard-delete team generation and card job rows
       await tx.delete(teamGenerationPlayers).where(inArray(teamGenerationPlayers.playerId, playerIds))
       await tx.delete(cardPhotoJobs).where(inArray(cardPhotoJobs.playerId, playerIds))
+
+      // Hard-delete Pronos bets — a wager carries no group-statistical value once its
+      // owner is gone, so there is nothing to preserve by anonymizing (unlike match stats).
+      await tx.delete(pronoBets).where(inArray(pronoBets.playerId, playerIds))
+
+      // Hard-delete legacy flat-Pronos predictions. The table is retired (Story 11.7) but
+      // deliberately retained rather than dropped, so its rows are still personal data and
+      // an erasure request must reach them. Archiving is not an exemption.
+      await tx.delete(pronos).where(inArray(pronos.playerId, playerIds))
     }
 
     // Anonymize seed ratings (erase who gave the rating, keep the value)

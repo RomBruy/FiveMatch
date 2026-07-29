@@ -106,6 +106,13 @@ export const Motion = {
   dockActivate: 250,
   ringSweep: 600,
   countdownTick: 1000,
+  /** Screen entrance cascade: per-item delay step and single-item fade-up duration (Story 10.3). */
+  staggerStep: 70,
+  staggerItem: 500,
+  /** Live numeral climb when a value changes in view (Story 10.5). */
+  countUp: 900,
+  /** Native-to-React brand-frame handoff (Story 10.6). */
+  splashHandoff: 400,
 } as const
 
 /** Reanimated-compatible easing/spring configs matching the motion table. */

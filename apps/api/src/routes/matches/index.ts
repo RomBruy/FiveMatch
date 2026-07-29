@@ -16,7 +16,7 @@ import { matches, teamGenerationJobs, teamGenerationPlayers, matchAttendances, p
 import { eq, and, isNull, sql } from 'drizzle-orm'
 import { notificationService } from '../../services/notifications/notification.service'
 import { tierService } from '../../services/matches/tier.service'
-import { pronosService } from '../../services/pronos/prono.service'
+import { betService } from '../../services/pronos/bet.service'
 import { logger } from '../../lib/logger'
 import { ratingService } from '../../services/ratings/rating.service'
 
@@ -152,6 +152,24 @@ router.get(
     const { groupId } = req.params as { groupId: string }
     const match = await matchService.getActiveMatch(groupId)
     return res.json({ data: match })
+  }),
+)
+
+// POST /v1/groups/:groupId/matches/series/:seriesId/end — organizer only.
+// Registered before /:matchId so the literal 'series' segment isn't captured as a match id.
+router.post(
+  '/series/:seriesId/end',
+  requireGroupMember,
+  requireOrganizer,
+  asyncHandler(async (req, res) => {
+    const { groupId, seriesId } = req.params as { groupId: string; seriesId: string }
+    const result = await matchService.endSeries(groupId, seriesId)
+    if (!result) {
+      return res.status(404).json({
+        error: { code: ErrorCode.MATCH_NOT_FOUND, message: 'Series not found or already ended', statusCode: 404 },
+      })
+    }
+    return res.json({ data: result })
   }),
 )
 
@@ -851,9 +869,10 @@ router.post(
       console.error('[result] tierService.evaluateTier failed:', err)
     }
 
-    // 6. Post-transaction: pronos scoring (stub in Epic 4; real in Epic 6)
-    pronosService.scoreAndReveal(matchId).catch((err) => {
-      console.error('[result] pronosService.scoreAndReveal failed:', err)
+    // 6. Post-transaction: settle the betting ledger (Epic 11). Result and correct-score
+    // bets settle now; MVP bets stay pending until the vote resolves, which re-runs this.
+    betService.settleMatchBets(matchId).catch((err) => {
+      console.error('[result] betService.settleMatchBets failed:', err)
     })
 
     // 7. Load IN player userIds for notification dispatch
@@ -1103,6 +1122,12 @@ router.get(
         .where(eq(players.id, resolvedWinnerId))
       mvpDisplayName = player?.displayName ?? null
     }
+
+    // The MVP is now known — settle the bets that were left pending at result time.
+    // Idempotent, so the race-loser above cannot double-credit anything.
+    betService.settleMatchBets(matchId).catch((err) => {
+      console.error('[mvp] betService.settleMatchBets failed:', err)
+    })
 
     return res.json({ data: { resolved: true, mvpPlayerId: resolvedWinnerId, mvpDisplayName } })
   }),

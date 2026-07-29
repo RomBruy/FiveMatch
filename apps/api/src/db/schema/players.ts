@@ -1,4 +1,5 @@
 import { pgTable, uuid, text, timestamp, integer, numeric, pgEnum, unique, boolean } from 'drizzle-orm/pg-core'
+import { PRONOS_STARTING_BANKROLL } from '@fivematch/types/algorithm-constants'
 import { users } from './users'
 import { groups } from './groups'
 
@@ -23,6 +24,10 @@ export const players = pgTable('players', {
   avgPhysicality: numeric('avg_physicality', { precision: 5, scale: 2 }),
   avgEffort: numeric('avg_effort', { precision: 5, scale: 2 }),
   lastMatchAt: timestamp('last_match_at', { withTimezone: true }),  // nullable — null until first match
+  // Pronos betting bankroll (Epic 11) — per-group fictional-points balance.
+  // Cached projection of the prono_bets ledger: 1000 + Σpayouts − Σstakes.
+  // Mutated ONLY through bankrollService (atomic SQL arithmetic, never read-modify-write).
+  pronosBalance: integer('pronos_balance').notNull().default(PRONOS_STARTING_BANKROLL),
   photoConsentGiven: boolean('photo_consent_given').default(false).notNull(),
   profilePhotoCardUrl: text('profile_photo_card_url'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

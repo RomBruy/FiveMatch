@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native'
+import { StyleSheet, Text, View } from 'react-native'
 import { LinearGradient } from 'expo-linear-gradient'
 import { useTranslation } from 'react-i18next'
 import { Ionicons } from '@expo/vector-icons'
@@ -6,7 +6,9 @@ import { Colors } from '../../constants/colors'
 import { Gradients } from '../../constants/gradients'
 import { Fonts, Radius } from '../../constants/tokens'
 import { DuotoneAvatar } from '../ui/DuotoneAvatar'
+import { PressableScale } from '../ui/PressableScale'
 import { AttendanceSegmentedPill } from './AttendanceSegmentedPill'
+import { CountUpNumber } from '../ui/CountUpNumber'
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 const MAX_STACK_AVATARS = 4
@@ -64,7 +66,7 @@ export function NextMatchHero({
   const overflow = confirmed.length - stack.length
 
   return (
-    <Pressable
+    <PressableScale
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={t('accueil.hero.a11y', { date: `${dateLabel} ${timeLabel}` })}
@@ -107,12 +109,13 @@ export function NextMatchHero({
               </View>
             )}
           </View>
-          <Text style={styles.countText}>
-            <Text style={styles.countConfirmed}>
-              {t('accueil.hero.confirmedCount', { count: confirmed.length })}
-            </Text>
-            <Text style={styles.countTotal}>{` ${t('accueil.hero.squadTotal', { count: squadTotal })}`}</Text>
-          </Text>
+          <View style={styles.countText}>
+            <View style={styles.confirmedLine}>
+              <CountUpNumber value={confirmed.length} style={styles.countConfirmed} />
+              <Text style={styles.countConfirmedLabel}>{t('accueil.hero.confirmedLabel')}</Text>
+            </View>
+            <Text style={styles.countTotal}>{t('accueil.hero.squadTotal', { count: squadTotal })}</Text>
+          </View>
         </View>
 
         <View style={styles.pillWrap}>
@@ -125,7 +128,7 @@ export function NextMatchHero({
           />
         </View>
       </LinearGradient>
-    </Pressable>
+    </PressableScale>
   )
 }
 
@@ -209,15 +212,22 @@ const styles = StyleSheet.create({
   },
   countText: {
     flexShrink: 1,
-    fontSize: 12.5,
-    fontFamily: Fonts.interSemiBold,
-    textAlign: 'right',
+    alignItems: 'flex-end',
   },
+  confirmedLine: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   countConfirmed: {
     color: Colors.success,
+    fontSize: 13,
+    lineHeight: 16,
+    height: 18,
+    minWidth: 12,
+    fontFamily: Fonts.interSemiBold,
   },
+  countConfirmedLabel: { color: Colors.success, fontSize: 12.5, fontFamily: Fonts.interSemiBold },
   countTotal: {
     color: Colors.inkSecondary,
+    fontSize: 12.5,
+    fontFamily: Fonts.interSemiBold,
   },
   pillWrap: {
     marginTop: 16,

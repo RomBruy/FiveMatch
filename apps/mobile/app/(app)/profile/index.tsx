@@ -1,7 +1,9 @@
-import { View, Text, ScrollView, StyleSheet } from 'react-native'
+import { View, Text, StyleSheet, RefreshControl } from 'react-native'
+import Animated from 'react-native-reanimated'
+import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useRouter } from 'expo-router'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Colors } from '../../../constants/colors'
 import { Fonts, Radius, Type } from '../../../constants/tokens'
@@ -9,6 +11,8 @@ import { DOCK_CLEARANCE } from '../../../components/ui/TabDock'
 import { DuotoneAvatar, getInitials } from '../../../components/ui/DuotoneAvatar'
 import { FormDots, type FormResult } from '../../../components/ui/FormDots'
 import { StatTile } from '../../../components/ui/StatTile'
+import { Skeleton, SkeletonTile } from '../../../components/ui/Skeleton'
+import { CollapsingHeader, CollapsingHeaderTitle, useCollapsingHeader } from '../../../components/ui/CollapsingHeader'
 import { SecondaryButton } from '../../../components/ui/SecondaryButton'
 import { TextureType } from '../../../components/ui/TextureType'
 import { OvrBadge } from '../../../components/players/OvrBadge'
@@ -73,8 +77,26 @@ export default function ProfileTab() {
   const { t } = useTranslation()
   const router = useRouter()
   const insets = useSafeAreaInsets()
+  const queryClient = useQueryClient()
   const { activeGroupId } = useGroupContext()
-  const { data: user } = useCurrentUser()
+  const { data: user, isLoading: userLoading } = useCurrentUser()
+  const [refreshing, setRefreshing] = useState(false)
+  const { scrollY, scrollHandler } = useCollapsingHeader()
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true)
+    try {
+      await Promise.all([
+        queryClient.refetchQueries({ queryKey: ['auth', 'me'] }),
+        queryClient.refetchQueries({ queryKey: ['groups', activeGroupId] }),
+        queryClient.refetchQueries({ queryKey: ['leaderboard', activeGroupId] }),
+        queryClient.refetchQueries({ queryKey: ['pronos', 'leaderboard', activeGroupId] }),
+        queryClient.refetchQueries({ queryKey: ['match-history', 'profile', activeGroupId] }),
+      ])
+    } finally {
+      setRefreshing(false)
+    }
+  }, [queryClient, activeGroupId])
 
   // All group-scoped data below reuses existing endpoints under the query keys
   // other screens already cache — no new API surface (AC 6).
@@ -151,27 +173,57 @@ export default function ProfileTab() {
         <TextureType lines={[{ text: getInitials(group.name) }]} fontSize={200} style={styles.crestTexture} />
       )}
 
-      <ScrollView
+      <Animated.ScrollView
         style={styles.scroll}
+        onScroll={scrollHandler}
+        scrollEventThrottle={16}
         contentContainerStyle={[styles.content, { paddingTop: insets.top + 24 }]}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} colors={[Colors.primary]} />
+        }
       >
-        {/* Identity header */}
-        <View style={styles.identity}>
-          <DuotoneAvatar displayName={displayName} photoUrl={user?.profilePhotoUrl} size={96} />
-          <View style={styles.identityText}>
-            <Text style={styles.name} numberOfLines={1}>{displayName}</Text>
-            {group && (
-              <Text style={styles.meta} numberOfLines={1}>
-                {t(`groups.home.tier.${group.tier}`).toUpperCase()} · {group.name.toUpperCase()}
-              </Text>
-            )}
-            {recentForm.length > 0 && (
-              <View style={styles.formRow}>
-                <FormDots results={recentForm} size={24} />
+        {userLoading ? (
+          <>
+            {/* Identity + stat placeholders — the shape the profile fills into */}
+            <View style={styles.identity}>
+              <Skeleton width={96} height={96} radius={Radius.full} />
+              <View style={styles.identityText}>
+                <Skeleton width="70%" height={30} />
+                <Skeleton width="50%" height={12} style={styles.identitySkeletonMeta} />
               </View>
-            )}
+            </View>
+            <View style={styles.statBand}>
+              <View style={styles.ovrBlock}>
+                <Skeleton width={72} height={54} radius={Radius.sm} />
+              </View>
+              <View style={styles.tiles}>
+                <SkeletonTile />
+                <SkeletonTile />
+              </View>
+            </View>
+          </>
+        ) : (
+          /* Identity header */
+          <View style={styles.identity}>
+            <DuotoneAvatar displayName={displayName} photoUrl={user?.profilePhotoUrl} size={96} />
+            <View style={styles.identityText}>
+              <CollapsingHeaderTitle
+                title={displayName}
+                scrollY={scrollY}
+                subtitle={group ? (
+                  <Text style={styles.meta} numberOfLines={1}>
+                    {t(`groups.home.tier.${group.tier}`).toUpperCase()} · {group.name.toUpperCase()}
+                  </Text>
+                ) : undefined}
+              />
+              {recentForm.length > 0 && (
+                <View style={styles.formRow}>
+                  <FormDots results={recentForm} size={24} />
+                </View>
+              )}
+            </View>
           </View>
-        </View>
+        )}
 
         {user?.playerStyle && (
           <View style={styles.footballIdentity}>
@@ -259,7 +311,14 @@ export default function ProfileTab() {
             />
           )}
         </View>
-      </ScrollView>
+      </Animated.ScrollView>
+      {!userLoading && (
+        <CollapsingHeader
+          title={displayName}
+          scrollY={scrollY}
+          compactLeading={<DuotoneAvatar displayName={displayName} photoUrl={user?.profilePhotoUrl} size={30} />}
+        />
+      )}
     </View>
   )
 }
@@ -286,12 +345,6 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   identityText: { flex: 1, gap: 4 },
-  name: {
-    color: Colors.ink,
-    fontFamily: Type.display.fontFamily,
-    fontSize: 36,
-    letterSpacing: Type.display.letterSpacing,
-  },
   meta: {
     color: Colors.inkSecondary,
     fontFamily: Type.labelCaps.fontFamily,
@@ -299,6 +352,7 @@ const styles = StyleSheet.create({
     letterSpacing: Type.labelCaps.letterSpacing,
   },
   formRow: { marginTop: 6 },
+  identitySkeletonMeta: { marginTop: 10 },
   footballIdentity: { marginTop: 28 },
   sectionLabel: {
     color: Colors.primary,

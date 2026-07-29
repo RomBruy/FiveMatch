@@ -4,11 +4,13 @@ import { asyncHandler } from '../../middleware/async-handler'
 import { requireGroupMember } from '../../middleware/require-group-member'
 import { createGroupSchema, updateGroupSchema, transferOrganizerSchema } from './schemas'
 import { db } from '../../db'
-import { groups, groupMemberships, users, players, matchParticipants, matches, pronos } from '../../db/schema'
+import { groups, groupMemberships, users, players, matchParticipants, matches, pronoBets } from '../../db/schema'
 import { randomUUID } from 'crypto'
 import { notificationService } from '../../services/notifications/notification.service'
 import { ErrorCode } from '@fivematch/types'
+import { PRONOS_STARTING_BANKROLL } from '@fivematch/types/algorithm-constants'
 import { ovrService } from '../../services/players/ovr.service'
+import { bankrollService } from '../../services/pronos/bankroll.service'
 
 const router = Router()
 
@@ -430,15 +432,20 @@ router.get(
   }),
 )
 
-// GET /v1/groups/:groupId/pronos/leaderboard — Pronos Points leaderboard, group-scoped
+// GET /v1/groups/:groupId/pronos/leaderboard — bankroll leaderboard, group-scoped (Story 11.6)
+//
+// Ranks by balance, not by the Epic 6 flat points: the biggest winner leads and accuracy
+// drops to a secondary stat. Only members with at least one bet appear — a board of
+// members who never bet would be a wall of identical starting bankrolls, and the rank-1
+// "biggest better" badge on someone who never placed a bet would be nonsense.
 router.get(
   '/:groupId/pronos/leaderboard',
   requireGroupMember,
   asyncHandler(async (req, res) => {
     const { groupId } = req.params as { groupId: string }
-    const matchIdFilter = req.query['matchId'] as string | undefined
 
-    // Resolve caller's playerId so the client can highlight their own row
+    // Resolved independently of the board below: Profil calls this endpoint purely for the
+    // caller's playerId, and must still get it when the caller has never placed a bet.
     const [callerPlayer] = await db
       .select({ id: players.id })
       .from(players)
@@ -446,87 +453,82 @@ router.get(
 
     const myPlayerId = callerPlayer?.id ?? null
 
-    // Fetch all pronos for completed matches in this group, joined with match result data
+    // One query, one row per bet, carrying the player's cached balance. The balance is the
+    // column bankrollService maintains transactionally — never recomputed per player here.
     const rows = await db
       .select({
-        playerId: pronos.playerId,
+        playerId: players.id,
         displayName: players.displayName,
-        predictionResult: pronos.predictionResult,
-        predictionScore: pronos.predictionScore,
-        predictionMvpPlayerId: pronos.predictionMvpPlayerId,
-        pointsEarned: pronos.pointsEarned,
-        matchScoreA: matches.scoreA,
-        matchScoreB: matches.scoreB,
-        matchMvpPlayerId: matches.mvpPlayerId,
+        balance: players.pronosBalance,
+        status: pronoBets.status,
       })
-      .from(pronos)
-      .innerJoin(matches, eq(matches.id, pronos.matchId))
-      .innerJoin(players, and(eq(players.id, pronos.playerId), isNull(players.deletedAt)))
-      .where(
-        matchIdFilter
-          ? and(eq(matches.groupId, groupId), eq(matches.status, 'completed'), eq(matches.id, matchIdFilter))
-          : and(eq(matches.groupId, groupId), eq(matches.status, 'completed'))
-      )
+      .from(players)
+      .innerJoin(pronoBets, eq(pronoBets.playerId, players.id))
+      .where(and(eq(players.groupId, groupId), isNull(players.deletedAt)))
 
-    // Aggregate per player in JS
     const statsMap = new Map<string, {
       playerId: string
       displayName: string
-      totalPronosPoints: number
-      matchesWithPronos: number
-      correctPredictions: number
-      totalPredictions: number
+      balance: number
+      betsPlaced: number
+      betsSettled: number
+      betsWon: number
     }>()
 
     for (const row of rows) {
-      const existing = statsMap.get(row.playerId)
-
-      const actualScore = `${row.matchScoreA}-${row.matchScoreB}`
-      const actualResult =
-        row.matchScoreA! > row.matchScoreB! ? 'teamA'
-        : row.matchScoreB! > row.matchScoreA! ? 'teamB'
-        : 'draw'
-
-      const scoreCorrect = row.predictionScore === actualScore
-      const resultCorrect = row.predictionResult === actualResult
-      const mvpCorrect = row.matchMvpPlayerId !== null && row.predictionMvpPlayerId === row.matchMvpPlayerId
-
-      // Count each of the 3 prediction types independently (max 3 per prono)
-      const correctInThisProno = (scoreCorrect ? 1 : 0) + (resultCorrect ? 1 : 0) + (mvpCorrect ? 1 : 0)
-
-      if (existing) {
-        existing.totalPronosPoints += row.pointsEarned ?? 0
-        existing.matchesWithPronos += 1
-        existing.correctPredictions += correctInThisProno
-        existing.totalPredictions += 3
-      } else {
-        statsMap.set(row.playerId, {
-          playerId: row.playerId,
-          displayName: row.displayName,
-          totalPronosPoints: row.pointsEarned ?? 0,
-          matchesWithPronos: 1,
-          correctPredictions: correctInThisProno,
-          totalPredictions: 3,
-        })
+      const entry = statsMap.get(row.playerId) ?? {
+        playerId: row.playerId,
+        displayName: row.displayName,
+        balance: row.balance,
+        betsPlaced: 0,
+        betsSettled: 0,
+        betsWon: 0,
       }
+      entry.betsPlaced += 1
+      // A close refund is a soft landing, not a win — it counts against accuracy.
+      if (row.status !== 'pending') entry.betsSettled += 1
+      if (row.status === 'won') entry.betsWon += 1
+      statsMap.set(row.playerId, entry)
     }
 
-    // Sort by totalPronosPoints DESC, assign ranks
-    const sorted = [...statsMap.values()].sort((a, b) => b.totalPronosPoints - a.totalPronosPoints)
-    const leaderboard = sorted.map((entry, idx) => ({
-      rank: idx + 1,
-      playerId: entry.playerId,
-      displayName: entry.displayName,
-      totalPronosPoints: entry.totalPronosPoints,
-      matchesWithPronos: entry.matchesWithPronos,
-      correctPredictions: entry.correctPredictions,
-      totalPredictions: entry.totalPredictions,
-      accuracyRate: entry.totalPredictions > 0
-        ? entry.correctPredictions / entry.totalPredictions
-        : 0,
-    }))
+    const leaderboard = [...statsMap.values()]
+      .map((entry) => ({
+        ...entry,
+        accuracyRate: entry.betsSettled > 0 ? entry.betsWon / entry.betsSettled : 0,
+      }))
+      // Deterministic all the way down — equal balances must not shuffle between calls.
+      .sort((a, b) =>
+        b.balance - a.balance ||
+        b.accuracyRate - a.accuracyRate ||
+        a.displayName.localeCompare(b.displayName),
+      )
+      .map((entry, idx) => ({ rank: idx + 1, ...entry }))
 
     return res.json({ data: { leaderboard, myPlayerId } })
+  }),
+)
+
+// GET /v1/groups/:groupId/pronos/bankroll — the caller's group-scoped betting balance.
+// Group-scoped rather than per-match: the Pronos tab hero and the bet slip's "solde après"
+// are the same number, and `GET matches/:matchId/pronos/bets/my` only answers per match.
+router.get(
+  '/:groupId/pronos/bankroll',
+  requireGroupMember,
+  asyncHandler(async (req, res) => {
+    const { groupId } = req.params as { groupId: string }
+
+    const [callerPlayer] = await db
+      .select({ id: players.id })
+      .from(players)
+      .where(and(eq(players.userId, req.user.internalId!), eq(players.groupId, groupId), isNull(players.deletedAt)))
+
+    if (!callerPlayer) {
+      return res.status(403).json({ error: { code: ErrorCode.NOT_A_MEMBER, statusCode: 403 } })
+    }
+
+    const balance = await bankrollService.getBalance(callerPlayer.id)
+
+    return res.json({ data: { balance, startingBankroll: PRONOS_STARTING_BANKROLL } })
   }),
 )
 

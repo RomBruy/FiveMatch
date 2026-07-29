@@ -1,6 +1,6 @@
-// algorithm-constants.ts v2.0 — changes require PR review and version bump in ALGORITHM_CONSTANTS_VERSION
+// algorithm-constants.ts v2.3 — changes require PR review and version bump in ALGORITHM_CONSTANTS_VERSION
 
-export const ALGORITHM_CONSTANTS_VERSION = 'v2.0'
+export const ALGORITHM_CONSTANTS_VERSION = 'v2.3'
 
 // ─── OVR Attribute Weights ────────────────────────────────────────────────────
 // match_impact = Σ(attribute × weight). Weights sum to exactly 1.0.
@@ -131,13 +131,10 @@ export const OUTCOME_WEIGHT   = 2.0   // max +/−2 OVR from match result
 export const EXPECTED_SCALE_D = 40    // OVR gap for ~64% expected win probability
 
 // ─── Pronos Scoring Points ────────────────────────────────────────────────────
-// Points awarded per correct prediction type. Exact score and result are exclusive:
-// if exact score is correct, PRONOS_POINTS_EXACT_SCORE is awarded instead of
-// PRONOS_POINTS_RESULT (not in addition). MVP is always independent.
-// Maximum achievable: PRONOS_POINTS_EXACT_SCORE + PRONOS_POINTS_MVP = 70.
-export const PRONOS_POINTS_EXACT_SCORE = 50
-export const PRONOS_POINTS_RESULT = 30
-export const PRONOS_POINTS_MVP = 20
+// RETIRED in v2.3 (Story 11.7). The Epic 6 flat scale (exact score 50 / result 30 / MVP 20)
+// paid the same for calling the obvious favourite as for a stunning upset. It is replaced by
+// the Epic 11 betting economy: payout = stake × the cote frozen at bet time. The archived
+// `pronos` table keeps its historical `points_earned` values; nothing reads them.
 
 // PRONOS_MVP_SIGNAL_VALUE / PRONOS_MVP_SIGNAL_WEIGHT are intentionally NOT defined here.
 // OVR = player performance. Pronos = prediction accuracy. These systems are fully separate.
@@ -225,3 +222,41 @@ export const TEAM_GEN_WEIGHTS = {
   w6_repetitionPenalty: 0.15,    // Penalise repeating last 3 match lineups
   w7_generatorStylePenalty: 0.25,
 } as const
+
+// ─── Pronos Betting Module (Epic 11) ─────────────────────────────────────────
+// Fictional-points betting on the locked teams. A "cote" (decimal odds) is built
+// exactly as a bookmaker builds a 1X2 market: estimate true probabilities, convert
+// to decimal odds (odds = MARGIN / p), clamp. Fair odds (MARGIN = 1.0, no vig) for a
+// friends game — there is no house.
+//
+// OVR-NEUTRAL: betting NEVER influences player OVR. The only cross-system link is
+// one-directional and read-only — the engine READS teamOvrAtLock. This upholds the
+// Core Principle: OVR = performance, Pronos = prediction. (Same reason
+// PRONOS_MVP_SIGNAL_* are intentionally absent above.)
+//
+// Result market (1X2) reuses the existing Elo-style logistic (EXPECTED_SCALE_D = 40,
+// defined above) for the win/loss split, plus a gaussian draw model.
+export const PRONOS_DRAW_BASE = 0.26   // draw probability at OVR parity (gap = 0)
+export const PRONOS_DRAW_SCALE = 25    // gaussian falloff of draw probability vs |OVR gap|
+export const PRONOS_MARGIN = 1.0       // 1.0 = fair odds (no house edge); < 1.0 adds vig
+export const PRONOS_ODDS_MIN = 1.10    // decimal-odds clamp floor (a near-certainty still pays a little)
+export const PRONOS_ODDS_MAX = 15.0    // decimal-odds clamp ceiling (a long shot can't pay infinity)
+
+// Correct-score market: independent-Poisson goal model, CONDITIONED on the 1X2 result
+// so the score market's implied result probabilities equal the logistic 1X2 exactly.
+// Per-team goals ~ Poisson(λ); λ is tilted by the OVR gap so the stronger side scores more.
+export const PRONOS_BASE_GOALS = 2.5       // expected goals per team at parity (5-a-side is high-scoring)
+export const PRONOS_GOAL_TILT_SCALE = 100  // OVR gap → goal-rate skew divisor (gap 20 ⇒ ±0.20 skew)
+export const PRONOS_GOAL_TILT_MAX = 0.6    // cap on the skew fraction (keeps both λ strictly > 0)
+export const PRONOS_SCORE_GRID_MAX = 8     // scoreline grid 0..N per team for enumeration/normalization
+
+// Economy
+export const PRONOS_STARTING_BANKROLL = 1000 // per-group starting balance (fictional points)
+export const PRONOS_MAX_STAKE = 500          // per-bet exposure cap (anti-ruin; tunable — brief §8)
+export const PRONOS_CLOSE_REFUND = 0.4       // fraction of stake refunded on a "close" correct-score miss
+export const PRONOS_CLOSE_GOAL_TOLERANCE = 1 // "close" = result correct AND |pred goal diff − actual| ≤ this
+
+// API surface
+// How many scorelines the correct-score board exposes, most-likely first. Presentation only —
+// it does NOT affect pricing (the engine always normalizes over the full PRONOS_SCORE_GRID_MAX grid).
+export const PRONOS_SCORE_BOARD_SIZE = 6

@@ -1,8 +1,9 @@
-import { View, Text, ScrollView, StyleSheet } from 'react-native'
+import { View, Text, StyleSheet, RefreshControl } from 'react-native'
+import Animated from 'react-native-reanimated'
 import { useTranslation } from 'react-i18next'
 import { useRouter } from 'expo-router'
-import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Colors } from '../../constants/colors'
 import { Fonts, Radius, Type } from '../../constants/tokens'
@@ -10,16 +11,20 @@ import { useGroupContext } from '../../contexts/GroupContext'
 import { ProgressBarPill } from '../../components/shared/ProgressBarPill'
 import { Podium } from '../../components/shared/Podium'
 import { httpClient } from '../../lib/api-client'
-import { PronosLeaderboard } from '../../components/vestiaire/PronosLeaderboard'
 import { DOCK_CLEARANCE } from '../../components/ui/TabDock'
 import { Chip } from '../../components/ui/Chip'
 import { DuotoneAvatar } from '../../components/ui/DuotoneAvatar'
 import { OvrBadge } from '../../components/players/OvrBadge'
 import { PrimaryButton } from '../../components/ui/PrimaryButton'
 import { SecondaryButton } from '../../components/ui/SecondaryButton'
+import { SkeletonRow, SkeletonPodium } from '../../components/ui/Skeleton'
+import { StaggerItem } from '../../components/ui/Stagger'
 import { TextureType } from '../../components/ui/TextureType'
+import { CollapsingHeader, CollapsingHeaderTitle, useCollapsingHeader } from '../../components/ui/CollapsingHeader'
 
-type VestiaireTab = 'ovr' | 'buteurs' | 'presences' | 'pronos'
+// Story 11.4 promoted Pronos out of this tab: it is now a first-class dock tab, and
+// Story 11.6 moved its leaderboard there as `components/pronos/BankrollLeaderboard`.
+type VestiaireTab = 'ovr' | 'buteurs' | 'presences'
 
 interface LeaderboardPlayer {
   rank: number | null
@@ -109,25 +114,24 @@ function RankRow({ player, tab }: { player: LeaderboardPlayer; tab: VestiaireTab
   )
 }
 
-function SkeletonRow() {
-  return (
-    <View style={[styles.rankRow, styles.skeletonRow]}>
-      <View style={styles.skeletonPosition} />
-      <View style={styles.skeletonAvatar} />
-      <View style={styles.rankCenter}>
-        <View style={styles.skeletonName} />
-      </View>
-      <View style={styles.skeletonRight} />
-    </View>
-  )
-}
-
 export default function VestiaireTab() {
   const { t } = useTranslation()
   const router = useRouter()
   const insets = useSafeAreaInsets()
+  const queryClient = useQueryClient()
   const { activeGroupId } = useGroupContext()
   const [activeTab, setActiveTab] = useState<VestiaireTab>('ovr')
+  const [refreshing, setRefreshing] = useState(false)
+  const { scrollY, scrollHandler } = useCollapsingHeader()
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true)
+    try {
+      await queryClient.refetchQueries({ queryKey: ['leaderboard', activeGroupId] })
+    } finally {
+      setRefreshing(false)
+    }
+  }, [queryClient, activeGroupId])
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['leaderboard', activeGroupId],
@@ -137,6 +141,14 @@ export default function VestiaireTab() {
         .then((r) => r.data.data),
     enabled: !!activeGroupId,
   })
+
+  // The entrance cascade plays on the screen's first content reveal only. The podium
+  // renders on the OVR chip alone, so it would otherwise remount and re-cascade on every
+  // chip switch; once the first reveal has played we disable the entrance for later mounts.
+  const hasEnteredRef = useRef(false)
+  useEffect(() => {
+    if (data && !isLoading) hasEnteredRef.current = true
+  }, [data, isLoading])
 
   if (!activeGroupId) {
     return (
@@ -172,7 +184,6 @@ export default function VestiaireTab() {
     { key: 'ovr', label: t('vestiaire.tab.ovr') },
     { key: 'buteurs', label: t('vestiaire.tab.buteurs') },
     { key: 'presences', label: t('vestiaire.tab.presences') },
-    { key: 'pronos', label: t('vestiaire.tab.pronos') },
   ]
 
   return (
@@ -180,22 +191,20 @@ export default function VestiaireTab() {
       {/* The screen's ONE texture element: outline screen-title watermark. */}
       <TextureType lines={[{ text: t('vestiaire.title') }]} fontSize={160} style={styles.texture} />
 
-      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
-        <Text style={styles.title}>{t('vestiaire.title')}</Text>
-        <View style={styles.chips}>
-          {tabs.map((tab) => (
-            <Chip
-              key={tab.key}
-              label={tab.label}
-              active={activeTab === tab.key}
-              onPress={() => setActiveTab(tab.key)}
-            />
-          ))}
+      {(isLoading || isError) && (
+        <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
+          <Text style={styles.title}>{t('vestiaire.title')}</Text>
+          <View style={styles.chips}>
+            {tabs.map((tab) => (
+              <Chip key={tab.key} label={tab.label} active={activeTab === tab.key} onPress={() => setActiveTab(tab.key)} />
+            ))}
+          </View>
         </View>
-      </View>
+      )}
 
-      {isLoading && activeTab !== 'pronos' && (
+      {isLoading && (
         <View style={styles.listContent}>
+          {activeTab === 'ovr' && <SkeletonPodium />}
           <View style={styles.listCard}>
             <SkeletonRow />
             <SkeletonRow />
@@ -204,24 +213,47 @@ export default function VestiaireTab() {
         </View>
       )}
 
-      {isError && activeTab !== 'pronos' && (
+      {isError && (
         <View style={styles.emptyContainer}>
           <Text style={styles.message}>{t('common.loadError')}</Text>
         </View>
       )}
 
-      {!isLoading && !isError && data && activeTab !== 'pronos' && (
-        <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
-          {activeTab === 'ovr' && top3.length >= 3 && <Podium top3={top3} />}
+      {!isLoading && !isError && data && (
+        <Animated.ScrollView
+          style={styles.list}
+          onScroll={scrollHandler}
+          scrollEventThrottle={16}
+          contentContainerStyle={[styles.listContent, { paddingTop: insets.top + 12 }]}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} colors={[Colors.primary]} />
+          }
+        >
+          <View style={styles.header}>
+            <CollapsingHeaderTitle
+              title={t('vestiaire.title')}
+              scrollY={scrollY}
+              subtitle={<View style={styles.chips}>
+                {tabs.map((tab) => (
+                  <Chip key={tab.key} label={tab.label} active={activeTab === tab.key} onPress={() => setActiveTab(tab.key)} />
+                ))}
+              </View>}
+            />
+          </View>
+          {activeTab === 'ovr' && top3.length >= 3 && (
+            <StaggerItem index={0} enabled={!hasEnteredRef.current}>
+              <Podium top3={top3} />
+            </StaggerItem>
+          )}
           {players.length > 0 && (
-            <View style={styles.listCard}>
+            <StaggerItem index={1} enabled={!hasEnteredRef.current} style={styles.listCard}>
               {sortedPlayers().map((player, idx, arr) => (
                 <View key={player.playerId}>
                   <RankRow player={player} tab={activeTab} />
                   {idx < arr.length - 1 && <View style={styles.separator} />}
                 </View>
               ))}
-            </View>
+            </StaggerItem>
           )}
           {players.length === 0 && (
             <View style={styles.emptyState}>
@@ -236,11 +268,11 @@ export default function VestiaireTab() {
               />
             </View>
           )}
-        </ScrollView>
+        </Animated.ScrollView>
       )}
 
-      {activeTab === 'pronos' && activeGroupId && (
-        <PronosLeaderboard groupId={activeGroupId} />
+      {!isLoading && !isError && data && (
+        <CollapsingHeader title={t('vestiaire.title')} scrollY={scrollY} />
       )}
     </View>
   )
@@ -256,7 +288,7 @@ const styles = StyleSheet.create({
     color: Colors.ink,
     fontFamily: Type.display.fontFamily,
     fontSize: 40,
-    letterSpacing: 1.8, // 0.045em @ 40 (display register)
+    letterSpacing: 1.8,
     marginBottom: 10,
   },
   chips: { flexDirection: 'row', gap: 8, marginBottom: 4 },
@@ -310,9 +342,4 @@ const styles = StyleSheet.create({
     letterSpacing: 0.88, // 0.04em @ 22 (stat register)
   },
   rankSubtext: { color: Colors.inkSecondary, fontSize: 11, fontFamily: Fonts.interMedium },
-  skeletonRow: { opacity: 0.4 },
-  skeletonPosition: { width: 26, height: 20, backgroundColor: Colors.surfaceRaised, borderRadius: Radius.sm },
-  skeletonAvatar: { width: 36, height: 36, borderRadius: Radius.full, backgroundColor: Colors.surfaceRaised },
-  skeletonName: { width: '70%', height: 16, backgroundColor: Colors.surfaceRaised, borderRadius: Radius.sm },
-  skeletonRight: { width: 48, height: 12, backgroundColor: Colors.surfaceRaised, borderRadius: Radius.sm },
 })

@@ -1,7 +1,16 @@
 import { View, Text, Image, StyleSheet } from 'react-native'
 import type { ViewStyle } from 'react-native'
 import { useTranslation } from 'react-i18next'
-import Animated from 'react-native-reanimated'
+import Animated, {
+  useAnimatedSensor,
+  useAnimatedStyle,
+  useDerivedValue,
+  useSharedValue,
+  useReducedMotion,
+  interpolate,
+  Extrapolation,
+  SensorType,
+} from 'react-native-reanimated'
 import type { AnimatedStyle } from 'react-native-reanimated'
 import { LinearGradient } from 'expo-linear-gradient'
 import Svg, { Path } from 'react-native-svg'
@@ -45,6 +54,11 @@ interface PaniniCardProps {
    *  from any card payload (players.id ≠ users.id, no joinedAt on players) —
    *  per AC the serial renders member count only. */
   serialTotal?: number
+  /** Story 10.4 — additive, default false. When true (unlocked full face only,
+   *  never mini) the card subscribes to the gyroscope and tilts/parallaxes/catches
+   *  light. Reduced motion or a sensor returning zeros collapses to the static face,
+   *  pixel-identical to today. */
+  interactive?: boolean
 }
 
 const DESIGN_WIDTH = 272
@@ -193,6 +207,255 @@ function PhotoCutout({
   )
 }
 
+/* ---------- Story 10.4 — living-card tilt ---------- */
+
+// Physical tilt (radians, relative to the pose captured at mount) that maps to the
+// full ±TILT_MAX_DEG deflection. ~0.6 rad ≈ 34° of wrist movement. Sensitivity and
+// range are the two device-pass tuning knobs (see AC 6 outstanding item).
+const TILT_MAX_DEG = 10
+const TILT_SENSITIVITY = 2.2
+const TILT_RANGE_RAD = 0.6
+// Per-layer parallax travel (px at full deflection). Distinct multipliers give the
+// duotone cutout (front), name/OVR lockup (mid) and scribble (back) separate planes.
+const PARALLAX = { cutout: 12, lockup: 7, scribble: 4 }
+// Sheen: a single low-alpha white band that sweeps the paper and fades to 0 at rest.
+const SHEEN_MAX_OPACITY = 0.16
+const SHEEN_TRAVEL = 60
+
+interface TiltStyles {
+  root: AnimatedStyle<ViewStyle>
+  cutout: AnimatedStyle<ViewStyle>
+  scribble: AnimatedStyle<ViewStyle>
+  lockup: AnimatedStyle<ViewStyle>
+  sheen: AnimatedStyle<ViewStyle>
+}
+
+/** Owns the gyroscope subscription. Only ever mounted for an interactive, non-reduced
+ *  unlocked full card, so the sensor is never subscribed on the static path. On the
+ *  simulator (zeroed sensor) the baseline is 0 and every derived value stays 0 → no
+ *  jitter, static render. Reanimated tears the subscription down on unmount. */
+function useCardTilt(): TiltStyles {
+  const sensor = useAnimatedSensor(SensorType.ROTATION, { interval: 16 })
+  const basePitch = useSharedValue<number | null>(null)
+  const baseRoll = useSharedValue<number | null>(null)
+
+  // Normalized, clamped tilt in [-1, 1]; 0 at rest (baseline = first sample's pose).
+  const pitchN = useDerivedValue(() => {
+    const { pitch } = sensor.sensor.value
+    if (basePitch.value === null) basePitch.value = pitch
+    const d = (pitch - basePitch.value) * TILT_SENSITIVITY
+    return interpolate(d, [-TILT_RANGE_RAD, TILT_RANGE_RAD], [-1, 1], Extrapolation.CLAMP)
+  })
+  const rollN = useDerivedValue(() => {
+    const { roll } = sensor.sensor.value
+    if (baseRoll.value === null) baseRoll.value = roll
+    const d = (roll - baseRoll.value) * TILT_SENSITIVITY
+    return interpolate(d, [-TILT_RANGE_RAD, TILT_RANGE_RAD], [-1, 1], Extrapolation.CLAMP)
+  })
+
+  const root = useAnimatedStyle(() => ({
+    // perspective MUST be the first transform for rotateX/rotateY to read as 3D.
+    transform: [
+      { perspective: 900 },
+      { rotateX: `${-pitchN.value * TILT_MAX_DEG}deg` },
+      { rotateY: `${rollN.value * TILT_MAX_DEG}deg` },
+    ],
+  }))
+  const cutout = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: rollN.value * PARALLAX.cutout },
+      { translateY: pitchN.value * PARALLAX.cutout },
+    ],
+  }))
+  const lockup = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: rollN.value * PARALLAX.lockup },
+      { translateY: pitchN.value * PARALLAX.lockup },
+    ],
+  }))
+  const scribble = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: rollN.value * PARALLAX.scribble },
+      { translateY: pitchN.value * PARALLAX.scribble },
+    ],
+  }))
+  const sheen = useAnimatedStyle(() => {
+    const mag = Math.min(1, Math.hypot(rollN.value, pitchN.value))
+    return {
+      opacity: mag * SHEEN_MAX_OPACITY,
+      transform: [
+        { translateX: rollN.value * SHEEN_TRAVEL },
+        { translateY: pitchN.value * SHEEN_TRAVEL },
+      ],
+    }
+  })
+
+  return { root, cutout, scribble, lockup, sheen }
+}
+
+interface UnlockedBodyProps {
+  s: number
+  width: number
+  groupLabel: string
+  crestInitials: string
+  initials: string
+  ovrScore: number | null
+  ovrLabel: string
+  ovrStyle?: AnimatedStyle<ViewStyle>
+  displayName: string
+  matchCountLabel: string
+  isMvp?: boolean
+  mvpLabel: string
+  serialText: string
+  appName: string
+  attributes: PaniniCardPlayer['attributes']
+  attrItems: Array<{ key: keyof NonNullable<PaniniCardPlayer['attributes']>; label: string }>
+  photoUrl?: string | null
+  /** Present only on the interactive path; absent → static, layout pixel-identical. */
+  tilt?: TiltStyles
+}
+
+/** L'Éditoriale bone unlocked face — single source of truth for both the static and
+ *  interactive renders. Without `tilt` the Animated.Views carry no animated style and
+ *  the output matches the pre-10.4 card exactly. */
+function UnlockedFaceBody({
+  s,
+  width,
+  groupLabel,
+  crestInitials,
+  initials,
+  ovrScore,
+  ovrLabel,
+  ovrStyle,
+  displayName,
+  matchCountLabel,
+  isMvp,
+  mvpLabel,
+  serialText,
+  appName,
+  attributes,
+  attrItems,
+  photoUrl,
+  tilt,
+}: UnlockedBodyProps) {
+  return (
+    <Animated.View style={[styles.cardShadow, tilt?.root]}>
+      <LinearGradient
+        colors={PAPER_GRADIENT}
+        start={{ x: 0.55, y: 0 }}
+        end={{ x: 0.45, y: 1 }}
+        style={[styles.card, { width, padding: 18 * s, paddingBottom: 14 * s }]}
+      >
+        {/* TOP — group lockup + crest monogram */}
+        <View style={styles.topRow}>
+          <Text style={[styles.topText, { fontSize: 8.5 * s, letterSpacing: 1.87 * s }]} numberOfLines={1}>
+            {groupLabel}
+          </Text>
+          <View style={[styles.crest, { width: 22 * s, height: 22 * s, borderRadius: 11 * s }]}>
+            <Text style={[styles.crestText, { fontSize: 9 * s }]}>{crestInitials}</Text>
+          </View>
+        </View>
+
+        {/* NAME lockup — initials + red period, then the OVR (the number you earn) */}
+        <Animated.View style={[styles.lockup, { marginTop: 14 * s }, tilt?.lockup]}>
+          <Text style={[styles.lockupText, { fontSize: 72 * s, lineHeight: 61 * s }]}>
+            {initials}
+            <Text style={styles.red}>.</Text>
+          </Text>
+          {ovrScore !== null && (
+            <Animated.View
+              style={[styles.ovrRow, ovrStyle]}
+              accessible
+              accessibilityLabel={`OVR ${ovrScore}`}
+            >
+              <Text style={[styles.lockupText, styles.red, { fontSize: 72 * s, lineHeight: 61 * s }]}>
+                {ovrScore}
+              </Text>
+              <Text style={[styles.ovrMicroLabel, { fontSize: 9 * s, letterSpacing: 2.52 * s, marginLeft: 8 * s }]}>
+                {ovrLabel}
+              </Text>
+            </Animated.View>
+          )}
+        </Animated.View>
+
+        {/* META column — the only place the complete name appears; no OVR line, no gold on paper */}
+        <View style={[styles.meta, { top: 118 * s, right: 18 * s }]}>
+          <Text style={[styles.metaName, { fontSize: 9 * s, lineHeight: 18 * s, letterSpacing: 1.26 * s }]} numberOfLines={1}>
+            {displayName.toUpperCase()}
+          </Text>
+          <Text style={[styles.metaLine, { fontSize: 9 * s, lineHeight: 18 * s, letterSpacing: 1.26 * s }]}>
+            {matchCountLabel}
+          </Text>
+          {isMvp === true && (
+            <Text style={[styles.metaMvp, { fontSize: 9 * s, lineHeight: 18 * s, letterSpacing: 1.26 * s }]}>
+              {mvpLabel}
+            </Text>
+          )}
+        </View>
+
+        {/* PHOTO — duotone cutout over the coach's-marker scribble */}
+        <View style={[styles.photoZone, { height: 178 * s, marginTop: -10 * s }]}>
+          <Animated.View style={[styles.scribble, { left: 10 * s, top: -6 * s }, tilt?.scribble]}>
+            <Scribble width={width - 56 * s} height={190 * s} strokeWidth={7} />
+          </Animated.View>
+          <Animated.View style={tilt?.cutout}>
+            <PhotoCutout photoUrl={photoUrl} palette="paper" scale={s} />
+          </Animated.View>
+        </View>
+
+        {/* STATS — the system's progress language on paper */}
+        {attributes && (
+          <View style={[styles.statsGrid, styles.statsRule, { paddingTop: 10 * s }]}>
+            {attrItems.map(({ key, label }) => {
+              const value = Math.round(attributes[key])
+              return (
+                <View key={key} style={styles.statCell}>
+                  <View style={styles.statHead}>
+                    <Text style={[styles.statLabel, { fontSize: 8 * s, letterSpacing: 0.96 * s }]}>
+                      {label}
+                    </Text>
+                    <Text style={[styles.statValue, { fontSize: 12 * s }]}>{value}</Text>
+                  </View>
+                  <View style={[styles.statTrack, { height: 2.5 * s }]}>
+                    <View style={[styles.statFill, { width: `${Math.min(100, Math.max(0, value))}%` }]} />
+                  </View>
+                </View>
+              )
+            })}
+          </View>
+        )}
+
+        {/* SERIAL */}
+        <View style={[styles.serialRow, { marginTop: 10 * s }]}>
+          <Text style={[styles.serialText, { fontSize: 7.5 * s, letterSpacing: 1.5 * s }]}>
+            {appName}
+          </Text>
+          <Text style={[styles.serialText, { fontSize: 7.5 * s, letterSpacing: 1.5 * s }]}>{serialText}</Text>
+        </View>
+
+        {/* LIGHT — the card's single light response; clipped by the card's overflow */}
+        {tilt && (
+          <Animated.View pointerEvents="none" style={[styles.sheen, tilt.sheen]}>
+            <LinearGradient
+              colors={['rgba(255,255,255,0)', 'rgba(255,255,255,0.9)', 'rgba(255,255,255,0)']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={StyleSheet.absoluteFill}
+            />
+          </Animated.View>
+        )}
+      </LinearGradient>
+    </Animated.View>
+  )
+}
+
+/** Interactive wrapper — isolates the sensor hook so it mounts (and subscribes) only
+ *  on the tilt path. */
+function InteractiveUnlockedFace(props: UnlockedBodyProps) {
+  const tilt = useCardTilt()
+  return <UnlockedFaceBody {...props} tilt={tilt} />
+}
+
 export function PaniniCard({
   player,
   groupName,
@@ -202,8 +465,10 @@ export function PaniniCard({
   variant = 'full',
   width = DESIGN_WIDTH,
   serialTotal,
+  interactive = false,
 }: PaniniCardProps) {
   const { t } = useTranslation()
+  const reduceMotion = useReducedMotion()
   const { cardState, matchCount, ovrScore, attributes, displayName, trend } = player
 
   const isUnlocked = cardState === 'unlocked'
@@ -372,100 +637,34 @@ export function PaniniCard({
 
   /* ---------- FULL — L'Éditoriale (bone unlocked face) ---------- */
 
-  return (
-    <View style={styles.cardShadow}>
-      <LinearGradient
-        colors={PAPER_GRADIENT}
-        start={{ x: 0.55, y: 0 }}
-        end={{ x: 0.45, y: 1 }}
-        style={[styles.card, { width, padding: 18 * s, paddingBottom: 14 * s }]}
-      >
-        {/* TOP — group lockup + crest monogram */}
-        <View style={styles.topRow}>
-          <Text style={[styles.topText, { fontSize: 8.5 * s, letterSpacing: 1.87 * s }]} numberOfLines={1}>
-            {groupLabel}
-          </Text>
-          <View style={[styles.crest, { width: 22 * s, height: 22 * s, borderRadius: 11 * s }]}>
-            <Text style={[styles.crestText, { fontSize: 9 * s }]}>{crestInitials}</Text>
-          </View>
-        </View>
+  const bodyProps: UnlockedBodyProps = {
+    s,
+    width,
+    groupLabel,
+    crestInitials,
+    initials,
+    ovrScore,
+    ovrLabel: t('card.unlocked.ovrLabel'),
+    ovrStyle,
+    displayName,
+    matchCountLabel,
+    isMvp,
+    mvpLabel: t('card.mvp.badge').toUpperCase(),
+    serialText,
+    appName: t('app.name').toUpperCase(),
+    attributes,
+    attrItems: ATTRS.map(({ key, labelKey }) => ({ key, label: t(labelKey) })),
+    photoUrl,
+  }
 
-        {/* NAME lockup — initials + red period, then the OVR (the number you earn) */}
-        <View style={[styles.lockup, { marginTop: 14 * s }]}>
-          <Text style={[styles.lockupText, { fontSize: 72 * s, lineHeight: 61 * s }]}>
-            {initials}
-            <Text style={styles.red}>.</Text>
-          </Text>
-          {ovrScore !== null && (
-            <Animated.View
-              style={[styles.ovrRow, ovrStyle]}
-              accessible
-              accessibilityLabel={`OVR ${ovrScore}`}
-            >
-              <Text style={[styles.lockupText, styles.red, { fontSize: 72 * s, lineHeight: 61 * s }]}>
-                {ovrScore}
-              </Text>
-              <Text style={[styles.ovrMicroLabel, { fontSize: 9 * s, letterSpacing: 2.52 * s, marginLeft: 8 * s }]}>
-                {t('card.unlocked.ovrLabel')}
-              </Text>
-            </Animated.View>
-          )}
-        </View>
+  // Tilt is strictly additive: unlocked full face only, and never under reduced motion.
+  // The mini face returned above, so `interactive` can never reach the grid.
+  const tiltEnabled = interactive === true && variant === 'full' && !reduceMotion
 
-        {/* META column — the only place the complete name appears; no OVR line, no gold on paper */}
-        <View style={[styles.meta, { top: 118 * s, right: 18 * s }]}>
-          <Text style={[styles.metaName, { fontSize: 9 * s, lineHeight: 18 * s, letterSpacing: 1.26 * s }]} numberOfLines={1}>
-            {displayName.toUpperCase()}
-          </Text>
-          <Text style={[styles.metaLine, { fontSize: 9 * s, lineHeight: 18 * s, letterSpacing: 1.26 * s }]}>
-            {matchCountLabel}
-          </Text>
-          {isMvp === true && (
-            <Text style={[styles.metaMvp, { fontSize: 9 * s, lineHeight: 18 * s, letterSpacing: 1.26 * s }]}>
-              {t('card.mvp.badge').toUpperCase()}
-            </Text>
-          )}
-        </View>
-
-        {/* PHOTO — duotone cutout over the coach's-marker scribble */}
-        <View style={[styles.photoZone, { height: 178 * s, marginTop: -10 * s }]}>
-          <View style={[styles.scribble, { left: 10 * s, top: -6 * s }]}>
-            <Scribble width={width - 56 * s} height={190 * s} strokeWidth={7} />
-          </View>
-          <PhotoCutout photoUrl={photoUrl} palette="paper" scale={s} />
-        </View>
-
-        {/* STATS — the system's progress language on paper */}
-        {attributes && (
-          <View style={[styles.statsGrid, styles.statsRule, { paddingTop: 10 * s }]}>
-            {ATTRS.map(({ key, labelKey }) => {
-              const value = Math.round(attributes[key])
-              return (
-                <View key={key} style={styles.statCell}>
-                  <View style={styles.statHead}>
-                    <Text style={[styles.statLabel, { fontSize: 8 * s, letterSpacing: 0.96 * s }]}>
-                      {t(labelKey)}
-                    </Text>
-                    <Text style={[styles.statValue, { fontSize: 12 * s }]}>{value}</Text>
-                  </View>
-                  <View style={[styles.statTrack, { height: 2.5 * s }]}>
-                    <View style={[styles.statFill, { width: `${Math.min(100, Math.max(0, value))}%` }]} />
-                  </View>
-                </View>
-              )
-            })}
-          </View>
-        )}
-
-        {/* SERIAL */}
-        <View style={[styles.serialRow, { marginTop: 10 * s }]}>
-          <Text style={[styles.serialText, { fontSize: 7.5 * s, letterSpacing: 1.5 * s }]}>
-            {t('app.name').toUpperCase()}
-          </Text>
-          <Text style={[styles.serialText, { fontSize: 7.5 * s, letterSpacing: 1.5 * s }]}>{serialText}</Text>
-        </View>
-      </LinearGradient>
-    </View>
+  return tiltEnabled ? (
+    <InteractiveUnlockedFace {...bodyProps} />
+  ) : (
+    <UnlockedFaceBody {...bodyProps} />
   )
 }
 
@@ -520,6 +719,16 @@ const styles = StyleSheet.create({
   statFillPrimary: { height: '100%', borderRadius: 2, backgroundColor: Colors.primary },
   serialRow: { flexDirection: 'row', justifyContent: 'space-between', zIndex: 2 },
   serialText: { fontFamily: Fonts.interSemiBold, color: Colors.paperInk2, textTransform: 'uppercase' },
+  // Story 10.4 — light sheen: a single diagonal white band, oversized so it can sweep
+  // across the paper on tilt while staying clipped by the card's overflow:'hidden'.
+  sheen: {
+    position: 'absolute',
+    top: -SHEEN_TRAVEL,
+    left: -SHEEN_TRAVEL,
+    right: -SHEEN_TRAVEL,
+    bottom: -SHEEN_TRAVEL,
+    zIndex: 3,
+  },
 
   /* dark locked face */
   darkCard: {

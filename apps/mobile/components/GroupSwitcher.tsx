@@ -27,6 +27,7 @@ import { Colors } from '../constants/colors'
 import { Fonts, Motion, MotionEasing, MotionSpring, Radius } from '../constants/tokens'
 import { DuotoneAvatar } from './ui/DuotoneAvatar'
 import { SecondaryButton } from './ui/SecondaryButton'
+import { PressableScale } from './ui/PressableScale'
 import { useReduceMotion } from '../hooks/use-reduce-motion'
 import { httpClient } from '../lib/api-client'
 import { useGroupContext } from '../contexts/GroupContext'
@@ -200,7 +201,7 @@ export function GroupSwitcher({ visible, onClose }: Props) {
               renderItem={({ item }) => {
                 const isActive = item.id === activeGroupId
                 return (
-                  <Pressable
+                  <PressableScale
                     style={styles.groupRow}
                     onPress={() => handleSelect(item.id)}
                     accessibilityRole="button"
@@ -219,16 +220,16 @@ export function GroupSwitcher({ visible, onClose }: Props) {
                         <Text style={styles.activeTagText}>{t('groups.switcher.active')}</Text>
                       </View>
                     )}
-                  </Pressable>
+                  </PressableScale>
                 )
               }}
               ListFooterComponent={
-                <Pressable style={styles.createRow} onPress={handleCreateGroup} accessibilityRole="button">
+                <PressableScale style={styles.createRow} onPress={handleCreateGroup} accessibilityRole="button">
                   <View style={styles.createIcon}>
                     <Ionicons name="add" size={20} color={Colors.inkSecondary} />
                   </View>
                   <Text style={styles.createText}>{t('groups.switcher.createGroup')}</Text>
-                </Pressable>
+                </PressableScale>
               }
             />
           )}

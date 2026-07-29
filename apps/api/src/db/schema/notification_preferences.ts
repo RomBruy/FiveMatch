@@ -15,12 +15,13 @@ export const NOTIFICATION_TYPES = [
   'CARD_UNLOCKED',
   'CARD_INITIAL_UNLOCKED',
   'PRONOS_WINDOW_OPEN',
-  'PRONOS_REVEALED',
+  'PRONOS_REVEALED', // legacy, undispatched since Story 11.7 — kept so stored prefs stay valid
   'PLAYER_TIER_CHANGED',
   'GROUP_TIER_CHANGED',
   'RATING_REMINDER',
   'ORGANIZER_TRANSFERRED',
   'MATCH_CREATED',
+  'PRONOS_BETS_SETTLED',
 ] as const
 
 export type NotificationType = typeof NOTIFICATION_TYPES[number]

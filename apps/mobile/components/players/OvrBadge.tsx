@@ -2,6 +2,7 @@ import { View, Text, StyleSheet } from 'react-native'
 import { useTranslation } from 'react-i18next'
 import { Colors } from '../../constants/colors'
 import { Fonts, Radius } from '../../constants/tokens'
+import { CountUpNumber } from '../ui/CountUpNumber'
 
 interface OvrBadgeProps {
   ovrScore: number | null
@@ -32,13 +33,12 @@ export function OvrBadge({ ovrScore, cardState, size = 'list', gold = false }: O
 
   if (size === 'hero') {
     return (
-      <Text
+      <CountUpNumber
+        value={ovrScore}
         style={styles.heroOvr}
-        accessible
+        showDelta
         accessibilityLabel={`OVR ${ovrScore}`}
-      >
-        {ovrScore}
-      </Text>
+      />
     )
   }
 
@@ -68,6 +68,8 @@ const styles = StyleSheet.create({
     fontSize: 76,
     fontFamily: Fonts.bebas,
     lineHeight: 76,
+    minWidth: 76,
+    height: 76,
   },
   listPill: {
     backgroundColor: Colors.primarySubtle,

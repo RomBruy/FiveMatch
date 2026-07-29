@@ -5,10 +5,12 @@
     "version": "1.0.0",
     "scheme": "fivematch",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/brand/icon-v2.png",
     "userInterfaceStyle": "dark",
     "splash": {
-      "backgroundColor": "#111111"
+      "image": "./assets/brand/splash-logo.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#101013"
     },
     "ios": {
       "supportsTablet": false,
@@ -16,13 +18,30 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#111111"
+        "foregroundImage": "./assets/brand/adaptive-foreground.png",
+        "backgroundColor": "#101013"
       },
       "package": "com.fivematch.app"
     },
     "plugins": [
       "expo-router",
       "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#101013",
+          "image": "./assets/brand/splash-logo.png",
+          "imageWidth": 320,
+          "resizeMode": "contain"
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/brand/notification-icon.png",
+          "color": "#FF4438"
+        }
+      ],
       [
         "@sentry/react-native/expo",
         {

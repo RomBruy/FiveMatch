@@ -1,6 +1,5 @@
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native'
 import { useEffect } from 'react'
-import { BlurView } from 'expo-blur'
 import { Ionicons } from '@expo/vector-icons'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs'
@@ -13,6 +12,8 @@ import Animated, {
 import { Colors } from '../../constants/colors'
 import { Motion, MotionSpring, Radius } from '../../constants/tokens'
 import { useReduceMotion } from '../../hooks/use-reduce-motion'
+import { haptics } from '../../lib/haptics'
+import { RaisedBlurSurface } from './RaisedBlurSurface'
 
 /** Bottom padding tab screens need so scrolled content clears the floating dock (height + offset + breathing room). */
 export const DOCK_CLEARANCE = 68 + 34 + 16
@@ -21,6 +22,7 @@ const TAB_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   index: 'home',
   players: 'people',
   match: 'football',
+  pronos: 'trending-up',
   vestiaire: 'shirt',
   'profile/index': 'person',
 }
@@ -94,11 +96,7 @@ export function TabDock({ state, descriptors, navigation }: BottomTabBarProps) {
   return (
     <View style={[styles.dock, { bottom: Math.max(insets.bottom, 34), width: dockWidth }]}>
       {/* Surface clips to the pill; tabs render outside it so the active glow isn't cut off */}
-      <View style={styles.surface}>
-        {/* intensity 50 ≈ a 14px blur radius (100 maps to the full ~30px system blur) */}
-        <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill} />
-        <View style={styles.tint} />
-      </View>
+      <RaisedBlurSurface style={styles.surface} />
       {visibleRoutes.map((route) => {
         const { options } = descriptors[route.key]
         const focused = state.routes[state.index]?.key === route.key
@@ -112,6 +110,7 @@ export function TabDock({ state, descriptors, navigation }: BottomTabBarProps) {
             canPreventDefault: true,
           })
           if (!focused && !event.defaultPrevented) {
+            haptics.selection()
             navigation.navigate(route.name, route.params)
           }
         }
@@ -143,13 +142,6 @@ const styles = StyleSheet.create({
   surface: {
     ...StyleSheet.absoluteFillObject,
     borderRadius: Radius.full,
-    borderWidth: 1,
-    borderColor: Colors.hairline,
-    overflow: 'hidden',
-  },
-  tint: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(38,38,44,0.92)',
   },
   tab: {
     width: 48,
