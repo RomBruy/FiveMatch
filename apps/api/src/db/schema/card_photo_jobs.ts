@@ -13,6 +13,8 @@ export const cardPhotoJobs = pgTable('card_photo_jobs', {
   state: cardPhotoJobStateEnum('state').notNull().default('idle'),
   idempotencyKey: text('idempotency_key').notNull().unique(),
   photoUrl: text('photo_url'),
+  /** Storage key for the generated object. Deletion works from this, not the URL. */
+  storageKey: text('storage_key'),
   errorMessage: text('error_message'),
   generationMonth: text('generation_month').notNull(),
   createdAt: timestamp('created_at').notNull().defaultNow(),

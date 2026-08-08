@@ -4,31 +4,14 @@ import { eq } from 'drizzle-orm'
 import * as Sentry from '@sentry/node'
 import { createRekognitionClientFromEnv } from '../lib/rekognition'
 import { createGeminiClientFromEnv } from '../lib/gemini'
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
-
-async function uploadToB2(imageBuffer: Buffer, jobId: string): Promise<string> {
-  const client = new S3Client({
-    endpoint: process.env.B2_ENDPOINT,
-    region: 'auto',
-    credentials: {
-      accessKeyId: process.env.B2_KEY_ID!,
-      secretAccessKey: process.env.B2_APP_KEY!,
-    },
-  })
-  const key = `card-photos/${jobId}.png`
-  await client.send(new PutObjectCommand({
-    Bucket: process.env.B2_BUCKET_NAME!,
-    Key: key,
-    Body: imageBuffer,
-    ContentType: 'image/png',
-  }))
-  return `${process.env.B2_PUBLIC_URL}/${key}`
-}
+import { cardPhotoKey, createObjectStorageFromEnv } from '../lib/object-storage'
+import { fetchSourceImage, ImageFetchError } from '../lib/image-fetch'
+import { photoConsentService } from '../services/cards/photo-consent.service'
 
 async function transitionJob(
   jobId: string,
   state: 'processing' | 'complete' | 'failed',
-  extras?: { photoUrl?: string; errorMessage?: string }
+  extras?: { photoUrl?: string; errorMessage?: string; storageKey?: string }
 ) {
   await db
     .update(cardPhotoJobs)
@@ -49,17 +32,25 @@ export async function processCardGenerationJob(jobId: string): Promise<void> {
 
   if (!job) return
 
-  // Fetch player's current photo to use as Gemini input
+  // Consent is re-checked here, not only at the route. A job can sit queued
+  // across a withdrawal, and processing a face after the player said stop is
+  // exactly what withdrawal is meant to prevent (rule 35).
+  const consent = await photoConsentService.getState(job.playerId)
+  if (!consent.current) {
+    await transitionJob(jobId, 'failed', { errorMessage: 'CONSENT_REQUIRED' })
+    return
+  }
+
   const player = await db
-    .select({ profilePhotoCardUrl: players.profilePhotoCardUrl })
+    .select({ profilePhotoSourceUrl: players.profilePhotoSourceUrl })
     .from(players)
     .where(eq(players.id, job.playerId))
     .limit(1)
     .then((rows) => rows[0])
 
-  // MVP: player must have a raw photo already at profilePhotoCardUrl.
-  // The upload UI is out of scope for Story 5.3 — job fails gracefully if missing.
-  const inputPhotoUrl = player?.profilePhotoCardUrl
+  // The source photo, never the generated one. These used to be the same
+  // column, so a second generation restyled the already-stylized output.
+  const inputPhotoUrl = player?.profilePhotoSourceUrl
   if (!inputPhotoUrl) {
     await transitionJob(jobId, 'failed', { errorMessage: 'NO_INPUT_PHOTO' })
     Sentry.captureMessage('Card generation failed: no input photo', {
@@ -68,14 +59,18 @@ export async function processCardGenerationJob(jobId: string): Promise<void> {
     return
   }
 
-  // Fetch input photo bytes
+  // Fetch input photo bytes under explicit type, size, redirect and timeout
+  // limits (rule 40).
   let inputBytes: Buffer
+  let inputMimeType: string
   try {
-    const response = await fetch(inputPhotoUrl)
-    inputBytes = Buffer.from(await response.arrayBuffer())
+    const fetched = await fetchSourceImage(inputPhotoUrl)
+    inputBytes = fetched.bytes
+    inputMimeType = fetched.mimeType
   } catch (err) {
-    await transitionJob(jobId, 'failed', { errorMessage: 'FETCH_INPUT_FAILED' })
-    Sentry.captureException(err, { extra: { jobId, playerId: job.playerId, step: 'rekognition' } })
+    const code = err instanceof ImageFetchError ? err.code : 'FETCH_INPUT_FAILED'
+    await transitionJob(jobId, 'failed', { errorMessage: code })
+    Sentry.captureException(err, { extra: { jobId, playerId: job.playerId, step: 'fetch' } })
     return
   }
 
@@ -109,7 +104,7 @@ export async function processCardGenerationJob(jobId: string): Promise<void> {
     const gemini = createGeminiClientFromEnv()
     generatedBytes = await gemini.generateCardPhoto(
       inputBytes.toString('base64'),
-      'image/jpeg'
+      inputMimeType,
     )
   } catch (err) {
     await transitionJob(jobId, 'failed', { errorMessage: 'GEMINI_ERROR' })
@@ -117,20 +112,44 @@ export async function processCardGenerationJob(jobId: string): Promise<void> {
     return
   }
 
-  // Step 3: Upload to Backblaze B2
+  // Step 3: moderate the OUTPUT before it is ever stored (rule 40).
+  //
+  // Moderating only the input assumes a generator cannot produce something the
+  // source did not contain, which is not a safe assumption about an image model.
+  // This runs before upload so flagged output never reaches the bucket at all.
+  try {
+    const rekognition = createRekognitionClientFromEnv()
+    const outputCheck = await rekognition.checkImage(generatedBytes)
+    if (outputCheck.isFlagged) {
+      await transitionJob(jobId, 'failed', { errorMessage: `OUTPUT_FLAGGED:${outputCheck.flagReason}` })
+      Sentry.captureMessage('Card generation failed: generated output flagged', {
+        extra: { jobId, playerId: job.playerId, step: 'output-moderation', flagReason: outputCheck.flagReason },
+      })
+      return
+    }
+  } catch (err) {
+    await transitionJob(jobId, 'failed', { errorMessage: 'OUTPUT_MODERATION_ERROR' })
+    Sentry.captureException(err, { extra: { jobId, playerId: job.playerId, step: 'output-moderation' } })
+    return
+  }
+
+  // Step 4: Upload to object storage
+  const storageKey = cardPhotoKey(jobId)
   let photoUrl: string
   try {
-    photoUrl = await uploadToB2(generatedBytes, jobId)
+    const storage = createObjectStorageFromEnv()
+    photoUrl = await storage.put(storageKey, generatedBytes, 'image/png')
   } catch (err) {
     await transitionJob(jobId, 'failed', { errorMessage: 'UPLOAD_ERROR' })
     Sentry.captureException(err, { extra: { jobId, playerId: job.playerId, step: 'upload' } })
     return
   }
 
-  // All steps passed — atomically transition to complete + update player photo
+  // All steps passed — record the key alongside the URL so erasure never has to
+  // parse a URL to find the object.
   await db.transaction(async (tx) => {
     await tx.update(cardPhotoJobs)
-      .set({ state: 'complete', photoUrl, updatedAt: new Date() })
+      .set({ state: 'complete', photoUrl, storageKey, updatedAt: new Date() })
       .where(eq(cardPhotoJobs.id, jobId))
     await tx.update(players)
       .set({ profilePhotoCardUrl: photoUrl })

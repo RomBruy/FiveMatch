@@ -356,3 +356,29 @@ Classification:
 | Cancelled 12h or less before kickoff | `late_cancel` |
 | Confirmed `in` and did not appear | `no_show` |
 | Never responded and did not appear | `no_show` |
+
+## ADR-030 — Photo consent as an event, not a flag
+
+Status: Accepted
+
+Consent to face processing is a row in `photo_consents` carrying policy version, purpose, retention and timestamps, not a boolean on `players`. Consent counts as *current* only when it is not withdrawn and its policy version matches the live one.
+
+The boolean it replaces could not say when consent was obtained, what the player was told, or that they had ever withdrawn it — which is most of what a consent record exists to prove. A grant after a withdrawal is inserted as a new row rather than updating the old one, because "they said no, then later said yes" is two facts and overwriting erases the first.
+
+Existing boolean consents were migrated under the distinct version `legacy_boolean` and are therefore **not** current. Those players are asked once more, under text that actually states purpose and retention. Carrying the boolean forward as informed consent would be a claim the stored data cannot support.
+
+Consequences:
+
+- Bumping `PHOTO_CONSENT_POLICY_VERSION` re-asks everyone. That is the intended cost of changing what people agreed to.
+- `players.photo_consent_given` is kept in sync as a mirror for existing readers; the table is the record of truth.
+- Generation re-checks consent at job execution, not only at the route, because a job can sit queued across a withdrawal.
+
+## ADR-031 — Erasure reaches object storage
+
+Status: Accepted
+
+Withdrawal of consent and GDPR purge both delete the generated objects from the bucket, driven by `card_photo_jobs.storage_key` rather than by parsing a URL.
+
+Before Phase 5 there was no delete path at all: purging a user removed the job rows and left the images in storage indefinitely. Deleting the only record of where an object lives, while leaving the object, is worse than not deleting either — nothing afterwards can find it.
+
+Storage deletion runs after the database transaction commits and never throws. A storage outage must not roll back an erasure that has otherwise succeeded, nor leave a player unable to withdraw consent. The failure is logged; a sweep is the remedy, not a retry that would have to redo the whole purge.

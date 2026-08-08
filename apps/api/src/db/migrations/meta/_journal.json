@@ -148,6 +148,13 @@
       "when": 1786260000000,
       "tag": "0020_phase4_card_eligibility",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1786264000000,
+      "tag": "0021_phase5_photo_lifecycle",
+      "breakpoints": true
     }
   ]
 }

@@ -49,6 +49,15 @@ export const players = pgTable('players', {
   // Mutated ONLY through bankrollService (atomic SQL arithmetic, never read-modify-write).
   pronosBalance: integer('pronos_balance').notNull().default(PRONOS_STARTING_BANKROLL),
   photoConsentGiven: boolean('photo_consent_given').default(false).notNull(),
+  /**
+   * The player's own photo, used as generation input.
+   *
+   * Separate from `profilePhotoCardUrl` because the job used to read its input
+   * from the same column it wrote its output to: a second generation restyled
+   * the already-stylized image instead of the original.
+   */
+  profilePhotoSourceUrl: text('profile_photo_source_url'),
+  /** The generated card portrait. Written by the job, never read by it. */
   profilePhotoCardUrl: text('profile_photo_card_url'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),

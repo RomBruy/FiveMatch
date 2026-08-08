@@ -356,6 +356,30 @@ Not yet built: no mobile surface for voiding a match, and no owner-facing explan
 
 Requirements: PR-032 through PR-037 and photo visibility in PR-041.
 
+### Local completion record — 2026-08-08
+
+Implemented on the isolated local database only. No deployment, no real-data migration.
+
+Three defects were found and fixed alongside the planned work:
+
+- **Generated photos survived erasure.** GDPR purge deleted `card_photo_jobs` rows and left the objects in the bucket indefinitely — and deleted the only record of where they were, so nothing afterwards could find them. Both withdrawal and purge now delete from storage, driven by a new `storage_key` rather than by parsing a URL (ADR-031, rule 38).
+- **The generator fed on its own output.** Input was read from `players.profile_photo_card_url`, the same column the output was written to, so a second generation restyled the already-stylized image instead of the original. A separate `profile_photo_source_url` fixes it.
+- **Generated output was never moderated.** Only the input was checked. Moderating input alone assumes an image model cannot produce something its source did not contain. Output is now checked before upload, so flagged output never reaches the bucket (rule 40).
+
+Planned work:
+
+- Consent is an event with policy version, purpose, retention and timestamps (ADR-030), replacing a boolean that could not say when consent was given or what the player was told. Current means not withdrawn AND on the live policy version. Legacy boolean consents migrated as `legacy_boolean` and are deliberately not current.
+- Withdrawal destroys generated photos; deleting photos does not withdraw consent. Disliking a portrait is a different request from stopping face processing.
+- Generation re-checks consent at job execution, not only at the route — a job can sit queued across a withdrawal.
+- Source fetch hardened: HTTPS only, redirects refused, content-type allow-list, size cap enforced twice, abort timeout. Previously a bare `fetch` that followed redirects and read any body.
+- All card-photo routes are owner-only through one middleware, replacing three hand-repeated ownership lookups.
+
+Migration `0021` is additive: one table, two columns, one index. Its two `INSERT`/`UPDATE` statements populate the new structures only and modify no pre-existing column.
+
+Gates: types and API typecheck, API lint, 46 files / 383 unit tests, 14 files / 109 isolated PostgreSQL integration tests. Mobile typecheck, lint, 671/671 parity, 5-tab baseline. OVR and pronostic golden regressions unchanged.
+
+**Outstanding:** no mobile surface for consent, withdrawal or photo deletion — the API is complete and nothing in the app calls it. No upload flow for the source photo, so generation still cannot be exercised end to end by a real user. Object-storage deletion is verified against a mock; it has never run against Backblaze.
+
 ### Deliverables
 
 - Move controls to global Profile.

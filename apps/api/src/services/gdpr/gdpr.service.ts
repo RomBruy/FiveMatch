@@ -1,7 +1,8 @@
 import { randomUUID } from 'crypto'
 import { and, eq, inArray, isNull, or } from 'drizzle-orm'
 import { db } from '../../db'
-import { behaviourReports, cardPhotoJobs, groupMemberships, matchParticipants, players, pronoBets, pronos, ratings, rawInitialSeedRatings, teamGenerationPlayers, users } from '../../db/schema'
+import { photoConsentService } from '../cards/photo-consent.service'
+import { behaviourReports, cardPhotoJobs, photoConsents, groupMemberships, matchParticipants, players, pronoBets, pronos, ratings, rawInitialSeedRatings, teamGenerationPlayers, users } from '../../db/schema'
 
 // Anonymize all match_participants rows for a deleted user.
 // userId and playerId are set to null; displayName is replaced with a random placeholder
@@ -85,6 +86,13 @@ async function purgeUser(userId: string, purgedAt: Date): Promise<void> {
 
   const playerIds = userPlayers.map((p) => p.id)
 
+  // Collected before the rows are deleted, or the keys go with them and the
+  // images stay in the bucket forever — which is exactly what happened before
+  // Phase 5 (rule 38).
+  const storageKeys = playerIds.length > 0
+    ? await photoConsentService.generatedStorageKeys(db as never, playerIds)
+    : []
+
   await db.transaction(async (tx) => {
     // Anonymize match_participants — preserve stats, erase identity
     const participantRows = await tx
@@ -111,6 +119,11 @@ async function purgeUser(userId: string, purgedAt: Date): Promise<void> {
       // Hard-delete team generation and card job rows
       await tx.delete(teamGenerationPlayers).where(inArray(teamGenerationPlayers.playerId, playerIds))
       await tx.delete(cardPhotoJobs).where(inArray(cardPhotoJobs.playerId, playerIds))
+
+      // Consent records go with the person. Keeping proof that someone once
+      // agreed to face processing, after erasing the person, would preserve the
+      // thing the erasure was about.
+      await tx.delete(photoConsents).where(inArray(photoConsents.playerId, playerIds))
 
       // Hard-delete Pronos bets — a wager carries no group-statistical value once its
       // owner is gone, so there is nothing to preserve by anonymizing (unlike match stats).
@@ -160,6 +173,12 @@ async function purgeUser(userId: string, purgedAt: Date): Promise<void> {
       .set({ purgedAt })
       .where(eq(users.id, userId))
   })
+
+  // After the transaction commits. A storage outage must not roll back an
+  // erasure that has otherwise succeeded; the failure is logged and the objects
+  // remain listed nowhere, so a later sweep is the remedy rather than a retry
+  // that would have to redo the whole purge.
+  await photoConsentService.deleteStoredObjects(storageKeys)
 }
 
 export const gdprService = {
