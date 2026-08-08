@@ -13,10 +13,11 @@ vi.mock('../../db', () => ({
 }))
 
 vi.mock('../../db/schema', () => ({
+  ACTIVE_CREW_ROLES: ['organizer', 'co_host', 'member'],
   users: { id: 'id', clerkUserId: 'clerk_user_id', name: 'name' },
   groups: { id: 'id', name: 'name', organizerId: 'organizer_id', inviteCode: 'invite_code', searchable: 'searchable', tier: 'tier' },
   groupMemberships: { groupId: 'group_id', userId: 'user_id', role: 'role', createdAt: 'created_at', deletedAt: 'deleted_at', joinedAt: 'joined_at' },
-  players: { id: 'id', groupId: 'group_id', userId: 'user_id', displayName: 'display_name', matchCount: 'match_count', deletedAt: 'deleted_at' },
+  players: { id: 'id', userId: 'user_id', displayName: 'display_name', matchCount: 'match_count', deletedAt: 'deleted_at' },
 }))
 
 vi.mock('../../middleware/require-group-member', () => ({
@@ -94,7 +95,6 @@ describe('POST /groups/:groupId/members/:userId/approve', () => {
     let membershipUpdated = false
 
     vi.mocked(db.transaction).mockImplementation(async (cb) => {
-      let txSelectCallCount = 0
       const mockTx = {
         update: vi.fn(() => {
           const chain = { set: vi.fn(), where: vi.fn() }
@@ -106,26 +106,20 @@ describe('POST /groups/:groupId/members/:userId/approve', () => {
           return chain
         }),
         select: vi.fn(() => {
-          txSelectCallCount++
-          if (txSelectCallCount === 1) {
-            // targetUser lookup: resolves from .where()
-            const chain = { from: vi.fn(), where: vi.fn() }
-            chain.from.mockReturnValue(chain)
-            chain.where.mockResolvedValue([{ name: 'Marcus' }])
-            return chain
-          }
-          // existingPlayer lookup: resolves from .limit()
-          const chain = { from: vi.fn(), where: vi.fn(), limit: vi.fn() }
+          // Only the targetUser lookup survives — approving no longer probes for
+          // an existing player row, it upserts the global identity.
+          const chain = { from: vi.fn(), where: vi.fn() }
           chain.from.mockReturnValue(chain)
-          chain.where.mockReturnValue(chain)
-          chain.limit.mockResolvedValue([])
+          chain.where.mockResolvedValue([{ name: 'Marcus' }])
           return chain
         }),
         insert: vi.fn(() => {
           const chain = { values: vi.fn() }
-          chain.values.mockImplementation(() => {
-            playerInsertCalled = true
-            return Promise.resolve()
+          chain.values.mockReturnValue({
+            onConflictDoNothing: vi.fn().mockImplementation(() => {
+              playerInsertCalled = true
+              return Promise.resolve()
+            }),
           })
           return chain
         }),
@@ -184,6 +178,9 @@ describe('POST /groups/:groupId/members/:userId/reject', () => {
   })
 
   it('organizer rejects pending member (200), deletes membership row', async () => {
+    vi.mocked(db.select).mockReturnValueOnce(
+      makeSelectLimit([{ userId: 'target-user-uuid-1' }]) as unknown as ReturnType<typeof db.select>,
+    )
     const deleteChain = { where: vi.fn() }
     deleteChain.where.mockResolvedValue(undefined)
     vi.mocked(db.delete).mockReturnValue(deleteChain as unknown as ReturnType<typeof db.delete>)

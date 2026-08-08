@@ -6,6 +6,7 @@ import { logger } from './lib/logger'
 import apiRouter from './routes'
 import webhooksRouter from './routes/webhooks'
 import { runCardStateTimeoutJob } from './jobs/card-state-timeout'
+import { runBehaviourReportExpiryJob } from './jobs/behaviour-report-expiry.job'
 
 const app = express()
 const PORT = process.env.PORT ?? 3000
@@ -24,6 +25,12 @@ app.listen(PORT, () => {
   setInterval(() => {
     runCardStateTimeoutJob().catch((err) => logger.error(err, 'card-state-timeout job failed'))
   }, 60 * 1000)
+
+  // Hourly is ample for a 72-hour window, and an unswept report is already inert
+  // to every read path — this settles the record, it does not decide anything.
+  setInterval(() => {
+    runBehaviourReportExpiryJob().catch((err) => logger.error(err, 'behaviour-report-expiry job failed'))
+  }, 60 * 60 * 1000)
 })
 
 export { app }

@@ -4,7 +4,8 @@ import request from 'supertest'
 
 // ── Hoisted mocks ──────────────────────────────────────────────────────────────
 vi.mock('../../db', () => ({ db: {} }))
-vi.mock('../../db/schema', () => ({ users: {} }))
+vi.mock('../../db/schema', () => ({
+  ACTIVE_CREW_ROLES: ['organizer', 'co_host', 'member'], users: {} }))
 vi.mock('../../lib/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }))

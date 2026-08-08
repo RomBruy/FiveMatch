@@ -13,6 +13,7 @@ vi.mock('../../db', () => ({
 }))
 
 vi.mock('../../db/schema', () => ({
+  ACTIVE_CREW_ROLES: ['organizer', 'co_host', 'member'],
   users: { id: 'id', clerkUserId: 'clerk_user_id', name: 'name' },
   groups: { id: 'id', name: 'name', organizerId: 'organizer_id', inviteCode: 'invite_code', searchable: 'searchable', tier: 'tier' },
   groupMemberships: { groupId: 'group_id', userId: 'user_id', role: 'role', createdAt: 'created_at' },

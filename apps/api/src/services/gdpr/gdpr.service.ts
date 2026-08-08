@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto'
 import { and, eq, inArray, isNull, or } from 'drizzle-orm'
 import { db } from '../../db'
-import { cardPhotoJobs, groupMemberships, matchParticipants, players, pronoBets, pronos, ratings, rawInitialSeedRatings, teamGenerationPlayers, users } from '../../db/schema'
+import { behaviourReports, cardPhotoJobs, groupMemberships, matchParticipants, players, pronoBets, pronos, ratings, rawInitialSeedRatings, teamGenerationPlayers, users } from '../../db/schema'
 
 // Anonymize all match_participants rows for a deleted user.
 // userId and playerId are set to null; displayName is replaced with a random placeholder
@@ -120,6 +120,26 @@ async function purgeUser(userId: string, purgedAt: Date): Promise<void> {
       // deliberately retained rather than dropped, so its rows are still personal data and
       // an erasure request must reach them. Archiving is not an exemption.
       await tx.delete(pronos).where(inArray(pronos.playerId, playerIds))
+
+      // Behaviour reports ABOUT this user are hard-deleted. A record of someone's
+      // conduct has no value once that person is gone, and it is pure personal
+      // data about them — there is nothing here worth preserving.
+      await tx.delete(behaviourReports).where(inArray(behaviourReports.subjectPlayerId, playerIds))
+
+      // Reports BY this user survive, detached. The subject's standing was built
+      // from them and erasing one person must not silently rewrite another's
+      // record — but the reporter's identity and their own words both go.
+      // A detached row also stops counting toward corroboration, which is right:
+      // an erased account should not keep vouching for anything.
+      await tx
+        .update(behaviourReports)
+        .set({ reporterPlayerId: null, detail: null })
+        .where(inArray(behaviourReports.reporterPlayerId, playerIds))
+
+      await tx
+        .update(behaviourReports)
+        .set({ validatorPlayerId: null })
+        .where(inArray(behaviourReports.validatorPlayerId, playerIds))
     }
 
     // Anonymize seed ratings (erase who gave the rating, keep the value)

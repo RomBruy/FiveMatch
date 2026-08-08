@@ -19,11 +19,10 @@ import { RaisedBlurSurface } from './RaisedBlurSurface'
 export const DOCK_CLEARANCE = 68 + 34 + 16
 
 const TAB_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
-  index: 'home',
-  players: 'people',
-  match: 'football',
-  pronos: 'trending-up',
-  vestiaire: 'shirt',
+  index: 'search',
+  matches: 'football',
+  crew: 'people',
+  'pronos/index': 'trending-up',
   'profile/index': 'person',
 }
 

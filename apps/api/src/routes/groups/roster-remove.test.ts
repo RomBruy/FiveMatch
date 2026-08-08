@@ -14,6 +14,7 @@ vi.mock('../../db', () => ({
 }))
 
 vi.mock('../../db/schema', () => ({
+  ACTIVE_CREW_ROLES: ['organizer', 'co_host', 'member'],
   users: { id: 'id', clerkUserId: 'clerk_user_id', name: 'name' },
   groups: { id: 'id', name: 'name', organizerId: 'organizer_id', inviteCode: 'invite_code', searchable: 'searchable', tier: 'tier' },
   groupMemberships: { groupId: 'group_id', userId: 'user_id', role: 'role', createdAt: 'created_at', deletedAt: 'deleted_at', joinedAt: 'joined_at' },
@@ -34,6 +35,10 @@ vi.mock('../../middleware/require-group-member', () => ({
 
 vi.mock('../../services/notifications/notification.service', () => ({
   notificationService: { send: vi.fn() },
+}))
+
+vi.mock('../../services/groups/membership.service', () => ({
+  membershipService: { endMembership: vi.fn().mockResolvedValue(true) },
 }))
 
 import { db } from '../../db'
@@ -81,28 +86,20 @@ describe('DELETE /:groupId/members/:userId', () => {
     vi.mocked(db.select).mockReturnValueOnce(
       makeSelectLimit([{ userId: 'member-uuid-1', role: 'member' }]) as unknown as ReturnType<typeof db.select>,
     )
-    vi.mocked(db.transaction).mockImplementationOnce(async (cb) => {
-      const mockTx = {
-        update: vi.fn().mockReturnValue({ set: vi.fn().mockReturnValue({ where: vi.fn().mockResolvedValue([]) }) }),
-        select: vi.fn().mockReturnValue({
-          from: vi.fn().mockReturnValue({
-            innerJoin: vi.fn().mockReturnValue({
-              where: vi.fn().mockResolvedValue([]),
-            }),
-          }),
-        }),
-      }
-      return cb(mockTx as unknown as Parameters<typeof cb>[0])
-    })
-
     const app = makeApp()
     const res = await request(app).delete('/group-123/members/member-uuid-1')
 
     expect(res.status).toBe(200)
     expect(res.body.data.removed).toBe(true)
+    const { membershipService } = await import('../../services/groups/membership.service')
+    expect(membershipService.endMembership).toHaveBeenCalledWith('group-123', 'member-uuid-1')
+    expect(db.transaction).not.toHaveBeenCalled()
   })
 
   it('organizer cannot remove themselves — returns 403', async () => {
+    vi.mocked(db.select).mockReturnValueOnce(
+      makeSelectLimit([{ userId: 'organizer-uuid-1', role: 'organizer' }]) as unknown as ReturnType<typeof db.select>,
+    )
     const app = makeApp()
     const res = await request(app).delete('/group-123/members/organizer-uuid-1')
 
@@ -165,6 +162,6 @@ describe('DELETE /:groupId/members/:userId', () => {
     const res = await request(app).post('/group-123/join')
 
     expect(res.status).toBe(201)
-    expect(res.body.data.role).toBe('pending_member')
+    expect(res.body.data.membershipStatus).toBe('pending_member')
   })
 })

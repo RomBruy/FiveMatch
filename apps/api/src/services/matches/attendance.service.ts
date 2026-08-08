@@ -1,36 +1,60 @@
 import { eq, and, isNull, isNotNull, sql, asc } from 'drizzle-orm'
 import { db } from '../../db'
-import { matches, matchAttendances, players, groupMemberships } from '../../db/schema'
+import { matches, matchAttendances, players, groupMemberships, matchCapacity } from '../../db/schema'
+import type { Match } from '../../db/schema'
 import { notificationService } from '../notifications/notification.service'
+import { AttendanceResponseSchema, type MatchCapabilities } from '@fivematch/types'
+import type { MatchRelation } from '../permissions/capability.service'
+import { trustProjectionService } from '../trust/trust-projection.service'
 
+type AttendanceSource = 'crew' | 'open'
+
+function fail(code: string, statusCode: number, meta?: unknown) {
+  return Object.assign(new Error(code), { code, statusCode, meta })
+}
+
+/** Confirmed IN and not waitlisted — the only count that means "has a seat". */
+async function countConfirmed(tx: typeof db, matchId: string, source?: AttendanceSource) {
+  const conditions = [
+    eq(matchAttendances.matchId, matchId),
+    eq(matchAttendances.status, 'in'),
+    isNull(matchAttendances.waitlistPosition),
+  ]
+  if (source) conditions.push(eq(matchAttendances.source, source))
+
+  const [row] = await tx
+    .select({ count: sql<number>`count(*)::int` })
+    .from(matchAttendances)
+    .where(and(...conditions))
+  return Number(row?.count ?? 0)
+}
+
+/**
+ * Respond to a match you already have a row on (crew members, or anyone who
+ * previously joined). `groupId` is no longer a parameter — it comes off the
+ * match, which may not have one at all.
+ */
 async function markAttendance(
   matchId: string,
-  groupId: string,
   internalUserId: string,
   newStatus: 'in' | 'out' | 'unknown',
 ) {
   const [player] = await db
     .select()
     .from(players)
-    .where(and(eq(players.userId, internalUserId), eq(players.groupId, groupId), isNull(players.deletedAt)))
+    .where(and(eq(players.userId, internalUserId), isNull(players.deletedAt)))
     .limit(1)
 
-  if (!player) {
-    throw Object.assign(new Error('NOT_A_MEMBER'), { code: 'NOT_A_MEMBER', statusCode: 403 })
-  }
+  if (!player) throw fail('PLAYER_NOT_FOUND', 403)
 
   const [match] = await db.select().from(matches).where(eq(matches.id, matchId)).limit(1)
 
   const isOpen = match?.status === 'attendance_open'
   const isLocked = match?.status === 'attendance_locked'
 
-  if (!match || (!isOpen && !isLocked)) {
-    throw Object.assign(new Error('ATTENDANCE_CLOSED'), { code: 'ATTENDANCE_CLOSED', statusCode: 422 })
-  }
+  if (!match || (!isOpen && !isLocked)) throw fail('ATTENDANCE_CLOSED', 422)
   // When locked, only 'out' is permitted — IN and unknown are rejected
-  if (isLocked && newStatus !== 'out') {
-    throw Object.assign(new Error('ATTENDANCE_CLOSED'), { code: 'ATTENDANCE_CLOSED', statusCode: 422 })
-  }
+  if (isLocked && newStatus !== 'out') throw fail('ATTENDANCE_CLOSED', 422)
 
   let [attendance] = await db
     .select()
@@ -38,42 +62,36 @@ async function markAttendance(
     .where(and(eq(matchAttendances.matchId, matchId), eq(matchAttendances.playerId, player.id)))
     .limit(1)
 
-  // Rows are seeded at match creation — players who joined the group after
-  // that have none. First response creates it instead of locking them out.
+  // Rows are seeded at match creation for the host's crew — players who joined
+  // the crew after that have none. First response creates it instead of locking
+  // them out. Anyone with no crew tie is arriving through an open spot.
   if (!attendance) {
+    const source = await inferSource(match, internalUserId)
     ;[attendance] = await db
       .insert(matchAttendances)
-      .values({ matchId, playerId: player.id, status: 'unknown' })
+      .values({ matchId, playerId: player.id, status: 'unknown', source })
       .returning()
   }
-  if (!attendance) {
-    throw Object.assign(new Error('NOT_IN_MATCH'), { code: 'NOT_IN_MATCH', statusCode: 404 })
-  }
+  if (!attendance) throw fail('NOT_IN_MATCH', 404)
 
   if (newStatus === 'in' && attendance.waitlistPosition !== null) {
-    throw Object.assign(new Error('ALREADY_ON_WAITLIST'), { code: 'ALREADY_ON_WAITLIST', statusCode: 409 })
+    throw fail('ALREADY_ON_WAITLIST', 409)
+  }
+
+  // An outsider can only take a seat while the host is still publishing spots.
+  if (newStatus === 'in' && attendance.source === 'open' && attendance.status !== 'in') {
+    await assertOpenSpotAvailable(match)
   }
 
   let shouldNotifyFull = false
-  let organizerUserId: string | null = null
+  let hostUserId: string | null = null
   let waitlistPromoteeUserId: string | null = null
   let waitlistPromoteePlayerId: string | null = null
 
   await db.transaction(async (tx) => {
     if (newStatus === 'in') {
-      const [countResult] = await tx
-        .select({ count: sql<number>`count(*)::int` })
-        .from(matchAttendances)
-        .where(
-          and(
-            eq(matchAttendances.matchId, matchId),
-            eq(matchAttendances.status, 'in'),
-            isNull(matchAttendances.waitlistPosition),
-          ),
-        )
-
-      const confirmedCount = Number(countResult.count)
-      const capacity = match.playersPerTeam * 2
+      const confirmedCount = await countConfirmed(tx as unknown as typeof db, matchId)
+      const capacity = matchCapacity(match.playersPerTeam)
 
       if (confirmedCount >= capacity) {
         const [maxResult] = await tx
@@ -84,39 +102,66 @@ async function markAttendance(
         const nextPosition = Number(maxResult.max) + 1
         await tx
           .update(matchAttendances)
-          .set({ status: 'in', waitlistPosition: nextPosition, respondedAt: new Date() })
+          // Coming back undoes the cancellation — you only let someone down if
+          // the seat was still empty at kickoff.
+          .set({
+            status: 'in',
+            waitlistPosition: nextPosition,
+            respondedAt: new Date(),
+            cancelledAt: null,
+          })
           .where(eq(matchAttendances.id, attendance.id))
       } else {
         await tx
           .update(matchAttendances)
-          .set({ status: 'in', waitlistPosition: null, respondedAt: new Date() })
+          .set({
+            status: 'in',
+            waitlistPosition: null,
+            respondedAt: new Date(),
+            cancelledAt: null,
+          })
           .where(eq(matchAttendances.id, attendance.id))
+
+        // Reliability numerator: every confirmed IN is a commitment made.
+        if (attendance.status !== 'in') {
+          await tx
+            .update(players)
+            .set({ commitmentCount: sql`${players.commitmentCount} + 1` })
+            .where(eq(players.id, player.id))
+        }
 
         if (confirmedCount + 1 >= capacity && !match.matchFullNotified) {
           await tx.update(matches).set({ matchFullNotified: true }).where(eq(matches.id, matchId))
           shouldNotifyFull = true
-
-          const [organizer] = await tx
-            .select({ userId: groupMemberships.userId })
-            .from(groupMemberships)
-            .where(
-              and(
-                eq(groupMemberships.groupId, groupId),
-                eq(groupMemberships.role, 'organizer'),
-                isNull(groupMemberships.deletedAt),
-              ),
-            )
-            .limit(1)
-
-          organizerUserId = organizer?.userId ?? null
+          hostUserId = match.hostId
         }
       }
     } else {
+      // Releasing a confirmed seat is the fact reliability is built on. Recorded
+      // whenever it happens, not only after lock — how late it was is decided at
+      // finalization against the crew's deadline, not guessed here (ADR-028).
+      const releasedConfirmedSeat =
+        attendance.status === 'in' && attendance.waitlistPosition === null
+
       // 'out' or 'unknown' — clear waitlistPosition if set
       await tx
         .update(matchAttendances)
-        .set({ status: newStatus, waitlistPosition: null, respondedAt: new Date() })
+        .set({
+          status: newStatus,
+          waitlistPosition: null,
+          respondedAt: new Date(),
+          ...(releasedConfirmedSeat ? { cancelledAt: new Date() } : {}),
+        })
         .where(eq(matchAttendances.id, attendance.id))
+
+      // Backing out after attendance locked is the thing that hurts a group
+      // that's counting on you. Withdrawing while it's still open is free.
+      if (isLocked && attendance.status === 'in' && attendance.waitlistPosition === null) {
+        await tx
+          .update(players)
+          .set({ noShowCount: sql`${players.noShowCount} + 1` })
+          .where(eq(players.id, player.id))
+      }
 
       // Post-lock: auto-promote the next waitlist player when a confirmed IN marks out
       if (isLocked && newStatus === 'out') {
@@ -146,12 +191,12 @@ async function markAttendance(
     }
   })
 
-  if (shouldNotifyFull && organizerUserId) {
+  if (shouldNotifyFull && hostUserId) {
     notificationService.send({
       type: 'MATCH_FULL',
       matchId,
-      groupId,
-      recipientUserId: organizerUserId,
+      groupId: match.groupId,
+      recipientUserId: hostUserId,
     })
   }
 
@@ -159,41 +204,129 @@ async function markAttendance(
     notificationService.send({
       type: 'WAITLIST_SPOT_OPEN',
       matchId,
-      groupId,
+      groupId: match.groupId,
       recipientUserId: waitlistPromoteeUserId,
     })
   }
 }
 
+/** Crew if they belong to the match's group, otherwise they came off discovery. */
+async function inferSource(match: Match, internalUserId: string): Promise<AttendanceSource> {
+  if (!match.groupId) return match.hostId === internalUserId ? 'crew' : 'open'
+  if (match.hostId === internalUserId) return 'crew'
+
+  const [membership] = await db
+    .select({ id: groupMemberships.id })
+    .from(groupMemberships)
+    .where(and(
+      eq(groupMemberships.groupId, match.groupId),
+      eq(groupMemberships.userId, internalUserId),
+      isNull(groupMemberships.deletedAt),
+    ))
+    .limit(1)
+
+  return membership ? 'crew' : 'open'
+}
+
+async function assertOpenSpotAvailable(match: Match) {
+  if (match.visibility !== 'public' || match.openSpots === null) throw fail('MATCH_NOT_PUBLIC', 422)
+
+  const takenFromOpen = await countConfirmed(db, match.id, 'open')
+  const confirmed = await countConfirmed(db, match.id)
+
+  if (takenFromOpen >= match.openSpots || confirmed >= matchCapacity(match.playersPerTeam)) {
+    throw fail('NO_SPOTS_AVAILABLE', 409)
+  }
+}
+
+/**
+ * Take a published spot on someone else's match. The one path in the product
+ * where a stranger writes to a match they have no prior tie to, so it re-checks
+ * everything rather than trusting the caller: match is public, kickoff is ahead,
+ * attendance is open, a spot is genuinely free.
+ */
+async function joinOpenMatch(matchId: string, internalUserId: string) {
+  const [player] = await db
+    .select()
+    .from(players)
+    .where(and(eq(players.userId, internalUserId), isNull(players.deletedAt)))
+    .limit(1)
+  if (!player) throw fail('PLAYER_NOT_FOUND', 403)
+
+  const [match] = await db.select().from(matches).where(eq(matches.id, matchId)).limit(1)
+  if (!match) throw fail('MATCH_NOT_FOUND', 404)
+  if (match.status !== 'attendance_open') throw fail('ATTENDANCE_CLOSED', 422)
+  if (match.scheduledAt.getTime() <= Date.now()) throw fail('MATCH_STARTED', 422)
+
+  const [existing] = await db
+    .select({ id: matchAttendances.id, status: matchAttendances.status })
+    .from(matchAttendances)
+    .where(and(eq(matchAttendances.matchId, matchId), eq(matchAttendances.playerId, player.id)))
+    .limit(1)
+
+  if (existing?.status === 'in') throw fail('ALREADY_JOINED', 409)
+
+  const source = await inferSource(match, internalUserId)
+  if (source === 'open') await assertOpenSpotAvailable(match)
+
+  if (existing) {
+    await markAttendance(matchId, internalUserId, 'in')
+  } else {
+    await db.insert(matchAttendances).values({
+      matchId,
+      playerId: player.id,
+      status: 'unknown',
+      source,
+    })
+    await markAttendance(matchId, internalUserId, 'in')
+  }
+
+  const spots = await getSpots(match)
+
+  // The host cares much more about a stranger arriving than about a crew RSVP.
+  if (source === 'open') {
+    notificationService.send({
+      type: 'SPOT_CLAIMED',
+      matchId,
+      groupId: match.groupId,
+      playerDisplayName: player.displayName,
+      spotsRemaining: spots.spotsRemaining,
+      recipientUserId: match.hostId,
+    })
+  }
+
+  return spots
+}
+
+async function getSpots(match: Match) {
+  const confirmed = await countConfirmed(db, match.id)
+  const takenFromOpen = await countConfirmed(db, match.id, 'open')
+  const capacity = matchCapacity(match.playersPerTeam)
+  return {
+    confirmed,
+    capacity,
+    spotsRemaining: match.openSpots === null
+      ? 0
+      : Math.max(0, Math.min(match.openSpots - takenFromOpen, capacity - confirmed)),
+  }
+}
+
+/** Give up a seat. Equivalent to marking out, kept as its own verb for the UI. */
+async function leaveMatch(matchId: string, internalUserId: string) {
+  await markAttendance(matchId, internalUserId, 'out')
+}
+
 async function lockAttendance(matchId: string) {
   const [match] = await db.select().from(matches).where(eq(matches.id, matchId)).limit(1)
 
-  if (!match) {
-    throw Object.assign(new Error('MATCH_NOT_FOUND'), { code: 'MATCH_NOT_FOUND', statusCode: 404 })
-  }
-  if (match.status !== 'attendance_open') {
-    throw Object.assign(new Error('ATTENDANCE_CLOSED'), { code: 'ATTENDANCE_CLOSED', statusCode: 422 })
-  }
+  if (!match) throw fail('MATCH_NOT_FOUND', 404)
+  if (match.status !== 'attendance_open') throw fail('ATTENDANCE_CLOSED', 422)
 
-  const [countResult] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(matchAttendances)
-    .where(
-      and(
-        eq(matchAttendances.matchId, matchId),
-        eq(matchAttendances.status, 'in'),
-        isNull(matchAttendances.waitlistPosition),
-      ),
-    )
-
-  const confirmedCount = Number(countResult.count)
-  const required = match.playersPerTeam * 2
+  const confirmedCount = await countConfirmed(db, matchId)
+  const required = matchCapacity(match.playersPerTeam)
 
   if (confirmedCount < required) {
-    throw Object.assign(
-      new Error('INSUFFICIENT_PLAYERS'),
-      { code: 'INSUFFICIENT_PLAYERS', statusCode: 422, meta: { confirmed: confirmedCount, required } },
-    )
+    throw fail('INSUFFICIENT_PLAYERS', 422, { confirmed: confirmedCount, required })
   }
 
   await db
@@ -202,33 +335,105 @@ async function lockAttendance(matchId: string) {
     .where(eq(matches.id, matchId))
 }
 
-async function getAttendances(matchId: string, internalUserId?: string) {
+async function getAttendances(
+  matchId: string,
+  internalUserId: string | undefined,
+  capabilities: MatchCapabilities,
+  relation: MatchRelation,
+) {
   const rows = await db
     .select({
       playerId: matchAttendances.playerId,
       displayName: players.displayName,
       status: matchAttendances.status,
+      source: matchAttendances.source,
       waitlistPosition: matchAttendances.waitlistPosition,
       playerUserId: players.userId,
+      // Trust signals travel with the sheet — a host vetting a stranger sees
+      // them right where the decision happens.
+      matchCount: players.matchCount,
+      skillLevel: players.skillLevel,
+      finalizedAt: matchAttendances.finalizedAt,
     })
     .from(matchAttendances)
     .leftJoin(players, eq(players.id, matchAttendances.playerId))
     .where(eq(matchAttendances.matchId, matchId))
 
   const myRow = internalUserId ? rows.find((r) => r.playerUserId === internalUserId) : undefined
-  const myPlayerId = myRow?.playerId ?? null
+
+  // The earned mark only — a host vetting a stranger gets a positive signal or
+  // nothing, never a visible negative (ADR-019).
+  const reliableFlags = await trustProjectionService.getReliableFlags(
+    rows.map((r) => r.playerId).filter((id): id is string => Boolean(id)),
+  )
+  const toEntry = (r: (typeof rows)[number]) => ({
+    playerId: r.playerId,
+    displayName: r.displayName,
+    skillLevel: r.skillLevel,
+    matchCount: r.matchCount ?? 0,
+    isReliable: r.playerId ? (reliableFlags.get(r.playerId) ?? false) : false,
+  })
 
   const confirmed = rows
     .filter((r) => r.status === 'in' && r.waitlistPosition === null)
-    .map((r) => ({ playerId: r.playerId, displayName: r.displayName, status: r.status }))
+    .map(toEntry)
 
   const waitlist = rows
     .filter((r) => r.waitlistPosition !== null)
     .sort((a, b) => (a.waitlistPosition ?? 0) - (b.waitlistPosition ?? 0))
-    .map((r) => ({ playerId: r.playerId, displayName: r.displayName, waitlistPosition: r.waitlistPosition }))
+    .map((r) => ({ ...toEntry(r), waitlistPosition: r.waitlistPosition }))
 
-  return { confirmed, waitlist, myPlayerId }
+  const pending = rows
+    .filter((r) => r.status === 'unknown')
+    .map(toEntry)
+
+  const counts = {
+    confirmed: confirmed.length,
+    waitlist: waitlist.length,
+    pending: pending.length,
+  }
+  const self = myRow
+    ? { playerId: myRow.playerId!, status: myRow.status, waitlistPosition: myRow.waitlistPosition }
+    : null
+
+  if (capabilities.canManageAttendance) {
+    const withSource = (r: (typeof rows)[number]) => ({ ...toEntry(r), source: r.source })
+    const confirmedRows = rows.filter((r) => r.status === 'in' && r.waitlistPosition === null)
+    return AttendanceResponseSchema.parse({
+      audience: 'manager',
+      counts,
+      self,
+      // One boolean, never per-player outcomes: the host needs to know the job
+      // is done, not to be handed a list of who let them down (ADR-019).
+      attendanceFinalized: confirmedRows.length > 0
+        && confirmedRows.every((r) => r.finalizedAt !== null),
+      confirmed: rows.filter((r) => r.status === 'in' && r.waitlistPosition === null).map(withSource),
+      waitlist: rows.filter((r) => r.waitlistPosition !== null)
+        .sort((a, b) => (a.waitlistPosition ?? 0) - (b.waitlistPosition ?? 0))
+        .map((r) => ({ ...withSource(r), waitlistPosition: r.waitlistPosition })),
+      pending: rows.filter((r) => r.status === 'unknown').map(withSource),
+      out: rows.filter((r) => r.status === 'out').map(withSource),
+    })
+  }
+
+  if (capabilities.canViewParticipantRoster) {
+    return AttendanceResponseSchema.parse({ audience: 'participant', counts, self, confirmed })
+  }
+
+  return AttendanceResponseSchema.parse({
+    audience: relation === 'crew' ? 'group' : 'viewer',
+    counts,
+    self,
+  })
 }
+
+/*
+ * `reliabilityOf` lived here: honoured / committed from the players counters.
+ * Removed in Phase 3C. It read RSVP intent rather than finalized outcomes, could
+ * not tell an excused absence from a no-show, and had no recency at all — one
+ * bad month followed you forever. `trustProjectionService` replaces it.
+ * The counters it read are now a cache, not a source of truth.
+ */
 
 async function checkAndTriggerReminder(matchId: string) {
   const [match] = await db.select().from(matches).where(eq(matches.id, matchId)).limit(1)
@@ -263,6 +468,8 @@ async function checkAndTriggerReminder(matchId: string) {
 
 export const attendanceService = {
   markAttendance,
+  joinOpenMatch,
+  leaveMatch,
   getAttendances,
   checkAndTriggerReminder,
   lockAttendance,

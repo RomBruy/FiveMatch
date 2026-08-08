@@ -12,7 +12,9 @@ vi.mock('../../db', () => ({
 }))
 
 vi.mock('../../db/schema', () => ({
-  users: { clerkUserId: 'clerk_user_id' },
+  ACTIVE_CREW_ROLES: ['organizer', 'co_host', 'member'],
+  users: { clerkUserId: 'clerk_user_id', id: 'id' },
+  players: { userId: 'user_id', skillLevel: 'skill_level' },
 }))
 
 vi.mock('@clerk/express', () => ({
@@ -80,6 +82,19 @@ describe('GET /auth/me', () => {
     vi.clearAllMocks()
   })
 
+  /** Two selects now: the user row, then the player row that carries the level. */
+  function mockSelects(...results: unknown[][]) {
+    let call = 0
+    vi.mocked(db.select).mockImplementation(() => {
+      const result = results[Math.min(call, results.length - 1)] ?? []
+      call += 1
+      const limitMock = vi.fn().mockResolvedValue(result)
+      const whereMock = vi.fn().mockReturnValue({ limit: limitMock })
+      const fromMock = vi.fn().mockReturnValue({ where: whereMock })
+      return { from: fromMock } as unknown as ReturnType<typeof db.select>
+    })
+  }
+
   it('returns user data when found', async () => {
     const mockUser = {
       id: 'uuid-1',
@@ -90,22 +105,17 @@ describe('GET /auth/me', () => {
       profilePhotoUrl: null,
     }
 
-    const limitMock = vi.fn().mockResolvedValue([mockUser])
-    const whereMock = vi.fn().mockReturnValue({ limit: limitMock })
-    const fromMock = vi.fn().mockReturnValue({ where: whereMock })
-    vi.mocked(db.select).mockReturnValue({ from: fromMock } as unknown as ReturnType<typeof db.select>)
+    mockSelects([mockUser], [{ skillLevel: 'casual' }])
 
     const res = await request(buildApp()).get('/auth/me')
 
     expect(res.status).toBe(200)
     expect(res.body.data.name).toBe('Alice')
+    expect(res.body.data.skillLevel).toBe('casual')
   })
 
   it('returns 404 when user not found', async () => {
-    const limitMock = vi.fn().mockResolvedValue([])
-    const whereMock = vi.fn().mockReturnValue({ limit: limitMock })
-    const fromMock = vi.fn().mockReturnValue({ where: whereMock })
-    vi.mocked(db.select).mockReturnValue({ from: fromMock } as unknown as ReturnType<typeof db.select>)
+    mockSelects([])
 
     const res = await request(buildApp()).get('/auth/me')
 
@@ -144,11 +154,17 @@ describe('PATCH /auth/me', () => {
     const setMock = vi.fn().mockReturnValue({ where: whereMock })
     vi.mocked(db.update).mockReturnValue({ set: setMock } as unknown as ReturnType<typeof db.update>)
 
+    // The player identity is upserted at the end of onboarding.
+    const onConflictMock = vi.fn().mockResolvedValue(undefined)
+    const insertValuesMock = vi.fn().mockReturnValue({ onConflictDoUpdate: onConflictMock })
+    vi.mocked(db.insert).mockReturnValue({ values: insertValuesMock } as unknown as ReturnType<typeof db.insert>)
+
     const res = await request(buildApp())
       .patch('/auth/me')
       .send({
         name: 'Nico',
         languagePreference: 'fr',
+        skillLevel: 'intermediate',
         profilePhotoUrl: null,
         currentClub: 'FC Five',
         formerClub: 'ES Lanfonnet',
@@ -171,6 +187,9 @@ describe('PATCH /auth/me', () => {
       specialSkill: 'Frappe en tribune',
       badFaithLevel: 2,
       lockerRoomStyle: 'Clown',
+    }))
+    expect(insertValuesMock).toHaveBeenCalledWith(expect.objectContaining({
+      skillLevel: 'intermediate',
     }))
   })
 

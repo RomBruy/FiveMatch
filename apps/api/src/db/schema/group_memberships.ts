@@ -2,7 +2,27 @@ import { pgTable, uuid, timestamp, pgEnum, unique } from 'drizzle-orm/pg-core'
 import { users } from './users'
 import { groups } from './groups'
 
-export const memberRoleEnum = pgEnum('member_role', ['organizer', 'member', 'pending_member'])
+/**
+ * `co_host` carries the organizer's operational authority — managing matches and
+ * resolving disputes — without ownership of the crew. It exists so a dispute
+ * involving the organizer still has somebody impartial to settle it (ADR-027).
+ */
+export const memberRoleEnum = pgEnum('member_role', [
+  'organizer',
+  'co_host',
+  'member',
+  'pending_member',
+])
+
+/**
+ * Everyone actually in the crew. `pending_member` is the only exclusion.
+ *
+ * Always prefer this over an inline allowlist: when `co_host` was added, every
+ * hand-written `['member', 'organizer']` filter silently dropped co-hosts from
+ * rosters, seeded attendance and notifications. The next role added will do the
+ * same to anything that does not use this.
+ */
+export const ACTIVE_CREW_ROLES = ['organizer', 'co_host', 'member'] as const
 
 export const groupMemberships = pgTable(
   'group_memberships',

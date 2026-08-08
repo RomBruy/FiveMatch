@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express'
 import { db } from '../db'
-import { groupMemberships, users } from '../db/schema'
+import { ACTIVE_CREW_ROLES, groupMemberships, users } from '../db/schema'
 import { eq, and, inArray, isNull } from 'drizzle-orm'
 import { ErrorCode } from '@fivematch/types'
 
@@ -16,7 +16,7 @@ export function requireGroupMember(req: Request, res: Response, next: NextFuncti
       and(
         eq(users.clerkUserId, clerkUserId),
         eq(groupMemberships.groupId, groupId),
-        inArray(groupMemberships.role, ['member', 'organizer']),
+        inArray(groupMemberships.role, [...ACTIVE_CREW_ROLES]),
         isNull(groupMemberships.deletedAt),
       ),
     )

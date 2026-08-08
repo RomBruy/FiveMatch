@@ -12,10 +12,11 @@ vi.mock('../../db', () => ({
 }))
 
 vi.mock('../../db/schema', () => ({
+  ACTIVE_CREW_ROLES: ['organizer', 'co_host', 'member'],
   users: { id: 'id', clerkUserId: 'clerk_user_id' },
   groups: { id: 'id' },
   groupMemberships: { role: 'role' },
-  players: { id: 'id' },
+  players: { id: 'id', userId: 'user_id' },
 }))
 
 vi.mock('../../middleware/require-group-member', () => ({
@@ -77,11 +78,14 @@ describe('POST /groups', () => {
     vi.mocked(db.select).mockReturnValue(selectChain as unknown as ReturnType<typeof db.select>)
 
     // Mock transaction that calls callback with mock tx
+    // The organizer's player row is an idempotent upsert now (the identity is
+    // global and may already exist), so `values()` must answer both shapes.
     vi.mocked(db.transaction).mockImplementation(async (cb) => {
       const mockTx = {
         insert: vi.fn().mockReturnValue({
           values: vi.fn().mockReturnValue({
             returning: vi.fn().mockResolvedValue([mockGroup]),
+            onConflictDoNothing: vi.fn().mockResolvedValue(undefined),
           }),
         }),
       }
@@ -132,6 +136,9 @@ describe('GET /groups/:groupId', () => {
 
     expect(res.status).toBe(200)
     expect(res.body.data.id).toBe('group-uuid-1')
+    expect(res.body.data).not.toHaveProperty('organizerId')
+    expect(res.body.data).not.toHaveProperty('createdAt')
+    expect(res.body.data).not.toHaveProperty('updatedAt')
     expect(requireGroupMember).toHaveBeenCalled()
   })
 

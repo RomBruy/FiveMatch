@@ -3,7 +3,7 @@ import { eq, and, inArray } from 'drizzle-orm'
 import { z } from 'zod'
 import { asyncHandler } from '../../middleware/async-handler'
 import { db } from '../../db'
-import { groupMemberships, groups, users, pushTokens, notificationPreferences, NOTIFICATION_TYPES } from '../../db/schema'
+import { ACTIVE_CREW_ROLES, groupMemberships, groups, users, pushTokens, notificationPreferences, NOTIFICATION_TYPES } from '../../db/schema'
 import { updateNotificationPreferenceSchema } from './schemas'
 
 const router = Router()
@@ -29,7 +29,7 @@ router.get(
       .where(
         and(
           eq(groupMemberships.userId, user.id),
-          inArray(groupMemberships.role, ['member', 'organizer']),
+          inArray(groupMemberships.role, [...ACTIVE_CREW_ROLES]),
         ),
       )
 

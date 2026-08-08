@@ -4,15 +4,27 @@ import { asyncHandler } from '../../middleware/async-handler'
 import { requireGroupMember } from '../../middleware/require-group-member'
 import { createGroupSchema, updateGroupSchema, transferOrganizerSchema } from './schemas'
 import { db } from '../../db'
-import { groups, groupMemberships, users, players, matchParticipants, matches, pronoBets } from '../../db/schema'
-import { randomUUID } from 'crypto'
+import { ACTIVE_CREW_ROLES, groups, groupMemberships, users, players, matchParticipants, matches, pronoBets } from '../../db/schema'
 import { notificationService } from '../../services/notifications/notification.service'
 import { ErrorCode } from '@fivematch/types'
-import { PRONOS_STARTING_BANKROLL } from '@fivematch/types/algorithm-constants'
 import { ovrService } from '../../services/players/ovr.service'
-import { bankrollService } from '../../services/pronos/bankroll.service'
+import { membershipService } from '../../services/groups/membership.service'
+import { PUBLIC_RATING_AGGREGATE_MIN_SAMPLE } from '../../services/players/player-profile.service'
 
 const router = Router()
+
+const groupDto = (group: typeof groups.$inferSelect, includeInviteCode: boolean) => ({
+  id: group.id,
+  name: group.name,
+  tier: group.tier,
+  matchCount: group.matchCount,
+  formatPreset: group.formatPreset,
+  goalkeeperMode: group.goalkeeperMode,
+  generatorStyle: group.generatorStyle,
+  playStyle: group.playStyle,
+  searchable: true,
+  ...(includeInviteCode ? { inviteCode: group.inviteCode } : {}),
+})
 
 function generateInviteCode(): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -31,10 +43,13 @@ router.get(
     if (!q || q.length < 2) {
       return res.json({ data: { items: [] } })
     }
+    // The `searchable` opt-in was never wired to any UI, so it silently hid
+    // every crew. Crews are a secondary surface now — findable by name, joins
+    // still gated by the organizer's approval.
     const results = await db
       .select({ id: groups.id, name: groups.name, tier: groups.tier })
       .from(groups)
-      .where(and(eq(groups.searchable, true), ilike(groups.name, `%${q}%`)))
+      .where(ilike(groups.name, `%${q}%`))
       .limit(20)
     return res.json({ data: { items: results } })
   }),
@@ -76,20 +91,18 @@ router.post(
         joinedAt: new Date(),
       })
 
-      // The organizer plays too — without this row they are invisible to
-      // attendance, the leaderboard, and cards (the approve flow creates it
-      // for every other member).
+      // The organizer plays too. The player row is global and may already
+      // exist from an earlier crew or an open match, so this is idempotent.
       await tx.insert(players).values({
-        groupId: newGroup.id,
         userId: user.id,
         displayName: user.name ?? 'Player',
         matchCount: 0,
-      })
+      }).onConflictDoNothing({ target: players.userId })
 
       return newGroup
     })
 
-    return res.status(201).json({ data: result })
+    return res.status(201).json({ data: groupDto(result, true) })
   }),
 )
 
@@ -159,7 +172,7 @@ router.post(
       if (groupForOrg) {
         notificationService.send({ type: 'JOIN_REQUEST_RECEIVED', groupId, recipientUserId: groupForOrg.organizerId })
       }
-      return res.status(201).json({ data: revived })
+      return res.status(201).json({ data: { groupId, membershipStatus: revived.role } })
     }
 
     const [membership] = await db.insert(groupMemberships).values({
@@ -177,7 +190,7 @@ router.post(
       notificationService.send({ type: 'JOIN_REQUEST_RECEIVED', groupId, recipientUserId: groupForNotif.organizerId })
     }
 
-    return res.status(201).json({ data: membership })
+    return res.status(201).json({ data: { groupId, membershipStatus: membership.role } })
   }),
 )
 
@@ -220,7 +233,7 @@ router.get(
       .from(groupMemberships)
       .where(and(
         eq(groupMemberships.groupId, groupId),
-        inArray(groupMemberships.role, ['member', 'organizer']),
+        inArray(groupMemberships.role, [...ACTIVE_CREW_ROLES]),
       ))
 
     return res.json({
@@ -265,7 +278,7 @@ router.get(
 
     const items = await db
       .select({
-        userId: users.id,
+        requestId: groupMemberships.id,
         displayName: users.name,
         requestedAt: groupMemberships.createdAt,
       })
@@ -289,7 +302,8 @@ router.get(
 
     const items = await db
       .select({
-        userId: users.id,
+        memberId: groupMemberships.id,
+        playerId: players.id,
         displayName: users.name,
         joinedAt: groupMemberships.joinedAt,
         matchCount: players.matchCount,
@@ -297,13 +311,10 @@ router.get(
       })
       .from(groupMemberships)
       .innerJoin(users, eq(users.id, groupMemberships.userId))
-      .leftJoin(
-        players,
-        and(eq(players.groupId, groupId), eq(players.userId, users.id), isNull(players.deletedAt)),
-      )
+      .leftJoin(players, and(eq(players.userId, users.id), isNull(players.deletedAt)))
       .where(and(
         eq(groupMemberships.groupId, groupId),
-        inArray(groupMemberships.role, ['member', 'organizer']),
+        inArray(groupMemberships.role, [...ACTIVE_CREW_ROLES]),
         isNull(groupMemberships.deletedAt),
       ))
 
@@ -342,9 +353,39 @@ router.get(
         avgDefending: players.avgDefending,
         avgPhysicality: players.avgPhysicality,
         avgEffort: players.avgEffort,
+        eligibleMatchCount: sql<number>`(
+          SELECT COUNT(*)::int FROM player_match_eligibilities pme
+          WHERE pme.player_id = ${players.id} AND pme.invalidated_at IS NULL
+        )`,
+        ratingSampleCount: sql<number>`(
+          SELECT COUNT(*)::int FROM ratings r
+          WHERE r.rated_player_id = ${players.id}
+            AND r.is_initial = false AND r.match_id IS NOT NULL AND r.rater_player_id IS NOT NULL
+            AND EXISTS (
+              SELECT 1 FROM player_match_eligibilities target_e
+              JOIN player_match_eligibilities rater_e
+                ON rater_e.match_id = target_e.match_id
+                AND rater_e.player_id = r.rater_player_id
+                AND rater_e.invalidated_at IS NULL
+              JOIN match_participants target_p
+                ON target_p.match_id = target_e.match_id AND target_p.player_id = r.rated_player_id
+              JOIN match_participants rater_p
+                ON rater_p.match_id = target_e.match_id AND rater_p.player_id = r.rater_player_id
+              WHERE target_e.match_id = r.match_id AND target_e.player_id = r.rated_player_id
+                AND target_e.invalidated_at IS NULL AND target_p.team_side <> rater_p.team_side
+            )
+        )`,
       })
       .from(players)
-      .where(and(eq(players.groupId, groupId), isNull(players.deletedAt)))
+      // A crew leaderboard is now the crew's members ranked by their global
+      // stats — the membership table is what scopes it, not the player row.
+      .innerJoin(groupMemberships, eq(groupMemberships.userId, players.userId))
+      .where(and(
+        eq(groupMemberships.groupId, groupId),
+        inArray(groupMemberships.role, [...ACTIVE_CREW_ROLES]),
+        isNull(groupMemberships.deletedAt),
+        isNull(players.deletedAt),
+      ))
 
     // 3. Aggregate total goals and assists per player from match_participants
     const goalRows = await db
@@ -371,7 +412,7 @@ router.get(
 
       const currentFloat = row.ovrScoreFloat ? parseFloat(row.ovrScoreFloat) : null
       const previousFloat = row.previousOvrScoreFloat ? parseFloat(row.previousOvrScoreFloat) : null
-      const displayOvr = ovrService.getOvrForDisplay(currentFloat, row.matchCount)
+      const displayOvr = ovrService.getOvrForDisplay(currentFloat, row.eligibleMatchCount)
 
       let trend: 'up' | 'down' | 'stable' | null = null
       if (currentFloat !== null && previousFloat !== null) {
@@ -381,7 +422,7 @@ router.get(
         else trend = 'stable'
       }
 
-      const hasAttributes = row.avgPace !== null
+      const hasAttributes = row.avgPace !== null && row.ratingSampleCount >= PUBLIC_RATING_AGGREGATE_MIN_SAMPLE
       const attributes = hasAttributes
         ? {
             pace: parseFloat(row.avgPace!),
@@ -401,7 +442,7 @@ router.get(
         playerId: row.id,
         displayName: row.displayName,
         cardState: row.cardState,
-        matchCount: row.matchCount,
+        matchCount: row.eligibleMatchCount,
         ovrScore: displayOvr,
         trend,
         playerTier: row.playerTier,
@@ -449,7 +490,7 @@ router.get(
     const [callerPlayer] = await db
       .select({ id: players.id })
       .from(players)
-      .where(and(eq(players.userId, req.user.internalId!), eq(players.groupId, groupId), isNull(players.deletedAt)))
+      .where(and(eq(players.userId, req.user.internalId!), isNull(players.deletedAt)))
 
     const myPlayerId = callerPlayer?.id ?? null
 
@@ -464,7 +505,13 @@ router.get(
       })
       .from(players)
       .innerJoin(pronoBets, eq(pronoBets.playerId, players.id))
-      .where(and(eq(players.groupId, groupId), isNull(players.deletedAt)))
+      .innerJoin(groupMemberships, eq(groupMemberships.userId, players.userId))
+      .where(and(
+        eq(groupMemberships.groupId, groupId),
+        inArray(groupMemberships.role, [...ACTIVE_CREW_ROLES]),
+        isNull(groupMemberships.deletedAt),
+        isNull(players.deletedAt),
+      ))
 
     const statsMap = new Map<string, {
       playerId: string
@@ -508,29 +555,8 @@ router.get(
   }),
 )
 
-// GET /v1/groups/:groupId/pronos/bankroll — the caller's group-scoped betting balance.
-// Group-scoped rather than per-match: the Pronos tab hero and the bet slip's "solde après"
-// are the same number, and `GET matches/:matchId/pronos/bets/my` only answers per match.
-router.get(
-  '/:groupId/pronos/bankroll',
-  requireGroupMember,
-  asyncHandler(async (req, res) => {
-    const { groupId } = req.params as { groupId: string }
-
-    const [callerPlayer] = await db
-      .select({ id: players.id })
-      .from(players)
-      .where(and(eq(players.userId, req.user.internalId!), eq(players.groupId, groupId), isNull(players.deletedAt)))
-
-    if (!callerPlayer) {
-      return res.status(403).json({ error: { code: ErrorCode.NOT_A_MEMBER, statusCode: 403 } })
-    }
-
-    const balance = await bankrollService.getBalance(callerPlayer.id)
-
-    return res.json({ data: { balance, startingBankroll: PRONOS_STARTING_BANKROLL } })
-  }),
-)
+// The group-scoped bankroll route is gone: a bankroll belongs to the player, not
+// to a crew, so `GET /v1/players/me/bankroll` is the single source for it.
 
 // GET /v1/groups/:groupId — get group details (member gate applied)
 router.get(
@@ -544,7 +570,7 @@ router.get(
         error: { code: ErrorCode.GROUP_NOT_FOUND, message: 'Group not found', statusCode: 404 },
       })
     }
-    return res.json({ data: group })
+    return res.json({ data: groupDto(group, req.user.groupRole === 'organizer') })
   }),
 )
 
@@ -565,7 +591,7 @@ router.patch(
       .set({ ...body, updatedAt: new Date() })
       .where(eq(groups.id, patchGroupId))
       .returning()
-    return res.json({ data: updated })
+    return res.json({ data: groupDto(updated, true) })
   }),
 )
 
@@ -580,14 +606,14 @@ router.post(
       })
     }
     const groupId = req.params['groupId'] as string
-    const targetUserId = req.params['userId'] as string
+    const targetMembershipId = req.params['userId'] as string
 
     const [pendingRow] = await db
       .select({ userId: groupMemberships.userId })
       .from(groupMemberships)
       .where(and(
         eq(groupMemberships.groupId, groupId),
-        eq(groupMemberships.userId, targetUserId),
+        eq(groupMemberships.id, targetMembershipId),
         eq(groupMemberships.role, 'pending_member'),
       ))
       .limit(1)
@@ -597,6 +623,7 @@ router.post(
         error: { code: ErrorCode.USER_NOT_FOUND, message: 'No pending request found', statusCode: 404 },
       })
     }
+    const targetUserId = pendingRow.userId
 
     await db.transaction(async (tx) => {
       await tx
@@ -604,7 +631,7 @@ router.post(
         .set({ role: 'member', joinedAt: new Date() })
         .where(and(
           eq(groupMemberships.groupId, groupId),
-          eq(groupMemberships.userId, targetUserId),
+          eq(groupMemberships.id, targetMembershipId),
         ))
 
       const [targetUser] = await tx
@@ -612,24 +639,14 @@ router.post(
         .from(users)
         .where(eq(users.id, targetUserId))
 
-      const [existingPlayer] = await tx
-        .select({ id: players.id })
-        .from(players)
-        .where(and(eq(players.groupId, groupId), eq(players.userId, targetUserId)))
-        .limit(1)
-
-      if (existingPlayer) {
-        await tx.update(players)
-          .set({ displayName: targetUser?.name ?? 'Player', deletedAt: null, matchCount: 0 })
-          .where(and(eq(players.groupId, groupId), eq(players.userId, targetUserId)))
-      } else {
-        await tx.insert(players).values({
-          groupId,
-          userId: targetUserId,
-          displayName: targetUser?.name ?? 'Player',
-          matchCount: 0,
-        })
-      }
+      // Joining a crew must never reset a global identity — the player may
+      // already have matches, an OVR and a card from elsewhere. Create the row
+      // if it's their first ever, otherwise leave every stat alone.
+      await tx.insert(players).values({
+        userId: targetUserId,
+        displayName: targetUser?.name ?? 'Player',
+        matchCount: 0,
+      }).onConflictDoNothing({ target: players.userId })
     })
 
     const [group] = await db.select({ name: groups.name }).from(groups).where(eq(groups.id, groupId))
@@ -655,15 +672,21 @@ router.post(
       })
     }
     const groupId = req.params['groupId'] as string
-    const targetUserId = req.params['userId'] as string
+    const targetMembershipId = req.params['userId'] as string
+
+    const [pending] = await db.select({ userId: groupMemberships.userId }).from(groupMemberships).where(and(
+      eq(groupMemberships.id, targetMembershipId),
+      eq(groupMemberships.groupId, groupId),
+      eq(groupMemberships.role, 'pending_member'),
+    )).limit(1)
 
     await db.delete(groupMemberships).where(and(
       eq(groupMemberships.groupId, groupId),
-      eq(groupMemberships.userId, targetUserId),
+      eq(groupMemberships.id, targetMembershipId),
       eq(groupMemberships.role, 'pending_member'),
     ))
 
-    notificationService.send({ type: 'JOIN_REJECTED', groupId, recipientUserId: targetUserId })
+    if (pending) notificationService.send({ type: 'JOIN_REJECTED', groupId, recipientUserId: pending.userId })
 
     return res.json({ data: { rejected: true } })
   }),
@@ -680,21 +703,15 @@ router.delete(
       })
     }
     const groupId = req.params['groupId'] as string
-    const targetUserId = req.params['userId'] as string
-
-    if (req.user.internalId === targetUserId) {
-      return res.status(403).json({
-        error: { code: ErrorCode.FORBIDDEN, message: 'Organizer cannot remove themselves', statusCode: 403 },
-      })
-    }
+    const targetMembershipId = req.params['userId'] as string
 
     const [targetMembership] = await db
       .select({ userId: groupMemberships.userId, role: groupMemberships.role })
       .from(groupMemberships)
       .where(and(
         eq(groupMemberships.groupId, groupId),
-        eq(groupMemberships.userId, targetUserId),
-        inArray(groupMemberships.role, ['member', 'organizer']),
+        eq(groupMemberships.id, targetMembershipId),
+        inArray(groupMemberships.role, [...ACTIVE_CREW_ROLES]),
         isNull(groupMemberships.deletedAt),
       ))
       .limit(1)
@@ -704,44 +721,17 @@ router.delete(
         error: { code: ErrorCode.MEMBER_NOT_FOUND, message: 'Member not found', statusCode: 404 },
       })
     }
+    const targetUserId = targetMembership.userId
+    if (req.user.internalId === targetUserId) {
+      return res.status(403).json({
+        error: { code: ErrorCode.FORBIDDEN, message: 'Organizer cannot remove themselves', statusCode: 403 },
+      })
+    }
 
-    await db.transaction(async (tx) => {
-      const now = new Date()
-
-      await tx
-        .update(groupMemberships)
-        .set({ deletedAt: now })
-        .where(and(
-          eq(groupMemberships.groupId, groupId),
-          eq(groupMemberships.userId, targetUserId),
-        ))
-
-      await tx
-        .update(players)
-        .set({ deletedAt: now })
-        .where(and(
-          eq(players.groupId, groupId),
-          eq(players.userId, targetUserId),
-        ))
-
-      // Anonymize match_participants rows for this user in this group.
-      // Join through matches to scope to this group only.
-      const participantRows = await tx
-        .select({ id: matchParticipants.id })
-        .from(matchParticipants)
-        .innerJoin(matches, eq(matches.id, matchParticipants.matchId))
-        .where(and(
-          eq(matchParticipants.userId, targetUserId),
-          eq(matches.groupId, groupId),
-        ))
-
-      for (const row of participantRows) {
-        await tx
-          .update(matchParticipants)
-          .set({ userId: null, playerId: null, displayName: `Joueur_${randomUUID().slice(0, 8).toUpperCase()}` })
-          .where(eq(matchParticipants.id, row.id))
-      }
-    })
+    // Ordinary removal ends only this membership. Historical participation,
+    // ratings, pronostics and the global player remain intact. GDPR erasure is
+    // a separate explicit service and is never invoked by this route.
+    await membershipService.endMembership(groupId, targetUserId)
 
     return res.json({ data: { removed: true } })
   }),
@@ -765,7 +755,7 @@ router.post(
       .from(groupMemberships)
       .where(and(
         eq(groupMemberships.groupId, groupId),
-        eq(groupMemberships.userId, newOrganizerId),
+        eq(groupMemberships.id, newOrganizerId),
         eq(groupMemberships.role, 'member'),
         isNull(groupMemberships.deletedAt),
       ))
@@ -776,14 +766,16 @@ router.post(
         error: { code: ErrorCode.MEMBER_NOT_FOUND, message: 'Target member not found or not an active member', statusCode: 404 },
       })
     }
+    const targetUserId = targetMembership.userId
 
     await db.transaction(async (tx) => {
+      await tx.update(groups).set({ organizerId: targetUserId, updatedAt: new Date() }).where(eq(groups.id, groupId))
       await tx
         .update(groupMemberships)
         .set({ role: 'organizer' })
         .where(and(
           eq(groupMemberships.groupId, groupId),
-          eq(groupMemberships.userId, newOrganizerId),
+          eq(groupMemberships.id, newOrganizerId),
         ))
 
       await tx
@@ -795,7 +787,7 @@ router.post(
         ))
     })
 
-    notificationService.send({ type: 'ORGANIZER_TRANSFERRED', groupId, recipientUserId: newOrganizerId })
+    notificationService.send({ type: 'ORGANIZER_TRANSFERRED', groupId, recipientUserId: targetUserId })
 
     return res.json({ data: { transferred: true } })
   }),

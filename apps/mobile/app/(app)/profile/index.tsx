@@ -9,7 +9,6 @@ import { Colors } from '../../../constants/colors'
 import { Fonts, Radius, Type } from '../../../constants/tokens'
 import { DOCK_CLEARANCE } from '../../../components/ui/TabDock'
 import { DuotoneAvatar, getInitials } from '../../../components/ui/DuotoneAvatar'
-import { FormDots, type FormResult } from '../../../components/ui/FormDots'
 import { StatTile } from '../../../components/ui/StatTile'
 import { Skeleton, SkeletonTile } from '../../../components/ui/Skeleton'
 import { CollapsingHeader, CollapsingHeaderTitle, useCollapsingHeader } from '../../../components/ui/CollapsingHeader'
@@ -18,60 +17,12 @@ import { TextureType } from '../../../components/ui/TextureType'
 import { OvrBadge } from '../../../components/players/OvrBadge'
 import { ProgressBarPill } from '../../../components/shared/ProgressBarPill'
 import { ProfileStorySections, type ProfilePersonality } from '../../../components/players/ProfileStorySections'
+import { TrustRow } from '../../../components/players/TrustRow'
+import { TrustDetail } from '../../../components/players/TrustDetail'
 import { useGroupContext } from '../../../contexts/GroupContext'
 import { httpClient } from '../../../lib/api-client'
-
-interface LeaderboardPlayer {
-  rank: number | null
-  playerId: string
-  displayName: string
-  cardState: string
-  matchCount: number
-  ovrScore: number | null
-  totalGoals: number
-}
-
-interface MatchHistoryItem {
-  matchId: string
-  scheduledAt: string
-  scoreA: number | null
-  scoreB: number | null
-  userResult: 'win' | 'loss' | 'draw' | null
-}
-
-const RESULT_TO_DOT: Record<NonNullable<MatchHistoryItem['userResult']>, FormResult> = {
-  win: 'W',
-  draw: 'D',
-  loss: 'L',
-}
-
-function useCurrentUser() {
-  return useQuery({
-    queryKey: ['auth', 'me'],
-    queryFn: async () => {
-      const { data } = await httpClient.get<{
-        data: {
-          name: string | null
-          userId: string
-          email: string
-          profilePhotoUrl: string | null
-          currentClub: string | null
-          formerClub: string | null
-          preferredPosition: 'goalkeeper' | 'defender' | 'midfielder' | 'forward' | 'utility' | null
-          strongFoot: 'left' | 'right' | 'both' | null
-          playerStyle: 'playmaker' | 'finisher' | 'engine' | 'wall' | 'wildcard' | null
-          specialSkill: string | null
-          favoriteExcuse: string | null
-          badFaithLevel: number | null
-          lockerRoomStyle: string | null
-          thirdHalfProfile: string | null
-          isAdmin: boolean
-        }
-      }>('/v1/auth/me')
-      return data.data
-    },
-  })
-}
+import type { PrivatePlayerProfile } from '@fivematch/types'
+import { ProfileVisibilityControls } from '../../../components/players/ProfileVisibilityControls'
 
 export default function ProfileTab() {
   const { t } = useTranslation()
@@ -79,7 +30,11 @@ export default function ProfileTab() {
   const insets = useSafeAreaInsets()
   const queryClient = useQueryClient()
   const { activeGroupId } = useGroupContext()
-  const { data: user, isLoading: userLoading } = useCurrentUser()
+  const { data: profile, isLoading: userLoading } = useQuery({
+    queryKey: ['players', 'me'],
+    queryFn: () => httpClient.get<{ data: PrivatePlayerProfile }>('/v1/players/me').then((r) => r.data.data),
+    retry: false,
+  })
   const [refreshing, setRefreshing] = useState(false)
   const { scrollY, scrollHandler } = useCollapsingHeader()
 
@@ -87,19 +42,15 @@ export default function ProfileTab() {
     setRefreshing(true)
     try {
       await Promise.all([
-        queryClient.refetchQueries({ queryKey: ['auth', 'me'] }),
+        queryClient.refetchQueries({ queryKey: ['players', 'me'] }),
         queryClient.refetchQueries({ queryKey: ['groups', activeGroupId] }),
-        queryClient.refetchQueries({ queryKey: ['leaderboard', activeGroupId] }),
-        queryClient.refetchQueries({ queryKey: ['pronos', 'leaderboard', activeGroupId] }),
-        queryClient.refetchQueries({ queryKey: ['match-history', 'profile', activeGroupId] }),
       ])
     } finally {
       setRefreshing(false)
     }
   }, [queryClient, activeGroupId])
 
-  // All group-scoped data below reuses existing endpoints under the query keys
-  // other screens already cache — no new API surface (AC 6).
+  // The crest is the only thing here that still needs a crew, and it's optional.
   const { data: group } = useQuery({
     queryKey: ['groups', activeGroupId],
     queryFn: async () => {
@@ -109,61 +60,27 @@ export default function ProfileTab() {
     enabled: !!activeGroupId,
   })
 
-  const { data: leaderboard } = useQuery({
-    queryKey: ['leaderboard', activeGroupId],
-    queryFn: () =>
-      httpClient
-        .get<{ data: { players: LeaderboardPlayer[] } }>(`/v1/groups/${activeGroupId}/leaderboard`)
-        .then((r) => r.data.data),
-    enabled: !!activeGroupId,
-  })
-
-  // The leaderboard payload has no userId; the pronos leaderboard is the one
-  // group-scoped endpoint that resolves the caller's playerId.
-  const { data: pronosData } = useQuery({
-    queryKey: ['pronos', 'leaderboard', activeGroupId],
-    queryFn: () =>
-      httpClient
-        .get<{ data: { myPlayerId: string | null } }>(`/v1/groups/${activeGroupId}/pronos/leaderboard`)
-        .then((r) => r.data.data),
-    enabled: !!activeGroupId,
-  })
-
-  const { data: historyData } = useQuery({
-    queryKey: ['match-history', 'profile', activeGroupId],
-    queryFn: () =>
-      httpClient
-        .get<{ data: { matches: MatchHistoryItem[] } }>(`/v1/groups/${activeGroupId}/matches?status=completed&limit=50`)
-        .then((r) => r.data.data),
-    enabled: !!activeGroupId,
-  })
-
-  const myPlayer = leaderboard?.players.find(
-    (p) => pronosData?.myPlayerId && p.playerId === pronosData.myPlayerId
-  )
-
-  // Recent form: 5 most recent results, oldest → newest left to right.
-  const recentForm: FormResult[] = (historyData?.matches ?? [])
-    .filter((m) => m.userResult !== null)
-    .slice(0, 5)
-    .reverse()
-    .map((m) => RESULT_TO_DOT[m.userResult!])
-
-  const displayName = user?.name ?? ''
-  const isUnlocked = myPlayer?.cardState === 'unlocked' && myPlayer.ovrScore !== null
-  const tightestMatch = (historyData?.matches ?? []).reduce<MatchHistoryItem | null>((tightest, match) => {
-    if (match.userResult === null || match.scoreA === null || match.scoreB === null) return tightest
-    if (tightest === null || tightest.scoreA === null || tightest.scoreB === null) return match
-    const margin = Math.abs(match.scoreA - match.scoreB)
-    const tightestMargin = Math.abs(tightest.scoreA - tightest.scoreB)
-    return margin < tightestMargin ? match : tightest
-  }, null)
-  const personality: ProfilePersonality | null = user ? {
-    specialSkill: user.specialSkill,
-    favoriteExcuse: user.favoriteExcuse,
-    badFaithLevel: user.badFaithLevel,
-    lockerRoomStyle: user.lockerRoomStyle,
-    thirdHalfProfile: user.thirdHalfProfile,
+  const myPlayer = profile ? { ...profile, matchCount: profile.eligibleMatchCount } : undefined
+  const football = profile?.footballIdentity
+  const user = profile ? {
+    name: profile.displayName,
+    profilePhotoUrl: profile.photoUrl ?? null,
+    currentClub: football?.currentClub ?? null,
+    formerClub: football?.formerClub ?? null,
+    preferredPosition: football?.preferredPosition ?? null,
+    strongFoot: football?.strongFoot ?? null,
+    playerStyle: football?.playerStyle ?? null,
+    isAdmin: profile.isAdmin,
+  } : undefined
+  const displayName = profile?.displayName ?? ''
+  const isUnlocked = profile?.cardState === 'unlocked' && profile.ovrScore !== null
+  const tightestMatch = profile?.memory.tightestMatch ?? null
+  const personality: ProfilePersonality | null = profile?.personality ? {
+    specialSkill: profile.personality.specialSkill ?? null,
+    favoriteExcuse: profile.personality.favoriteExcuse ?? null,
+    badFaithLevel: profile.personality.badFaithLevel ?? null,
+    lockerRoomStyle: profile.personality.lockerRoomStyle ?? null,
+    thirdHalfProfile: profile.personality.thirdHalfProfile ?? null,
   } : null
 
   return (
@@ -216,11 +133,6 @@ export default function ProfileTab() {
                   </Text>
                 ) : undefined}
               />
-              {recentForm.length > 0 && (
-                <View style={styles.formRow}>
-                  <FormDots results={recentForm} size={24} />
-                </View>
-              )}
             </View>
           </View>
         )}
@@ -269,7 +181,8 @@ export default function ProfileTab() {
           </View>
         )}
 
-        {/* OVR + stat tiles — whatever the current payload exposes (Matchs, Buts; no MVP count in any payload) */}
+        {/* OVR stays — but as the reward it is, sitting beside the two numbers
+            that other people actually judge you on. */}
         {myPlayer && (
           <View style={styles.statBand}>
             <View style={styles.ovrBlock}>
@@ -284,19 +197,38 @@ export default function ProfileTab() {
             </View>
             <View style={styles.tiles}>
               <StatTile value={myPlayer.matchCount} label={t('profile.stats.matches')} />
-              <StatTile value={myPlayer.totalGoals} label={t('profile.stats.goals')} />
+              <StatTile
+                value={myPlayer.trust.reliability !== null ? `${myPlayer.trust.reliability}%` : '—'}
+                label={t('profile.stats.reliability')}
+              />
             </View>
           </View>
         )}
 
+        {myPlayer && (
+          <View style={styles.levelSection}>
+            <Text style={styles.sectionLabel}>{t('profile.level.title').toUpperCase()}</Text>
+            <TrustRow
+              skillLevel={myPlayer.skillLevel}
+              isReliable={myPlayer.isReliable}
+              matchCount={myPlayer.matchCount}
+            />
+            <TrustDetail
+              reliability={myPlayer.trust.reliability}
+              fairPlay={myPlayer.trust.fairPlay}
+              sampleCount={myPlayer.trust.sampleCount}
+            />
+          </View>
+        )}
+
         <ProfileStorySections
-          tightestMatch={tightestMatch && tightestMatch.scoreA !== null && tightestMatch.scoreB !== null ? {
-            scheduledAt: tightestMatch.scheduledAt,
-            scoreA: tightestMatch.scoreA,
-            scoreB: tightestMatch.scoreB,
-          } : null}
+          tightestMatch={tightestMatch}
           personality={personality}
         />
+
+        {profile && (
+          <ProfileVisibilityControls visibility={profile.visibility} />
+        )}
 
         {/* Actions — ghost pills */}
         <View style={styles.actions}>
@@ -383,6 +315,10 @@ const styles = StyleSheet.create({
   },
   identityValue: { color: Colors.ink, fontFamily: Fonts.interSemiBold, fontSize: 14 },
   identityLabel: { color: Colors.inkDisabled, fontFamily: Fonts.inter, fontSize: 11, marginTop: 4 },
+  levelSection: {
+    marginTop: 22,
+    gap: 10,
+  },
   statBand: {
     flexDirection: 'row',
     alignItems: 'center',

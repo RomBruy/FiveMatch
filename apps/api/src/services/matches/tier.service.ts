@@ -1,7 +1,7 @@
 import { eq, and, inArray } from 'drizzle-orm'
 import { GROUP_TIER_THRESHOLDS } from '@fivematch/types/algorithm-constants'
 import { db } from '../../db'
-import { groups, groupMemberships } from '../../db/schema'
+import { ACTIVE_CREW_ROLES, groups, groupMemberships } from '../../db/schema'
 import { notificationService } from '../notifications/notification.service'
 
 type GroupTier = 'amateur' | 'club' | 'semiPro' | 'elite'
@@ -35,7 +35,7 @@ async function evaluateTier(
       .where(
         and(
           eq(groupMemberships.groupId, groupId),
-          inArray(groupMemberships.role, ['member', 'organizer']),
+          inArray(groupMemberships.role, [...ACTIVE_CREW_ROLES]),
         ),
       )
 

@@ -13,6 +13,7 @@ vi.mock('../../db', () => ({
 }))
 
 vi.mock('../../db/schema', () => ({
+  ACTIVE_CREW_ROLES: ['organizer', 'co_host', 'member'],
   users: { id: 'id', clerkUserId: 'clerk_user_id', name: 'name' },
   groups: { id: 'id', name: 'name', organizerId: 'organizer_id', inviteCode: 'invite_code', searchable: 'searchable', tier: 'tier' },
   groupMemberships: { groupId: 'group_id', userId: 'user_id', role: 'role', createdAt: 'created_at' },
@@ -96,7 +97,7 @@ describe('POST /groups/:groupId/join', () => {
     const res = await request(buildApp()).post('/groups/group-uuid-1/join')
 
     expect(res.status).toBe(201)
-    expect(res.body.data.role).toBe('pending_member')
+    expect(res.body.data.membershipStatus).toBe('pending_member')
   })
 
   it('returns 409 ALREADY_A_MEMBER if user already has a membership row', async () => {

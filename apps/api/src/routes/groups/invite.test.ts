@@ -9,6 +9,7 @@ vi.mock('../../db', () => ({
 }))
 
 vi.mock('../../db/schema', () => ({
+  ACTIVE_CREW_ROLES: ['organizer', 'co_host', 'member'],
   groups: { id: 'id', name: 'name', organizerId: 'organizer_id', inviteCode: 'invite_code' },
   users: { id: 'id', name: 'name' },
   groupMemberships: { groupId: 'group_id', role: 'role' },
