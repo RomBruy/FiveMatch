@@ -2,7 +2,8 @@ import { and, eq, isNull } from 'drizzle-orm'
 import { DEFAULT_CANCELLATION_DEADLINE_HOURS } from '@fivematch/types'
 import { db, type Db } from '../../db'
 import { groups, matchAttendances, matchParticipants, matches } from '../../db/schema'
-import { hasPhase1EligibilityEvidence } from './eligibility.service'
+import { eligibilityService, isCountableMatch } from './eligibility.service'
+import { notificationService } from '../notifications/notification.service'
 
 type Transaction = Parameters<Parameters<Db['transaction']>[0]>[0]
 
@@ -65,8 +66,12 @@ async function resolveDeadlineHours(tx: Transaction, groupId: string | null): Pr
 async function finalizeMatchInTransaction(
   tx: Transaction,
   matchId: string,
-  finalizedByPlayerId: string,
-): Promise<{ finalized: Array<{ playerId: string; outcome: AttendanceOutcome }> }> {
+  /** Null when the system finalized it after the grace period (ADR-029). */
+  finalizedByPlayerId: string | null,
+): Promise<{
+  finalized: Array<{ playerId: string; outcome: AttendanceOutcome }>
+  newlyUnlocked: Array<{ playerId: string; userId: string }>
+}> {
   const [match] = await tx
     .select({
       groupId: matches.groupId,
@@ -74,13 +79,14 @@ async function finalizeMatchInTransaction(
       scheduledAt: matches.scheduledAt,
       scoreA: matches.scoreA,
       scoreB: matches.scoreB,
+      voidedAt: matches.voidedAt,
     })
     .from(matches)
     .where(eq(matches.id, matchId))
     .limit(1)
 
   // Same evidence bar the card ledger uses: no result, no truth about who played.
-  if (!match || !hasPhase1EligibilityEvidence(match)) return { finalized: [] }
+  if (!match || !isCountableMatch(match)) return { finalized: [], newlyUnlocked: [] }
 
   const deadlineHours = await resolveDeadlineHours(tx, match.groupId)
 
@@ -131,11 +137,42 @@ async function finalizeMatchInTransaction(
     if (outcome) finalized.push({ playerId: row.playerId, outcome })
   }
 
-  return { finalized }
+  // Card eligibility can only be recorded now: it needs a finalized `attended`
+  // outcome, which did not exist until this moment. This is why eligibility
+  // moved off result-recording — a team sheet is not proof of turning up.
+  const { newlyUnlocked } = await eligibilityService.recordCompletedMatchInTransaction(tx, matchId)
+
+  return { finalized, newlyUnlocked }
 }
 
-async function finalizeMatch(matchId: string, finalizedByPlayerId: string) {
-  return db.transaction((tx) => finalizeMatchInTransaction(tx, matchId, finalizedByPlayerId))
+/**
+ * Finalize and announce.
+ *
+ * The unlock notification is sent here rather than by the caller because cards
+ * now unlock at finalization, and finalization has two callers: the host and the
+ * automatic sweep (ADR-029). Leaving it to the route would silently drop every
+ * unlock the system settled on the host's behalf.
+ */
+async function finalizeMatch(matchId: string, finalizedByPlayerId: string | null) {
+  const [match] = await db
+    .select({ groupId: matches.groupId })
+    .from(matches)
+    .where(eq(matches.id, matchId))
+    .limit(1)
+
+  const result = await db.transaction((tx) =>
+    finalizeMatchInTransaction(tx, matchId, finalizedByPlayerId))
+
+  for (const unlocked of result.newlyUnlocked) {
+    notificationService.send({
+      type: 'CARD_UNLOCKED',
+      groupId: match?.groupId ?? null,
+      playerId: unlocked.playerId,
+      recipientUserId: unlocked.userId,
+    })
+  }
+
+  return result
 }
 
 /**

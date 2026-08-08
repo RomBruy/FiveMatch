@@ -141,6 +141,13 @@
       "when": 1786176400000,
       "tag": "0019_phase3_behaviour_reports",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1786260000000,
+      "tag": "0020_phase4_card_eligibility",
+      "breakpoints": true
     }
   ]
 }

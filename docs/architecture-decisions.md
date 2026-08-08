@@ -132,9 +132,29 @@ Phase 0 implements this with a guarded setup module, guarded migration wrapper a
 
 ## ADR-017 — Card invalidation after unlock
 
-Status: Open
+Status: Accepted
 
-Product must decide whether a card re-locks when a previously eligible match is later voided and active eligibility drops below four. The data model must support correction either way.
+A card never re-locks. Once unlocked it stays unlocked, even if a later void drops active eligibility below four.
+
+This codifies behaviour the code already had rather than changing it: `eligibility.service.ts` has always computed `nextCardState` as `unlocked` when the current state is `unlocked`, whatever the count says.
+
+Rationale: the card reveal is the product's best moment and the reward the whole four-match arc builds toward. Taking it back is a uniquely bad experience, and an invalidation is usually administrative rather than the player's fault — a host voided a fixture, a result was corrected. The correction is still recorded honestly in the ledger, with its reason and actor; it simply does not reach backward into something already given.
+
+Consequences:
+
+- Eligibility count and card state can legitimately disagree after an invalidation. The ledger is the audit truth; `players.card_state` is a high-water mark.
+- Anything reporting on eligibility must read the ledger, never infer a count from card state.
+- Re-locking would need both an explicit product decision and a migration for the notifications already sent.
+
+## ADR-029 — Automatic attendance finalization
+
+Status: Accepted
+
+A completed match whose attendance is still unfinalized `CARD_AUTO_FINALIZE_HOURS` (48) after completion is finalized by the system, with `finalized_by` null.
+
+Phase 4 makes card eligibility depend on a finalized `attended` outcome, which is the correct evidence bar. Without this, a player's card progression would hang on whether their host remembered to confirm the sheet — punishing the player for someone else's admin. Automatic finalization derives outcomes from the same stored facts a host would have confirmed; it decides nothing a manual pass would not have.
+
+A host who finalizes late finds nothing left to settle: finalization only ever touches rows that are still unsettled, so the automatic and manual paths cannot disagree.
 
 ## ADR-018 — Host participation
 

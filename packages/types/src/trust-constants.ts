@@ -30,6 +30,16 @@ export const TRUST_CONSTANTS_VERSION = 'v1.0'
  */
 export const DEFAULT_CANCELLATION_DEADLINE_HOURS = 12
 
+/**
+ * Hours after completion before the system finalizes attendance itself (ADR-029).
+ *
+ * Card eligibility requires a finalized `attended` outcome, so without this a
+ * player's card progression would hang on whether their host remembered to
+ * confirm the sheet. Automatic finalization derives outcomes from the same
+ * stored facts a host would have confirmed — it decides nothing new.
+ */
+export const CARD_AUTO_FINALIZE_HOURS = 48
+
 // ─── Behaviour reports (ADR-027) ──────────────────────────────────────────────
 
 /**

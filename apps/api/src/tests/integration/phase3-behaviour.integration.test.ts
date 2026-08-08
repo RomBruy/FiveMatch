@@ -8,6 +8,7 @@ import {
   groups,
   matchParticipants,
   matches,
+  playerMatchEligibilities,
   players,
   users,
 } from '../../db/schema'
@@ -37,6 +38,7 @@ const SUBJECT = fx.players.waitlisted
 const OUTSIDER = fx.players.neverIn
 
 async function cleanup() {
+  await db.delete(playerMatchEligibilities).where(inArray(playerMatchEligibilities.matchId, ALL_MATCH_IDS))
   await db.delete(behaviourReports).where(inArray(behaviourReports.matchId, ALL_MATCH_IDS))
   await db.delete(matchParticipants).where(inArray(matchParticipants.matchId, ALL_MATCH_IDS))
   await db.delete(matches).where(inArray(matches.id, ALL_MATCH_IDS))

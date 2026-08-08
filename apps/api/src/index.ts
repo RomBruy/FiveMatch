@@ -7,6 +7,7 @@ import apiRouter from './routes'
 import webhooksRouter from './routes/webhooks'
 import { runCardStateTimeoutJob } from './jobs/card-state-timeout'
 import { runBehaviourReportExpiryJob } from './jobs/behaviour-report-expiry.job'
+import { runAttendanceAutoFinalizeJob } from './jobs/attendance-auto-finalize.job'
 
 const app = express()
 const PORT = process.env.PORT ?? 3000
@@ -30,6 +31,12 @@ app.listen(PORT, () => {
   // to every read path — this settles the record, it does not decide anything.
   setInterval(() => {
     runBehaviourReportExpiryJob().catch((err) => logger.error(err, 'behaviour-report-expiry job failed'))
+  }, 60 * 60 * 1000)
+
+  // Hourly against a 48-hour grace period. Settling a few hours late costs
+  // nothing; a card that never unlocks because a host forgot costs a lot.
+  setInterval(() => {
+    runAttendanceAutoFinalizeJob().catch((err) => logger.error(err, 'attendance-auto-finalize job failed'))
   }, 60 * 60 * 1000)
 })
 

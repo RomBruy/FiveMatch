@@ -34,6 +34,15 @@ export const matches = pgTable('matches', {
   // Set when this match is a materialized occurrence of a recurring series.
   seriesId: uuid('series_id'),
   status: matchStatusEnum('status').notNull().default('attendance_open'),
+  /**
+   * A completed match struck from the record — a walkover, a bad result, a
+   * fixture that should never have counted. Separate from `cancelled`, which
+   * means it never happened: a voided match did happen, but stops counting
+   * toward cards. Historical OVR is never recomputed (PR-031, ADR-017).
+   */
+  voidedAt: timestamp('voided_at', { withTimezone: true }),
+  voidedBy: uuid('voided_by').references(() => users.id),
+  voidReason: text('void_reason'),
   scheduledAt: timestamp('scheduled_at', { withTimezone: true }).notNull(),
   durationMinutes: integer('duration_minutes').notNull().default(60),
   format: formatPresetEnum('format').notNull(),

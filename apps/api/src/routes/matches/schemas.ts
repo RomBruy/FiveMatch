@@ -131,3 +131,12 @@ export const ResolveBehaviourReportSchema = z.object({
 })
 
 export type ResolveBehaviourReportInput = z.infer<typeof ResolveBehaviourReportSchema>
+
+// ─── Phase 4 — card eligibility ───────────────────────────────────────────────
+
+export const VoidMatchSchema = z.object({
+  /** Recorded on every eligibility it strikes, so the correction explains itself. */
+  reason: z.string().trim().min(1).max(200),
+})
+
+export type VoidMatchInput = z.infer<typeof VoidMatchSchema>

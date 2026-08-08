@@ -17,6 +17,8 @@ export const playerMatchEligibilities = pgTable('player_match_eligibilities', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   invalidatedAt: timestamp('invalidated_at', { withTimezone: true }),
   invalidationReason: text('invalidation_reason'),
+  /** Null when the system invalidated it (a voided match), set when a person did. */
+  invalidatedBy: uuid('invalidated_by').references(() => players.id),
 }, (table) => ({
   uniqueMatchPlayer: unique('player_match_eligibilities_match_player_unique').on(table.matchId, table.playerId),
   playerIndex: index('player_match_eligibilities_player_idx').on(table.playerId),

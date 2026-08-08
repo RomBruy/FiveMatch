@@ -7,6 +7,7 @@ import {
   matchAttendances,
   matchParticipants,
   matches,
+  playerMatchEligibilities,
   players,
   users,
 } from '../../db/schema'
@@ -25,6 +26,7 @@ const COMPLETED_AT = new Date('2099-03-01T21:00:00.000Z')
 const hoursBefore = (hours: number) => new Date(KICKOFF.getTime() - hours * 60 * 60 * 1000)
 
 async function cleanup() {
+  await db.delete(playerMatchEligibilities).where(inArray(playerMatchEligibilities.matchId, ALL_MATCH_IDS))
   await db.delete(matchAttendances).where(inArray(matchAttendances.matchId, ALL_MATCH_IDS))
   await db.delete(matchParticipants).where(inArray(matchParticipants.matchId, ALL_MATCH_IDS))
   await db.delete(matches).where(inArray(matches.id, ALL_MATCH_IDS))

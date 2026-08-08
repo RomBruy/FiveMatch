@@ -323,10 +323,28 @@ Requirements: PR-026 through PR-031.
 - Backfill only source-provable eligible matches.
 - Preserve historical OVR values.
 
-### Dependencies/open decisions
+### Dependencies
 
-- Phase 3 finalized attendance.
-- ADR-017 re-lock behavior.
+Both resolved. Phase 3 finalized attendance exists; ADR-017 (never re-lock) and ADR-029 (automatic finalization) are accepted.
+
+### Local completion record — 2026-08-08
+
+Implemented on the isolated local database only. No deployment, no real-data migration, no backfill.
+
+- **The evidence bar moved.** Eligibility now requires a finalized `attended` outcome *and* presence in the final participant snapshot. Phase 1 could only prove the snapshot, which meant a no-show named on a team sheet counted toward a card (PR-030). New rows carry `evidence_version = 'phase4_finalized_attendance_v1'`; Phase 1 rows keep theirs, because a row created from a team sheet cannot be retroactively claimed as proof of attendance.
+- **Eligibility moved off result-recording onto finalization**, which is the first moment the evidence exists. The card-unlock notification moved with it — leaving it on the route would have silently dropped every unlock the automatic sweep settled.
+- **Automatic finalization (ADR-029)** sweeps hourly against a 48-hour grace period. Without it, card progress would hang on whether a host remembered to confirm the sheet. A host who finalizes late finds nothing left to settle, so the manual and automatic paths cannot disagree.
+- **Voiding** strikes a completed match from card counting via `voided_at`/`voided_by`/`void_reason` on matches, cascading to `invalidated_at`/`invalidation_reason`/`invalidated_by` on the ledger. Idempotent: a second void never rewrites the original reason or actor. `POST /:matchId/void` is manager-only and returns a count, not names — naming affected players would hand a host a list of people to explain an administrative correction to.
+- **Cards never re-lock (ADR-017).** Eligibility count and card state legitimately disagree after a void: the ledger is the audit truth, `card_state` is a high-water mark. Progress below the threshold still walks back for a card not yet unlocked, because nothing has been given yet.
+- **Historical OVR is never recomputed** on void, asserted directly rather than assumed.
+
+Migration `0020` is fully additive — four columns, two foreign keys, one index. No DROP, DELETE or UPDATE.
+
+**No backfill was performed, and the exit criterion asking a backfill report to reconcile every created row is therefore satisfied vacuously.** Existing eligibility rows were created under Phase 1 evidence and cannot be upgraded: no finalized outcome exists for any historical match, and inventing one would be exactly the guess Phase 1 refused to make.
+
+Gates: types and API typecheck, API lint, 45 files / 371 unit tests, 13 files / 99 isolated PostgreSQL integration tests including the full 16-case card matrix. Mobile typecheck, lint, 671/671 parity and the 5-tab baseline pass. OVR and pronostic golden regressions unchanged.
+
+Not yet built: no mobile surface for voiding a match, and no owner-facing explanation of why a card did not progress.
 
 ### Exit criteria
 

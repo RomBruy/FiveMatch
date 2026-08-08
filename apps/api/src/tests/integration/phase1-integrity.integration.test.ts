@@ -4,6 +4,7 @@ import { db } from '../../db'
 import {
   groupMemberships,
   groups,
+  matchAttendances,
   matchParticipants,
   matches,
   ovrProcessingEvents,
@@ -38,6 +39,7 @@ const ratingValues = {
 }
 
 async function cleanup() {
+  await db.delete(matchAttendances).where(inArray(matchAttendances.matchId, ALL_MATCH_IDS))
   await db.delete(ovrProcessingEvents).where(inArray(ovrProcessingEvents.playerId, ALL_PLAYER_IDS))
   await db.delete(ratingEvents).where(inArray(ratingEvents.playerId, ALL_PLAYER_IDS))
   await db.delete(ratings).where(inArray(ratings.ratedPlayerId, ALL_PLAYER_IDS))
@@ -120,6 +122,19 @@ async function seedMatch(
     { matchId, playerId: fx.players.host, userId: fx.users.host, displayName: identity.name('host'), teamSide: 'B' as const },
   ]
   await db.insert(matchParticipants).values(participants)
+
+  // Phase 4 raised the bar from "named on the sheet" to "finalized as attended".
+  // These cases are about counting and idempotency, not about the evidence rule,
+  // so the evidence is seeded directly rather than driven through finalization.
+  await db.insert(matchAttendances).values(
+    participants.map((participant) => ({
+      matchId,
+      playerId: participant.playerId,
+      status: 'in' as const,
+      outcome: 'attended' as const,
+      finalizedAt: completedAt,
+    })),
+  )
 }
 
 beforeEach(async () => {

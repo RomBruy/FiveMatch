@@ -23,6 +23,7 @@ import {
   FinalizeAttendanceSchema,
   SubmitBehaviourReportSchema,
   ResolveBehaviourReportSchema,
+  VoidMatchSchema,
 } from './schemas'
 import { ErrorCode } from '@fivematch/types'
 import { TEAM_GEN_MAX_GENERATIONS, TEAM_GEN_OVR_FALLBACK } from '@fivematch/types/algorithm-constants'
@@ -677,7 +678,11 @@ router.post(
           .where(eq(groups.id, match.groupId))
       }
 
-      return eligibilityService.recordCompletedMatchInTransaction(tx, matchId)
+      // Card eligibility is NOT recorded here any more. Phase 4 requires a
+      // finalized `attended` outcome, which does not exist until the sheet is
+      // settled — by the host, or by the automatic sweep 48h later (ADR-029).
+      // Recording a result no longer unlocks anything on its own.
+      return { newlyUnlocked: [] as Array<{ playerId: string; userId: string }> }
     })
 
     if (!resultRecord) {
@@ -1026,6 +1031,37 @@ function sendPostMatchReminders(matchId: string, groupId: string | null): void {
 }
 
 export default router
+
+// ─── Phase 4 — card eligibility ───────────────────────────────────────────────
+
+// POST /v1/matches/:matchId/void
+// Strikes a completed match from card counting. Historical OVR is never
+// recomputed — the result stood at the time and every rating built on it was
+// given in good faith (PR-031, ADR-017).
+router.post(
+  '/:matchId/void',
+  loadMatch,
+  requireMatchHost,
+  requirePlayer,
+  asyncHandler(async (req, res) => {
+    const { reason } = VoidMatchSchema.parse(req.body)
+
+    const result = await eligibilityService.voidMatch(
+      req.match.id,
+      reason,
+      req.user.internalId!,
+      req.user.playerId!,
+    )
+
+    if (!result.voided) {
+      return res.status(422).json(errorFor(ErrorCode.WRONG_MATCH_STATUS, 422))
+    }
+
+    // Count only. Naming whose cards were affected would hand the host a list of
+    // people to explain themselves to for an administrative correction.
+    return res.json({ data: { voided: true, affectedPlayers: result.invalidatedPlayerIds.length } })
+  }),
+)
 
 // ─── Phase 3 — attendance finalization and behaviour reports ──────────────────
 
