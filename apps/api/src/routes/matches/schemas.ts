@@ -3,6 +3,8 @@ import { z } from 'zod'
 const SkillLevelSchema = z.enum(['casual', 'intermediate', 'competitive'])
 
 export const CreateMatchSchema = z.object({
+  publicOpensAt: z.string().datetime().nullable().optional(),
+  hostPlays: z.boolean().optional(),
   // Optional — omit for a standalone match created straight from discovery.
   groupId: z.string().uuid().optional().nullable(),
   scheduledAt: z.string().datetime(),
@@ -73,6 +75,16 @@ export const PlayerStatSchema = z.object({
   goalsScored: z.number().int().min(0).default(0),
   assists: z.number().int().min(0).default(0),
 })
+
+export const SetPublicationSchema = z.object({
+  visibility: z.enum(['private', 'public']).optional(),
+  /** Null publishes whatever is left. */
+  openSpots: z.number().int().positive().nullable().optional(),
+  /** When the crew's first refusal ends. */
+  publicOpensAt: z.string().datetime().nullable().optional(),
+})
+
+export type SetPublicationInput = z.infer<typeof SetPublicationSchema>
 
 export const RecordResultSchema = z.object({
   scoreA: z.number().int().min(0),

@@ -28,7 +28,12 @@ export interface CreateMatchInput extends MatchLocationInput {
   goalkeeperMode: 'fixed' | 'rotating' | 'none'
   generatorStyle?: 'pure_ovr' | 'position_aware' | 'mixed'
   visibility?: 'private' | 'public'
+  /** Optional cap on published places. Null publishes whatever is left. */
   openSpots?: number | null
+  /** When the crew's first refusal ends. Null with public = public now. */
+  publicOpensAt?: string | null
+  /** Default true — a five-a-side host is almost always playing (ADR-018). */
+  hostPlays?: boolean
   skillLevel?: 'casual' | 'intermediate' | 'competitive'
   pricePerPlayer?: number | null
   notes?: string | null
@@ -96,7 +101,11 @@ async function insertOccurrence(
       latitude: data.latitude != null ? String(data.latitude) : null,
       longitude: data.longitude != null ? String(data.longitude) : null,
       visibility: data.visibility ?? 'private',
-      openSpots: data.visibility === 'public' ? (data.openSpots ?? 1) : null,
+      // Null means "publish whatever is left". Defaulting to 1 made a public
+      // 5v5 look full to every stranger who saw it (ADR-033).
+      openSpots: data.visibility === 'public' ? (data.openSpots ?? null) : null,
+      publicOpensAt: data.publicOpensAt ? new Date(data.publicOpensAt) : null,
+      hostPlays: data.hostPlays ?? true,
       skillLevel: data.skillLevel ?? 'casual',
       pricePerPlayer: data.pricePerPlayer != null ? String(data.pricePerPlayer) : null,
       notes: data.notes ?? null,
@@ -128,6 +137,36 @@ async function insertOccurrence(
           source: 'crew' as const,
         })),
       )
+    }
+  }
+
+  // Seed the host as confirmed unless they said they are not playing.
+  //
+  // They were never seeded before, so a host's own match started one place
+  // short in every capacity calculation and the host had to RSVP to their own
+  // fixture (ADR-018, AF-007).
+  if (newMatch.hostPlays) {
+    const [hostPlayer] = await tx
+      .select({ id: players.id })
+      .from(players)
+      .where(and(eq(players.userId, hostInternalId), isNull(players.deletedAt)))
+      .limit(1)
+
+    if (hostPlayer) {
+      await tx
+        .insert(matchAttendances)
+        .values({
+          matchId: newMatch.id,
+          playerId: hostPlayer.id,
+          status: 'in' as const,
+          source: 'crew' as const,
+          respondedAt: new Date(),
+        })
+        // A crew host already has a seeded row; promote it rather than collide.
+        .onConflictDoUpdate({
+          target: [matchAttendances.matchId, matchAttendances.playerId],
+          set: { status: 'in' as const, respondedAt: new Date() },
+        })
     }
   }
 

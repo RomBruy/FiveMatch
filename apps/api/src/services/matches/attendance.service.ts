@@ -3,7 +3,7 @@ import { db } from '../../db'
 import { matches, matchAttendances, players, groupMemberships, matchCapacity } from '../../db/schema'
 import type { Match } from '../../db/schema'
 import { notificationService } from '../notifications/notification.service'
-import { AttendanceResponseSchema, type MatchCapabilities } from '@fivematch/types'
+import { AttendanceResponseSchema, MATCH_MIN_PLAYABLE_TOTAL, type MatchCapabilities } from '@fivematch/types'
 import type { MatchRelation } from '../permissions/capability.service'
 import { trustProjectionService } from '../trust/trust-projection.service'
 
@@ -228,15 +228,23 @@ async function inferSource(match: Match, internalUserId: string): Promise<Attend
   return membership ? 'crew' : 'open'
 }
 
+/**
+ * Whether outsiders may take a place yet.
+ *
+ * Public visibility alone is not enough: a crew-first match stays private until
+ * `publicOpensAt` passes, so the crew gets first refusal on their own fixture
+ * (ADR-033).
+ */
+export function isPubliclyOpen(match: Pick<Match, 'visibility' | 'publicOpensAt'>, now = new Date()): boolean {
+  if (match.visibility !== 'public') return false
+  return match.publicOpensAt === null || match.publicOpensAt.getTime() <= now.getTime()
+}
+
 async function assertOpenSpotAvailable(match: Match) {
-  if (match.visibility !== 'public' || match.openSpots === null) throw fail('MATCH_NOT_PUBLIC', 422)
+  if (!isPubliclyOpen(match)) throw fail('MATCH_NOT_PUBLIC', 422)
 
-  const takenFromOpen = await countConfirmed(db, match.id, 'open')
-  const confirmed = await countConfirmed(db, match.id)
-
-  if (takenFromOpen >= match.openSpots || confirmed >= matchCapacity(match.playersPerTeam)) {
-    throw fail('NO_SPOTS_AVAILABLE', 409)
-  }
+  const { spotsRemaining } = await getSpots(match)
+  if (spotsRemaining <= 0) throw fail('NO_SPOTS_AVAILABLE', 409)
 }
 
 /**
@@ -298,16 +306,29 @@ async function joinOpenMatch(matchId: string, internalUserId: string) {
   return spots
 }
 
+/**
+ * Availability, always derived from the real sheet.
+ *
+ * `openSpots` caps how many of the remaining places are offered publicly; it is
+ * never a separate pool. Previously a public match defaulted to one open place,
+ * so a host advertising a 5v5 looked full to everyone — the opposite of what
+ * publishing is for (ADR-033, AF-007).
+ */
 async function getSpots(match: Match) {
   const confirmed = await countConfirmed(db, match.id)
   const takenFromOpen = await countConfirmed(db, match.id, 'open')
   const capacity = matchCapacity(match.playersPerTeam)
+
+  const actuallyLeft = Math.max(0, capacity - confirmed)
+  const publicAllowance = match.openSpots === null
+    ? actuallyLeft
+    : Math.max(0, match.openSpots - takenFromOpen)
+
   return {
     confirmed,
     capacity,
-    spotsRemaining: match.openSpots === null
-      ? 0
-      : Math.max(0, Math.min(match.openSpots - takenFromOpen, capacity - confirmed)),
+    // Never more than the sheet really has, whatever the publication cap says.
+    spotsRemaining: isPubliclyOpen(match) ? Math.min(actuallyLeft, publicAllowance) : 0,
   }
 }
 
@@ -323,10 +344,17 @@ async function lockAttendance(matchId: string) {
   if (match.status !== 'attendance_open') throw fail('ATTENDANCE_CLOSED', 422)
 
   const confirmedCount = await countConfirmed(db, matchId)
-  const required = matchCapacity(match.playersPerTeam)
 
-  if (confirmedCount < required) {
-    throw fail('INSUFFICIENT_PLAYERS', 422, { confirmed: confirmedCount, required })
+  // The host decides whether the game is on (ADR-032). Locking used to demand a
+  // full sheet, which does not match how five-a-side is played — a 5v5 that ends
+  // up 4v4 is a normal Wednesday, not a failed match. Below four there is no
+  // game to play, which is the only reason a floor exists.
+  if (confirmedCount < MATCH_MIN_PLAYABLE_TOTAL) {
+    throw fail('INSUFFICIENT_PLAYERS', 422, {
+      confirmed: confirmedCount,
+      required: MATCH_MIN_PLAYABLE_TOTAL,
+      nominal: matchCapacity(match.playersPerTeam),
+    })
   }
 
   await db
@@ -473,4 +501,5 @@ export const attendanceService = {
   getAttendances,
   checkAndTriggerReminder,
   lockAttendance,
+  getSpots,
 }

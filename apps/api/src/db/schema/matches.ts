@@ -16,7 +16,7 @@ export const matchStatusEnum = pgEnum('match_status', [
 
 /**
  * `private` — only the host's crew sees it (the original behaviour).
- * `public`  — listed on discovery; anyone within range can take one of `openSpots`.
+ * `public`  — listed on discovery; anyone within range can take a remaining place.
  */
 export const matchVisibilityEnum = pgEnum('match_visibility', ['private', 'public'])
 
@@ -63,8 +63,24 @@ export const matches = pgTable('matches', {
 
   // --- Marketplace ------------------------------------------------------
   visibility: matchVisibilityEnum('visibility').notNull().default('private'),
+  /**
+   * Crew-first publishing. Before this instant the match is private to the crew;
+   * after it, remaining places are public. Null with public visibility means
+   * public immediately (ADR-033).
+   */
+  publicOpensAt: timestamp('public_opens_at', { withTimezone: true }),
+  /**
+   * Whether the host occupies one of the places (ADR-018). Default true, because
+   * a five-a-side host is almost always playing — and when they are, not seeding
+   * them left the count short by one from the first second.
+   */
+  hostPlays: boolean('host_plays').notNull().default(true),
   // How many of the total capacity the host is offering to strangers.
   // NULL on a private match. Crew members are never counted against it.
+  /**
+   * Optional CAP on how many remaining places are offered publicly — never a
+   * separate pool. Null publishes whatever is actually left (ADR-033).
+   */
   openSpots: integer('open_spots'),
   skillLevel: skillLevelEnum('skill_level').notNull().default('casual'),
   pricePerPlayer: numeric('price_per_player', { precision: 6, scale: 2 }),

@@ -3,6 +3,7 @@ import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { db } from '../../db'
 import { ACTIVE_CREW_ROLES, groupMemberships, matchAttendances, matchParticipants } from '../../db/schema'
 import type { Match } from '../../db/schema'
+import { isPubliclyOpen } from '../matches/attendance.service'
 
 export type MatchRelation = 'host' | 'participant' | 'crew' | 'viewer'
 
@@ -117,7 +118,9 @@ export async function resolveMatchCapabilities(
   const capacity = match.playersPerTeam * 2
   const confirmed = Number(spotRows[0]?.confirmed ?? 0)
   const openConfirmed = Number(spotRows[0]?.openConfirmed ?? 0)
-  const hasPublishedSpots = match.visibility === 'public' && match.openSpots !== null
+  // Public visibility alone is not enough — a crew-first match stays private
+  // until its opening time passes (ADR-033).
+  const hasPublishedSpots = isPubliclyOpen(match)
   const hasAvailableSpot = hasPublishedSpots
     && confirmed < capacity
     && openConfirmed < (match.openSpots ?? 0)

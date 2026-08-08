@@ -418,6 +418,22 @@ Every screen change in this phase must reuse documented existing components/toke
 
 Potential publication/opening, invitation, organizer, venue preference, and cancellation fields. Additive migrations preferred.
 
+### 6A local completion record — 2026-08-08
+
+Publication model and host participation. Closes AF-007. Implemented on the isolated local database only.
+
+- **The host is now seeded onto their own sheet** unless they opt out (`host_plays`, ADR-018). They never were, so a host had to RSVP to their own match and every capacity calculation started one place short.
+- **`open_spots` is a cap, not an inventory** (ADR-033). Availability is always derived as `capacity − confirmed`, then capped. A cap larger than the real remainder can no longer conjure places.
+- **A public match no longer defaults to one open place.** Null now means "publish whatever is left". The old default meant a host advertising a public 5v5 offered a single seat and looked full to everyone — the opposite of publishing.
+- **Crew-first publishing** via `public_opens_at`: private to the crew until that instant, public after. Null with public visibility means public immediately, which is how every existing match already behaves.
+- **Locking no longer demands a full sheet** (ADR-032). The floor is `MATCH_MIN_PLAYABLE_TOTAL` (4). A 5v5 that ends up 4v4 is a normal Wednesday; the host is standing there and knows whether the game is on.
+
+Migration `0022` is additive — two columns. `open_spots` is deliberately not backfilled: every existing value remains valid under the new reading, and rewriting them would be guessing at hosts' intent.
+
+Gates: 48 files / 406 unit tests, 15 files / 117 isolated PostgreSQL integration tests, typecheck, lint, 686/686 parity, 5-tab baseline.
+
+**Remaining Phase 6 packages, not started:** 6B external waitlist and manual promotion (AF-008) · 6C match lifecycle — edit, cancel, invite, directions (AF-009) · 6D guest discovery and auth return intent (AF-001, AF-002) · 6E next-match and needs-attention sections, progressive creation · 6F merge legacy group detail into Crew. The mobile create flow does not yet expose the host-plays toggle or the crew-first opening time; both default sensibly without it.
+
 ## 9. Phase 7 — Scalability and operational reliability
 
 Requirements: PR-010, PR-050 through PR-054.

@@ -382,3 +382,28 @@ Withdrawal of consent and GDPR purge both delete the generated objects from the 
 Before Phase 5 there was no delete path at all: purging a user removed the job rows and left the images in storage indefinitely. Deleting the only record of where an object lives, while leaving the object, is worse than not deleting either — nothing afterwards can find it.
 
 Storage deletion runs after the database transaction commits and never throws. A storage outage must not roll back an erasure that has otherwise succeeded, nor leave a player unable to withdraw consent. The failure is logged; a sweep is the remedy, not a retry that would have to redo the whole purge.
+
+## ADR-032 — Minimum playable size is the host's call
+
+Status: Accepted
+
+Attendance may be locked at any confirmed count of `MATCH_MIN_PLAYABLE_TOTAL` (4) or more. The app never blocks a host above that floor, and never requires nominal capacity.
+
+Locking previously demanded a full sheet, which does not match how five-a-side is actually played: a 5v5 that ends up 4v4 is a normal Wednesday, not a failed match. The host is standing there and knows whether the game is on; the app is not in a position to overrule them. Below four there is no game to play, which is why a floor exists at all.
+
+Nominal capacity remains the ceiling for joining. This decision is only about the lower bound for locking.
+
+## ADR-033 — Published places are a limit, not an inventory
+
+Status: Accepted
+
+Actual availability is always `capacity − confirmed`. `matches.open_spots` is an optional **cap** on how many of those remaining places are offered publicly, never a separate pool that can disagree with the real sheet.
+
+Null means "publish whatever is left". The previous default of 1 for a public match meant a standalone host advertising a 5v5 offered a single place and looked full to everyone else — the opposite of what publishing is for.
+
+Crew-first publishing uses `public_opens_at`: before that instant the match is private to the crew, after it the remaining places are public. A null value with public visibility means it is public immediately.
+
+Consequences:
+
+- A host is seeded onto their own sheet at creation unless they opt out (ADR-018). Without that the count was short by one and capacity arithmetic was wrong from the first second.
+- Availability shown to an outsider can never exceed availability on the real sheet, because it is derived from it.
