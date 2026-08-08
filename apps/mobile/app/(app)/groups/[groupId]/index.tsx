@@ -24,7 +24,7 @@ interface GroupData {
 }
 
 interface JoinRequest {
-  userId: string
+  requestId: string
   displayName: string | null
   requestedAt: string
 }
@@ -149,14 +149,14 @@ export default function GroupHomeScreen() {
           <View style={styles.joinRequestsSection}>
             <Text style={styles.sectionLabel}>{t('groups.requests.title')}</Text>
             {joinRequests.map((req) => (
-              <View key={req.userId} style={styles.joinRequestRow}>
+              <View key={req.requestId} style={styles.joinRequestRow}>
                 <Text style={styles.joinRequestName} numberOfLines={1}>
                   {req.displayName ?? '—'}
                 </Text>
                 <View style={styles.joinRequestActions}>
                   <Pressable
                     style={[styles.actionPill, styles.acceptPill]}
-                    onPress={() => approveMutation.mutate(req.userId)}
+                    onPress={() => approveMutation.mutate(req.requestId)}
                     disabled={approveMutation.isPending || rejectMutation.isPending}
                     accessibilityRole="button"
                   >
@@ -164,7 +164,7 @@ export default function GroupHomeScreen() {
                   </Pressable>
                   <Pressable
                     style={[styles.actionPill, styles.rejectPill]}
-                    onPress={() => rejectMutation.mutate(req.userId)}
+                    onPress={() => rejectMutation.mutate(req.requestId)}
                     disabled={approveMutation.isPending || rejectMutation.isPending}
                     accessibilityRole="button"
                   >

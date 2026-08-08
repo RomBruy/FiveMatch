@@ -12,7 +12,8 @@ import { httpClient } from '../../../../lib/api-client'
 const SEPARATOR = ' · '
 
 interface RosterMember {
-  userId: string
+  memberId: string
+  playerId: string | null
   displayName: string | null
   joinedAt: string | null
   matchCount: number | null
@@ -20,7 +21,7 @@ interface RosterMember {
 }
 
 interface JoinRequest {
-  userId: string
+  requestId: string
   displayName: string | null
   requestedAt: string
 }
@@ -170,14 +171,14 @@ export default function RosterScreen() {
         <View style={styles.requestsSection}>
           <Text style={styles.sectionLabel}>{t('groups.requests.title')}</Text>
           {joinRequests.map((req) => (
-            <View key={req.userId} style={styles.requestCard}>
+            <View key={req.requestId} style={styles.requestCard}>
               <DuotoneAvatar displayName={req.displayName ?? ''} size={40} />
               <Text style={styles.requestName} numberOfLines={1}>
                 {req.displayName ?? '—'}
               </Text>
               <Pressable
                 style={[styles.acceptPill, (approveMutation.isPending || rejectMutation.isPending) && styles.pillDisabled]}
-                onPress={() => approveMutation.mutate(req.userId)}
+                onPress={() => approveMutation.mutate(req.requestId)}
                 disabled={approveMutation.isPending || rejectMutation.isPending}
                 accessibilityRole="button"
               >
@@ -185,7 +186,7 @@ export default function RosterScreen() {
               </Pressable>
               <Pressable
                 style={[styles.declinePill, (approveMutation.isPending || rejectMutation.isPending) && styles.pillDisabled]}
-                onPress={() => rejectMutation.mutate(req.userId)}
+                onPress={() => rejectMutation.mutate(req.requestId)}
                 disabled={approveMutation.isPending || rejectMutation.isPending}
                 accessibilityRole="button"
               >
@@ -198,7 +199,7 @@ export default function RosterScreen() {
 
       <View style={styles.membersCard}>
         {rosterData.map((item, index) => (
-          <View key={item.userId} style={[styles.memberRow, index > 0 && styles.memberRowBorder]}>
+          <View key={item.memberId} style={[styles.memberRow, index > 0 && styles.memberRowBorder]}>
             <DuotoneAvatar displayName={item.displayName ?? ''} size={40} />
             <View style={styles.memberInfo}>
               <Text style={styles.memberName} numberOfLines={1}>
@@ -219,7 +220,7 @@ export default function RosterScreen() {
               <View style={styles.actions}>
                 <Pressable
                   style={[styles.ghostActionPill, (transferMutation.isPending || removeMutation.isPending) && styles.pillDisabled]}
-                  onPress={() => handleTransfer(item.userId, item.displayName ?? '—')}
+                  onPress={() => handleTransfer(item.memberId, item.displayName ?? '—')}
                   disabled={transferMutation.isPending || removeMutation.isPending}
                   accessibilityRole="button"
                   hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
@@ -228,7 +229,7 @@ export default function RosterScreen() {
                 </Pressable>
                 <Pressable
                   style={[styles.removePill, (removeMutation.isPending || transferMutation.isPending) && styles.pillDisabled]}
-                  onPress={() => handleRemove(item.userId, item.displayName ?? '—')}
+                  onPress={() => handleRemove(item.memberId, item.displayName ?? '—')}
                   disabled={removeMutation.isPending || transferMutation.isPending}
                   accessibilityRole="button"
                   hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}

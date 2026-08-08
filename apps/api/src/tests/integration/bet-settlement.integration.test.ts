@@ -42,13 +42,13 @@ describe('Bet settlement', () => {
     playerId = randomUUID()
     mvpPlayerId = randomUUID()
     await db.insert(players).values([
-      { id: playerId, groupId, userId, displayName: `${TEST_PREFIX}bettor` },
-      { id: mvpPlayerId, groupId, userId: mvpUserId, displayName: `${TEST_PREFIX}mvp` },
+      { id: playerId, userId, displayName: `${TEST_PREFIX}bettor` },
+      { id: mvpPlayerId, userId: mvpUserId, displayName: `${TEST_PREFIX}mvp` },
     ])
 
     matchId = randomUUID()
     await db.insert(matches).values({
-      id: matchId, groupId, organizerId: userId,
+      id: matchId, groupId, hostId: userId,
       status: 'teams_generated',
       scheduledAt: new Date(Date.now() + 3_600_000),
       format: '5v5', playersPerTeam: 5, goalkeeperMode: 'none',

@@ -1,4 +1,20 @@
-import { integer, pgTable, text, uuid, timestamp } from 'drizzle-orm/pg-core'
+import { integer, jsonb, pgTable, text, uuid, timestamp } from 'drizzle-orm/pg-core'
+import type { ProfileFieldVisibility } from '@fivematch/types'
+
+const privateProfileFieldVisibility: ProfileFieldVisibility = {
+  profilePhoto: 'private',
+  generatedCardPhoto: 'private',
+  currentClub: 'private',
+  formerClub: 'private',
+  preferredPosition: 'private',
+  strongFoot: 'private',
+  playerStyle: 'private',
+  specialSkill: 'private',
+  favoriteExcuse: 'private',
+  badFaithLevel: 'private',
+  lockerRoomStyle: 'private',
+  thirdHalfProfile: 'private',
+}
 
 export const users = pgTable('users', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -16,6 +32,10 @@ export const users = pgTable('users', {
   badFaithLevel: integer('bad_faith_level'),
   lockerRoomStyle: text('locker_room_style'),
   thirdHalfProfile: text('third_half_profile'),
+  profileFieldVisibility: jsonb('profile_field_visibility')
+    .$type<ProfileFieldVisibility>()
+    .notNull()
+    .default(privateProfileFieldVisibility),
   onboardingCompletedAt: timestamp('onboarding_completed_at', { withTimezone: true }),
   languagePreference: text('language_preference').notNull().default('en'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),

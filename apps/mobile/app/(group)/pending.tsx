@@ -53,7 +53,7 @@ export default function PendingScreen() {
     if (status.role === 'member' || status.role === 'organizer') {
       setShowWelcome(true)
       const timer = setTimeout(() => {
-        router.replace('/(group)/initial-rating')
+        router.replace('/(app)')
       }, 2000)
       return () => clearTimeout(timer)
     } else if (status.role === null) {

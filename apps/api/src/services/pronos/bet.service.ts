@@ -245,7 +245,7 @@ export async function settleMatchBets(matchId: string): Promise<SettlementSummar
 }
 
 /** One push per player who had a bet settled, carrying their net for the whole match. */
-async function notifySettled(matchId: string, groupId: string, playerIds: string[]): Promise<void> {
+async function notifySettled(matchId: string, groupId: string | null, playerIds: string[]): Promise<void> {
   const rows = await db
     .select({
       playerId: pronoBets.playerId,

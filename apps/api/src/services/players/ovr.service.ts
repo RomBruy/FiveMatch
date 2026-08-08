@@ -27,9 +27,18 @@ import {
 import type { PlayerTier } from '@fivematch/types/algorithm-constants'
 import type { OvrSignal } from './ovr-signal'
 import type { CardState, AlphaBreakdown, AttributeSet, MatchUpdateBreakdown } from '@fivematch/types'
-import { eq, and, isNull, isNotNull, ne } from 'drizzle-orm'
-import { db } from '../../db'
-import { ratings, players, groupMemberships, groups, matchParticipants, matches, ratingEvents } from '../../db/schema'
+import { eq, and, inArray, isNull, ne } from 'drizzle-orm'
+import { db, type Db } from '../../db'
+import {
+  ratings,
+  players,
+  groupMemberships,
+  groups,
+  matchParticipants,
+  matches,
+  ovrProcessingEvents,
+  ratingEvents,
+} from '../../db/schema'
 import { notificationService } from '../notifications/notification.service'
 import { seedingService } from './seeding.service'
 
@@ -43,6 +52,7 @@ type OvrAttributes = {
 }
 
 type GroupTier = keyof typeof GROUP_TIER_MULTIPLIERS
+type Transaction = Parameters<Parameters<Db['transaction']>[0]>[0]
 
 // ─── Tier boundary helpers ────────────────────────────────────────────────────
 
@@ -391,11 +401,13 @@ async function computeAttributeAverages(groupId: string, ratedPlayerId: string):
       }) * 10,
     )
 
+  // The seed prior is now the median of every unlocked player, not of one crew.
+  // With a global identity a crew median would be a biased sample of the same
+  // population — and a solo player has no crew to take a median of.
   const unlockedOvrs = await db
     .select({ ovrScoreFloat: players.ovrScoreFloat })
     .from(players)
     .where(and(
-      eq(players.groupId, groupId),
       eq(players.cardState, 'unlocked'),
       isNull(players.deletedAt),
     ))
@@ -425,12 +437,63 @@ function evaluatePlayerTier(ovrScore: number): PlayerTier {
   return 'rookie'
 }
 
+async function getEligibleRatingsForPlayer(tx: Transaction, ratedPlayerId: string) {
+  const candidates = await tx
+    .select({
+      matchId: ratings.matchId,
+      raterPlayerId: ratings.raterPlayerId,
+      pace: ratings.pace,
+      technique: ratings.technique,
+      passing: ratings.passing,
+      defending: ratings.defending,
+      physicality: ratings.physicality,
+      effort: ratings.effort,
+      matchStatus: matches.status,
+      scoreA: matches.scoreA,
+      scoreB: matches.scoreB,
+    })
+    .from(ratings)
+    .innerJoin(matches, eq(matches.id, ratings.matchId))
+    .where(and(
+      eq(ratings.ratedPlayerId, ratedPlayerId),
+      eq(ratings.isInitial, false),
+    ))
+
+  const matchIds = [...new Set(candidates.map((row) => row.matchId).filter((id): id is string => id !== null))]
+  if (matchIds.length === 0) return []
+
+  const snapshots = await tx
+    .select({
+      matchId: matchParticipants.matchId,
+      playerId: matchParticipants.playerId,
+      teamSide: matchParticipants.teamSide,
+    })
+    .from(matchParticipants)
+    .where(inArray(matchParticipants.matchId, matchIds))
+
+  const sideByMatchPlayer = new Map(
+    snapshots
+      .filter((row): row is typeof row & { playerId: string } => row.playerId !== null)
+      .map((row) => [`${row.matchId}:${row.playerId}`, row.teamSide]),
+  )
+
+  return candidates.filter((rating) => {
+    if (!rating.matchId || !rating.raterPlayerId) return false
+    if (rating.raterPlayerId === ratedPlayerId) return false
+    if (rating.matchStatus !== 'completed' || rating.scoreA === null || rating.scoreB === null) return false
+    const raterSide = sideByMatchPlayer.get(`${rating.matchId}:${rating.raterPlayerId}`)
+    const targetSide = sideByMatchPlayer.get(`${rating.matchId}:${ratedPlayerId}`)
+    return raterSide !== undefined && targetSide !== undefined && raterSide !== targetSide
+  })
+}
+
 async function runPostMatchUpdate(matchId: string): Promise<void> {
   // 1. Load match metadata (including OVR snapshot from team lock — fix #3)
   const [match] = await db
     .select({
       id: matches.id,
       groupId: matches.groupId,
+      status: matches.status,
       mvpPlayerId: matches.mvpPlayerId,
       scoreA: matches.scoreA,
       scoreB: matches.scoreB,
@@ -440,29 +503,34 @@ async function runPostMatchUpdate(matchId: string): Promise<void> {
     .from(matches)
     .where(eq(matches.id, matchId))
 
-  if (!match || match.scoreA === null || match.scoreB === null) return
+  if (!match || match.status !== 'completed' || match.scoreA === null || match.scoreB === null) return
 
-  // 2. Resolve group tier for alpha multiplier
-  const [groupRow] = await db
-    .select({ tier: groups.tier })
-    .from(groups)
-    .where(eq(groups.id, match.groupId))
+  // 2. Resolve crew tier for the alpha multiplier. A standalone match has no
+  //    crew, so it sits at the baseline tier.
+  const [groupRow] = match.groupId
+    ? await db.select({ tier: groups.tier }).from(groups).where(eq(groups.id, match.groupId))
+    : [undefined]
 
   const groupTier = (groupRow?.tier ?? 'amateur') as GroupTier
 
-  // 3. Compute diversity target from active (non-pending, non-deleted) roster size.
-  //    Total active roster is the correct denominator — "have diverse people seen you"
-  //    relative to everyone in this group, not just recent participants.
-  const activeMemberRows = await db
-    .select({ id: groupMemberships.id })
-    .from(groupMemberships)
-    .where(and(
-      eq(groupMemberships.groupId, match.groupId),
-      isNull(groupMemberships.deletedAt),
-      ne(groupMemberships.role, 'pending_member'),
-    ))
-  const activeRosterSize = activeMemberRows.length
-  const diversityTarget = Math.min(Math.max(0, activeRosterSize - 1), DIVERSITY_TARGET_CAP)
+  // 3. Diversity target — "have enough different people seen you". For a crew
+  //    match the denominator is the active roster; for a standalone match it is
+  //    everyone who actually turned out, which is the only pool that exists.
+  const diversityPool = match.groupId
+    ? (await db
+        .select({ id: groupMemberships.id })
+        .from(groupMemberships)
+        .where(and(
+          eq(groupMemberships.groupId, match.groupId),
+          isNull(groupMemberships.deletedAt),
+          ne(groupMemberships.role, 'pending_member'),
+        ))).length
+    : (await db
+        .select({ id: matchParticipants.id })
+        .from(matchParticipants)
+        .where(eq(matchParticipants.matchId, matchId))).length
+
+  const diversityTarget = Math.min(Math.max(0, diversityPool - 1), DIVERSITY_TARGET_CAP)
 
   // 4. Team OVR averages: read from the snapshot stored at team-lock time (reproducible).
   //    Fall back to neutral value only if the match pre-dates the snapshot column.
@@ -488,177 +556,120 @@ async function runPostMatchUpdate(matchId: string): Promise<void> {
   const teamAWon = match.scoreA > match.scoreB
   const isDraw = match.scoreA === match.scoreB
 
-  // 7. Process each participant
+  // 7. Process each participant. The claim, player projection and audit event
+  //    commit in one transaction, so retries/concurrent closes are deterministic.
   for (const participant of allParticipants) {
     if (!participant.playerId) continue // GDPR-anonymized participant — skip
+    const processed = await db.transaction(async (tx) => {
+      const [player] = await tx
+        .select({
+          id: players.id,
+          userId: players.userId,
+          ovrScoreFloat: players.ovrScoreFloat,
+          matchCount: players.matchCount,
+          lastMatchAt: players.lastMatchAt,
+          playerTier: players.playerTier,
+          avgPace: players.avgPace,
+          avgTechnique: players.avgTechnique,
+          avgPassing: players.avgPassing,
+          avgDefending: players.avgDefending,
+          avgPhysicality: players.avgPhysicality,
+          avgEffort: players.avgEffort,
+        })
+        .from(players)
+        .where(and(eq(players.id, participant.playerId!), isNull(players.deletedAt)))
+        .limit(1)
 
-    // 7. Load current player state
-    const [player] = await db
-      .select({
-        id: players.id,
-        userId: players.userId,
-        ovrScoreFloat: players.ovrScoreFloat,
-        matchCount: players.matchCount,
-        lastMatchAt: players.lastMatchAt,
-        cardState: players.cardState,
-        playerTier: players.playerTier,
-        avgPace: players.avgPace,
-        avgTechnique: players.avgTechnique,
-        avgPassing: players.avgPassing,
-        avgDefending: players.avgDefending,
-        avgPhysicality: players.avgPhysicality,
-        avgEffort: players.avgEffort,
+      if (!player) return null
+
+      const allEligibleRatings = await getEligibleRatingsForPlayer(tx, participant.playerId!)
+      const currentMatchRatings = allEligibleRatings.filter((rating) => rating.matchId === matchId)
+      if (currentMatchRatings.length === 0) return null
+
+      const claim = await tx
+        .insert(ovrProcessingEvents)
+        .values({ matchId, playerId: participant.playerId!, processingType: 'MATCH_UPDATE' })
+        .onConflictDoNothing()
+        .returning({ id: ovrProcessingEvents.id })
+      if (claim.length === 0) return null
+
+      const distinctRatersCount = new Set(
+        allEligibleRatings.map((rating) => rating.raterPlayerId).filter((id): id is string => id !== null),
+      ).size
+
+      const side = participant.teamSide
+      const matchOutcome: 'win' | 'draw' | 'loss' = isDraw ? 'draw'
+        : (side === 'A' ? (teamAWon ? 'win' : 'loss') : (teamAWon ? 'loss' : 'win'))
+      const myTeamAvgOvr = side === 'A' ? teamAAvgOvr : teamBAvgOvr
+      const oppTeamAvgOvr = side === 'A' ? teamBAvgOvr : teamAAvgOvr
+      const currentOvr = player.ovrScoreFloat ? parseFloat(player.ovrScoreFloat) : TEAM_GEN_OVR_FALLBACK
+
+      const { newOvr, breakdown } = applyEmaWithBreakdown({
+        matchId,
+        player: {
+          ovrScoreFloat: currentOvr,
+          matchCount: player.matchCount,
+          lastMatchAt: player.lastMatchAt,
+          avgPace: player.avgPace, avgTechnique: player.avgTechnique, avgPassing: player.avgPassing,
+          avgDefending: player.avgDefending, avgPhysicality: player.avgPhysicality, avgEffort: player.avgEffort,
+        },
+        matchRatings: currentMatchRatings,
+        goalCount: participant.goalsScored,
+        assistCount: participant.assists,
+        isMvp: match.mvpPlayerId === participant.playerId,
+        groupTier,
+        distinctRatersCount,
+        diversityTarget,
+        myTeamAvgOvr,
+        oppTeamAvgOvr,
+        matchOutcome,
       })
-      .from(players)
-      .where(and(eq(players.id, participant.playerId), isNull(players.deletedAt)))
 
-    if (!player) continue
+      const allCount = allEligibleRatings.length
+      const average = (attribute: 'pace' | 'technique' | 'passing' | 'defending' | 'physicality' | 'effort') =>
+        allEligibleRatings.reduce((sum, rating) => sum + rating[attribute], 0) / allCount
 
-    // 8. Aggregate post-match ratings for this player
-    const matchRatings = await db
-      .select({
-        pace: ratings.pace,
-        technique: ratings.technique,
-        passing: ratings.passing,
-        defending: ratings.defending,
-        physicality: ratings.physicality,
-        effort: ratings.effort,
+      const currentTier = (player.playerTier ?? 'rookie') as PlayerTier
+      const candidateTier = evaluatePlayerTier(Math.round(newOvr))
+      const tierChanged = shouldChangeTier(currentTier, candidateTier, newOvr)
+      const newTier = tierChanged ? candidateTier : currentTier
+
+      await tx
+        .update(players)
+        .set({
+          ovrScoreFloat: String(newOvr),
+          previousOvrScoreFloat: player.ovrScoreFloat,
+          playerTier: newTier,
+          avgPace: String(average('pace')),
+          avgTechnique: String(average('technique')),
+          avgPassing: String(average('passing')),
+          avgDefending: String(average('defending')),
+          avgPhysicality: String(average('physicality')),
+          avgEffort: String(average('effort')),
+        })
+        .where(and(eq(players.id, participant.playerId!), isNull(players.deletedAt)))
+
+      await tx.insert(ratingEvents).values({
+        playerId: participant.playerId!,
+        matchId,
+        eventType: 'MATCH_UPDATE',
+        oldOvr: String(currentOvr),
+        newOvr: String(newOvr),
+        seedStatus: null,
+        breakdown: breakdown as unknown as Record<string, unknown>,
       })
-      .from(ratings)
-      .where(and(
-        eq(ratings.ratedPlayerId, participant.playerId),
-        eq(ratings.matchId, matchId),
-        eq(ratings.isInitial, false),
-      ))
 
-    if (matchRatings.length === 0) continue
-
-    // 9. Count distinct raters who have EVER rated this player (rater diversity for alpha)
-    const distinctRatersRows = await db
-      .selectDistinct({ raterPlayerId: ratings.raterPlayerId })
-      .from(ratings)
-      .where(and(
-        eq(ratings.ratedPlayerId, participant.playerId),
-        eq(ratings.groupId, match.groupId),
-        isNotNull(ratings.raterPlayerId),
-      ))
-    const distinctRatersCount = distinctRatersRows.length
-
-    // 10. Determine match outcome from this player's perspective
-    const side = participant.teamSide
-    const matchOutcome: 'win' | 'draw' | 'loss' = isDraw ? 'draw'
-      : (side === 'A' ? (teamAWon ? 'win' : 'loss') : (teamAWon ? 'loss' : 'win'))
-
-    const myTeamAvgOvr = side === 'A' ? teamAAvgOvr : teamBAvgOvr
-    const oppTeamAvgOvr = side === 'A' ? teamBAvgOvr : teamAAvgOvr
-
-    // 11. Run the full pipeline
-    const currentOvr = player.ovrScoreFloat ? parseFloat(player.ovrScoreFloat) : TEAM_GEN_OVR_FALLBACK
-    const isMvp = match.mvpPlayerId === participant.playerId
-
-    const { newOvr, breakdown } = applyEmaWithBreakdown({
-      matchId,
-      player: {
-        ovrScoreFloat: currentOvr,
-        matchCount: player.matchCount,
-        lastMatchAt: player.lastMatchAt,
-        avgPace: player.avgPace, avgTechnique: player.avgTechnique, avgPassing: player.avgPassing,
-        avgDefending: player.avgDefending, avgPhysicality: player.avgPhysicality, avgEffort: player.avgEffort,
-      },
-      matchRatings,
-      goalCount: participant.goalsScored,
-      assistCount: participant.assists,
-      isMvp,
-      groupTier,
-      distinctRatersCount,
-      diversityTarget,
-      myTeamAvgOvr,
-      oppTeamAvgOvr,
-      matchOutcome,
+      return { tierChanged, currentTier, newTier, userId: player.userId }
     })
 
-    // Only advance matchCount when alpha > 0 (raterCount < 2 produces no update)
-    const newMatchCount = breakdown.alpha.finalAlphaAfterClamp > 0 ? player.matchCount + 1 : player.matchCount
-
-    // 12. Recompute stored attribute averages from ALL ratings (no goal/assist boosts)
-    const allRatings = await db
-      .select({
-        pace: ratings.pace,
-        technique: ratings.technique,
-        passing: ratings.passing,
-        defending: ratings.defending,
-        physicality: ratings.physicality,
-        effort: ratings.effort,
-      })
-      .from(ratings)
-      .where(and(
-        eq(ratings.ratedPlayerId, participant.playerId),
-        eq(ratings.groupId, match.groupId),
-      ))
-
-    const allCount = allRatings.length
-    const newAvgPace = allRatings.reduce((s, r) => s + r.pace, 0) / allCount
-    const newAvgTechnique = allRatings.reduce((s, r) => s + r.technique, 0) / allCount
-    const newAvgPassing = allRatings.reduce((s, r) => s + r.passing, 0) / allCount
-    const newAvgDefending = allRatings.reduce((s, r) => s + r.defending, 0) / allCount
-    const newAvgPhysicality = allRatings.reduce((s, r) => s + r.physicality, 0) / allCount
-    const newAvgEffort = allRatings.reduce((s, r) => s + r.effort, 0) / allCount
-
-    // 13. Card state
-    const newCardState = getCardState(newMatchCount, true)
-
-    // 14. Tier evaluation with hysteresis (Step 9)
-    const currentTier = (player.playerTier ?? 'rookie') as PlayerTier
-    const candidateTier = evaluatePlayerTier(Math.round(newOvr))
-    const tierChanged = shouldChangeTier(currentTier, candidateTier, newOvr)
-    const newTier = tierChanged ? candidateTier : currentTier
-
-    // 15. Persist atomically
-    await db
-      .update(players)
-      .set({
-        ovrScoreFloat: String(newOvr),
-        previousOvrScoreFloat: player.ovrScoreFloat,
-        matchCount: newMatchCount,
-        cardState: newCardState,
-        playerTier: newTier,
-        lastMatchAt: new Date(),
-        avgPace: String(newAvgPace),
-        avgTechnique: String(newAvgTechnique),
-        avgPassing: String(newAvgPassing),
-        avgDefending: String(newAvgDefending),
-        avgPhysicality: String(newAvgPhysicality),
-        avgEffort: String(newAvgEffort),
-      })
-      .where(and(eq(players.id, participant.playerId), isNull(players.deletedAt)))
-
-    await db.insert(ratingEvents).values({
-      playerId: participant.playerId,
-      eventType: 'MATCH_UPDATE',
-      oldOvr: String(currentOvr),
-      newOvr: String(newOvr),
-      seedStatus: null,
-      breakdown: breakdown as unknown as Record<string, unknown>,
-    })
-
-    // 16. Notifications
-    if (player.cardState !== 'unlocked' && newCardState === 'unlocked') {
-      notificationService.send({
-        type: 'CARD_UNLOCKED',
-        groupId: match.groupId,
-        playerId: participant.playerId,
-        recipientUserId: player.userId,
-      })
-    }
-
-    if (tierChanged) {
+    if (processed?.tierChanged) {
       notificationService.send({
         type: 'PLAYER_TIER_CHANGED',
         groupId: match.groupId,
         playerId: participant.playerId,
-        previousTier: currentTier,
-        newTier,
-        recipientUserId: player.userId,
+        previousTier: processed.currentTier,
+        newTier: processed.newTier,
+        recipientUserId: processed.userId,
       })
     }
   }

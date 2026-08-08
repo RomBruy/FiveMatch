@@ -1,7 +1,6 @@
 import { Router } from 'express'
 import { eq } from 'drizzle-orm'
 import { asyncHandler } from '../../middleware/async-handler'
-import { requireGroupMember } from '../../middleware/require-group-member'
 import { db } from '../../db'
 import { players } from '../../db/schema'
 import { cardGenerationService } from '../../services/cards/card-generation.service'
@@ -10,10 +9,9 @@ import { ErrorCode } from '@fivematch/types'
 
 const router = Router({ mergeParams: true })
 
-// POST /v1/groups/:groupId/players/:playerId/card-photo/consent
+// POST /v1/players/:playerId/card-photo/consent
 router.post(
   '/consent',
-  requireGroupMember,
   asyncHandler(async (req, res) => {
     const { playerId } = req.params as { playerId: string }
     // Verify the acting user owns this player record (compare internal UUIDs)
@@ -32,12 +30,11 @@ router.post(
   })
 )
 
-// POST /v1/groups/:groupId/players/:playerId/card-photo/generate
+// POST /v1/players/:playerId/card-photo/generate
 router.post(
   '/generate',
-  requireGroupMember,
   asyncHandler(async (req, res) => {
-    const { groupId, playerId } = req.params as { groupId: string; playerId: string }
+    const { playerId } = req.params as { playerId: string }
     const idempotencyKey = req.headers['idempotency-key'] as string | undefined
     if (!idempotencyKey) {
       return res.status(400).json({
@@ -65,7 +62,7 @@ router.post(
       })
     }
 
-    const result = await cardGenerationService.createGenerationJob(playerId, groupId, idempotencyKey)
+    const result = await cardGenerationService.createGenerationJob(playerId, idempotencyKey)
     if ('error' in result) {
       return res.status(result.statusCode).json({
         error: { code: result.error, message: result.error, statusCode: result.statusCode, meta: result.meta },
@@ -83,12 +80,18 @@ router.post(
   })
 )
 
-// GET /v1/groups/:groupId/players/:playerId/card-photo/status
+// GET /v1/players/:playerId/card-photo/status
 router.get(
   '/status',
-  requireGroupMember,
   asyncHandler(async (req, res) => {
     const { playerId } = req.params as { playerId: string }
+    const [owner] = await db.select({ userId: players.userId }).from(players)
+      .where(eq(players.id, playerId)).limit(1)
+    if (!owner || owner.userId !== req.user.internalId) {
+      return res.status(403).json({
+        error: { code: ErrorCode.FORBIDDEN, message: 'Cannot view another player photo status', statusCode: 403 },
+      })
+    }
     const status = await cardGenerationService.getStatus(playerId)
     return res.json({ data: status })
   })

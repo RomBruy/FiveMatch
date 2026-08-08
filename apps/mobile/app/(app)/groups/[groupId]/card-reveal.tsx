@@ -92,7 +92,7 @@ export default function CardRevealScreen() {
     queryKey: ['player', groupId, playerId],
     queryFn: () =>
       httpClient
-        .get<{ data: PlayerDetail }>(`/v1/groups/${groupId}/players/${playerId}`)
+        .get<{ data: PlayerDetail }>(`/v1/players/${playerId}`)
         .then((r) => r.data.data),
     enabled: !!groupId && !!playerId,
   })
@@ -111,7 +111,7 @@ export default function CardRevealScreen() {
     queryKey: ['players', groupId],
     queryFn: () =>
       httpClient
-        .get<{ data: { items: { playerId: string }[] } }>(`/v1/groups/${groupId}/players`)
+        .get<{ data: { players: { playerId: string }[] } }>(`/v1/groups/${groupId}/leaderboard`)
         .then((r) => r.data.data),
     enabled: !!groupId,
   })
@@ -276,7 +276,7 @@ export default function CardRevealScreen() {
         has_mvp_badge: player?.isMvp ?? false,
       })
       httpClient.post(
-        `/v1/groups/${groupId}/players/${playerId}/card-share-event`
+        `/v1/players/${playerId}/card-share-event`
       ).catch(() => {})
     } catch {
       // Sharing cancelled by user — not an error
@@ -308,7 +308,7 @@ export default function CardRevealScreen() {
             groupTier={group?.tier}
             ovrStyle={ovrAnimatedStyle}
             isMvp={player.isMvp}
-            serialTotal={playersData?.items.length}
+            serialTotal={playersData?.players.length}
             interactive={cardInteractive}
           />
         ) : (
@@ -323,7 +323,7 @@ export default function CardRevealScreen() {
             player={player}
             groupName={group?.name}
             isMvp={player.isMvp}
-            serialTotal={playersData?.items.length}
+            serialTotal={playersData?.players.length}
           />
         </View>
       )}

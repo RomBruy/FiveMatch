@@ -226,12 +226,16 @@ export function PitchBoard({ teamA, teamB, fairnessScore }: PitchBoardProps) {
   )
 }
 
-// ─── Data container — joins participants (sides, names) with the players list
-// (ovrScore + cardState for FR-14) client-side; the team lock API is untouched.
+// ─── Data container ─────────────────────────────────────────────────────────
+// One request. The participants endpoint carries cardState and ovrScore now, so
+// this no longer pulls a whole group roster just to colour eleven names — which
+// also means it works on a match with no crew behind it.
 
 interface ParticipantEntry {
   playerId: string | null
   displayName: string | null
+  cardState: string
+  ovrScore: number | null
 }
 
 interface ParticipantsData {
@@ -243,56 +247,33 @@ interface ParticipantsData {
   teamB: ParticipantEntry[]
 }
 
-interface PlayerSummary {
-  playerId: string
-  displayName: string
-  cardState: string
-  ovrScore: number | null
-}
-
 interface LockedPitchBoardProps {
-  groupId: string
   matchId: string
 }
 
-/** Locked-teams composition view — shared by the organizer, player, and match-detail routes. */
-export function LockedPitchBoard({ groupId, matchId }: LockedPitchBoardProps) {
+/** Locked-teams composition view — shared by the match screen and the result flow. */
+export function LockedPitchBoard({ matchId }: LockedPitchBoardProps) {
   const { data: participants } = useQuery({
-    queryKey: ['participants', groupId, matchId],
+    queryKey: ['matches', matchId, 'participants'],
     queryFn: async () => {
       const { data } = await httpClient.get<{ data: ParticipantsData }>(
-        `/v1/groups/${groupId}/matches/${matchId}/participants`,
+        `/v1/matches/${matchId}/participants`,
       )
       return data.data
     },
-    enabled: Boolean(groupId) && Boolean(matchId),
-  })
-
-  const { data: playersData } = useQuery({
-    queryKey: ['players', groupId],
-    queryFn: async () => {
-      const { data } = await httpClient.get<{ data: { items: PlayerSummary[] } }>(
-        `/v1/groups/${groupId}/players`,
-      )
-      return data.data
-    },
-    enabled: Boolean(groupId),
+    enabled: Boolean(matchId),
   })
 
   if (!participants || (participants.teamA.length === 0 && participants.teamB.length === 0)) {
     return null
   }
 
-  const byId = new Map((playersData?.items ?? []).map((p) => [p.playerId, p]))
-  const toTeamPlayer = (entry: ParticipantEntry): TeamPlayer => {
-    const summary = entry.playerId ? byId.get(entry.playerId) : undefined
-    return {
-      playerId: entry.playerId,
-      displayName: entry.displayName,
-      cardState: summary?.cardState ?? 'not_started',
-      ovrScore: summary?.ovrScore ?? null,
-    }
-  }
+  const toTeamPlayer = (entry: ParticipantEntry): TeamPlayer => ({
+    playerId: entry.playerId,
+    displayName: entry.displayName,
+    cardState: entry.cardState ?? 'not_started',
+    ovrScore: entry.ovrScore ?? null,
+  })
 
   return (
     <PitchBoard

@@ -8,35 +8,8 @@ import { ProfileStorySections, type ProfilePersonality } from '../../../componen
 import { DOCK_CLEARANCE } from '../../../components/ui/TabDock'
 import { Colors } from '../../../constants/colors'
 import { Fonts, Radius, Type } from '../../../constants/tokens'
-import { useGroupContext } from '../../../contexts/GroupContext'
 import { httpClient } from '../../../lib/api-client'
-
-interface PlayerProfileData {
-  playerId: string
-  displayName: string
-  cardState: 'not_started' | 'in_progress_1' | 'in_progress_2' | 'in_progress_3' | 'unlocked'
-  matchCount: number
-  ovrScore: number | null
-  trend: 'up' | 'down' | 'stable' | null
-  attributes: {
-    pace: number
-    technique: number
-    passing: number
-    defending: number
-    physicality: number
-    effort: number
-  } | null
-  photoUrl: string | null
-  isMvp: boolean
-  personality: ProfilePersonality
-  memory: {
-    tightestMatch: {
-      scheduledAt: string
-      scoreA: number
-      scoreB: number
-    } | null
-  }
-}
+import type { PublicPlayerProfile } from '@fivematch/types'
 
 export default function PlayerProfileScreen() {
   const { t } = useTranslation()
@@ -44,25 +17,15 @@ export default function PlayerProfileScreen() {
   const insets = useSafeAreaInsets()
   const { width } = useWindowDimensions()
   const { playerId } = useLocalSearchParams<{ playerId: string }>()
-  const { activeGroupId } = useGroupContext()
 
   const { data: player, isLoading, isError } = useQuery({
-    queryKey: ['player-profile', activeGroupId, playerId],
+    queryKey: ['player-profile', playerId],
     queryFn: () =>
       httpClient
-        .get<{ data: PlayerProfileData }>(`/v1/groups/${activeGroupId}/players/${playerId}`)
+        .get<{ data: PublicPlayerProfile }>(`/v1/players/${playerId}`)
         .then((response) => response.data.data),
-    enabled: Boolean(activeGroupId && playerId),
+    enabled: Boolean(playerId),
   })
-  const { data: group } = useQuery({
-    queryKey: ['groups', activeGroupId],
-    queryFn: () =>
-      httpClient
-        .get<{ data: { name: string; tier: string } }>(`/v1/groups/${activeGroupId}`)
-        .then((response) => response.data.data),
-    enabled: Boolean(activeGroupId),
-  })
-
   const cardWidth = Math.min(340, width - 40)
 
   return (
@@ -95,14 +58,26 @@ export default function PlayerProfileScreen() {
       {player && (
         <ScrollView contentContainerStyle={styles.content}>
           <PaniniCard
-            player={player}
-            groupName={group?.name}
-            groupTier={group?.tier}
-            photoUrl={player.photoUrl}
-            isMvp={player.isMvp}
+            player={{
+              ...player,
+              cardState: player.cardState as 'not_started' | 'in_progress_1' | 'in_progress_2' | 'in_progress_3' | 'unlocked',
+              matchCount: player.eligibleMatchCount,
+              attributes: player.ratingAggregate?.attributes ?? null,
+            }}
+            photoUrl={player.generatedCardPhotoUrl ?? player.photoUrl}
+            isMvp={player.isMvp ?? false}
             width={cardWidth}
           />
-          <ProfileStorySections tightestMatch={player.memory.tightestMatch} personality={player.personality} />
+          <ProfileStorySections
+            tightestMatch={null}
+            personality={player.personality ? {
+              specialSkill: player.personality.specialSkill ?? null,
+              favoriteExcuse: player.personality.favoriteExcuse ?? null,
+              badFaithLevel: player.personality.badFaithLevel ?? null,
+              lockerRoomStyle: player.personality.lockerRoomStyle ?? null,
+              thirdHalfProfile: player.personality.thirdHalfProfile ?? null,
+            } satisfies ProfilePersonality : null}
+          />
         </ScrollView>
       )}
     </View>

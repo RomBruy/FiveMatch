@@ -9,7 +9,9 @@
     "lint": "eslint src --ext .ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:integration": "vitest run --config vitest.integration.config.ts"
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "db:migrate:test": "tsx scripts/migrate-test-database.ts",
+    "audit:phase0": "tsx scripts/phase0-audit-report.ts"
   },
   "dependencies": {
     "@aws-sdk/client-rekognition": "^3.0.0",

@@ -9,6 +9,8 @@ declare global {
       user: {
         userId: string
         internalId?: string
+        /** Global player identity — set by attachPlayer, 1:1 with the user. */
+        playerId?: string
         groupRole?: 'organizer' | 'member'
       }
     }

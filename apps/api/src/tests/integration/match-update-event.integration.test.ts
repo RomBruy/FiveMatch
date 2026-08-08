@@ -2,7 +2,9 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { eq, and, sql } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
 import { db } from '../../db'
-import { users, groups, players, matches, matchParticipants, ratings, ratingEvents } from '../../db/schema'
+import {
+  users, groups, players, matches, matchParticipants, ratings, ratingEvents, ovrProcessingEvents,
+} from '../../db/schema'
 import { ratingService } from '../../services/ratings/rating.service'
 import type { MatchUpdateBreakdown } from '@fivematch/types'
 
@@ -23,6 +25,7 @@ describe('MATCH_UPDATE RatingEvent written after rating window closes', () => {
     }
     seededRatingIds.length = 0
     for (const id of seededMatchIds) {
+      await db.delete(ovrProcessingEvents).where(eq(ovrProcessingEvents.matchId, id))
       await db.delete(matchParticipants).where(eq(matchParticipants.matchId, id))
       await db.delete(matches).where(eq(matches.id, id))
     }
@@ -61,7 +64,6 @@ describe('MATCH_UPDATE RatingEvent written after rating window closes', () => {
       email: `${TEST_PREFIX}rated@example.com`,
     })
     const [ratedPlayer] = await db.insert(players).values({
-      groupId,
       userId: ratedUserId,
       displayName: `${TEST_PREFIX}rated-player`,
       ovrScoreFloat: '70.000',
@@ -71,7 +73,7 @@ describe('MATCH_UPDATE RatingEvent written after rating window closes', () => {
     // Completed match, rating window still open
     const [match] = await db.insert(matches).values({
       groupId,
-      organizerId,
+      hostId: organizerId,
       status: 'completed',
       scheduledAt: new Date('2025-06-01T18:00:00Z'),
       completedAt: new Date('2025-06-01T20:00:00Z'),
@@ -106,10 +108,19 @@ describe('MATCH_UPDATE RatingEvent written after rating window closes', () => {
         email: `${TEST_PREFIX}rater${i}@example.com`,
       })
       const [raterPlayer] = await db.insert(players).values({
-        groupId,
         userId: raterUserId,
         displayName: `${TEST_PREFIX}rater-${i}`,
       }).returning()
+
+      // Phase 1 accepts OVR evidence only from a final participant on the
+      // opposing team, matching the same boundary as rating submission.
+      await db.insert(matchParticipants).values({
+        matchId: match!.id,
+        playerId: raterPlayer!.id,
+        userId: raterUserId,
+        displayName: `${TEST_PREFIX}rater-${i}`,
+        teamSide: 'B',
+      })
 
       const [rating] = await db.insert(ratings).values({
         groupId,
@@ -162,6 +173,7 @@ describe('MATCH_UPDATE RatingEvent written after rating window closes', () => {
       .from(players)
       .where(eq(players.id, ratedPlayer!.id))
     expect(parseFloat(updatedPlayer!.ovrScoreFloat!)).toBeCloseTo(parsedNewOvr, 5)
-    expect(updatedPlayer!.lastMatchAt).not.toBeNull()
+    // OVR processing no longer mutates the canonical eligible-match cache.
+    expect(updatedPlayer!.lastMatchAt).toBeNull()
   })
 })

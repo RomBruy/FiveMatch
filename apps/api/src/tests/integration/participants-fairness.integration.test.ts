@@ -6,22 +6,6 @@ import { randomUUID } from 'crypto'
 import { db } from '../../db'
 import { users, groups, players, matches, matchParticipants, teamGenerationJobs } from '../../db/schema'
 
-// Auth middlewares are mocked (route-harness idiom from roster.test.ts);
-// everything below them — router, services, DB — is real.
-vi.mock('../../middleware/require-group-member', () => ({
-  requireGroupMember: vi.fn(
-    (req: express.Request, _res: express.Response, next: express.NextFunction) => {
-      req.user.internalId = (globalThis as Record<string, unknown>)['__testInternalId'] as string
-      req.user.groupRole = 'organizer'
-      next()
-    },
-  ),
-}))
-vi.mock('../../middleware/require-organizer', () => ({
-  requireOrganizer: vi.fn(
-    (_req: express.Request, _res: express.Response, next: express.NextFunction) => next(),
-  ),
-}))
 vi.mock('../../services/notifications/notification.service', () => ({
   notificationService: { send: vi.fn() },
 }))
@@ -34,10 +18,13 @@ function makeApp() {
   const app = express()
   app.use(express.json())
   app.use((req, _res, next) => {
-    req.user = { userId: `${TEST_PREFIX}clerk` } as express.Request['user']
+    req.user = {
+      userId: `${TEST_PREFIX}clerk`,
+      internalId: (globalThis as Record<string, unknown>)['__testInternalId'] as string,
+    } as express.Request['user']
     next()
   })
-  app.use('/:groupId/matches', matchesRouter)
+  app.use('/matches', matchesRouter)
   return app
 }
 
@@ -77,14 +64,13 @@ describe('GET /:matchId/participants — fairnessScore of the locked split', () 
     })
 
     const [playerA] = await db.insert(players).values({
-      groupId,
       userId: organizerId,
       displayName: `${TEST_PREFIX}player-a`,
     }).returning()
 
     const [match] = await db.insert(matches).values({
       groupId,
-      organizerId,
+      hostId: organizerId,
       status: 'in_progress',
       scheduledAt: new Date('2026-07-01T18:00:00Z'),
       format: '5v5',
@@ -109,16 +95,16 @@ describe('GET /:matchId/participants — fairnessScore of the locked split', () 
       })
     }
 
-    return { groupId, matchId: match!.id }
+    return { matchId: match!.id }
   }
 
   it('returns the fairnessScore of the latest completed generation job as a number', async () => {
-    const { groupId, matchId } = await seedLockedMatch([
+    const { matchId } = await seedLockedMatch([
       { generationNumber: 1, fairnessScore: '12.5' },
       { generationNumber: 2, fairnessScore: '3.25' },
     ])
 
-    const res = await request(makeApp()).get(`/${groupId}/matches/${matchId}/participants`)
+    const res = await request(makeApp()).get(`/matches/${matchId}/participants`)
 
     expect(res.status).toBe(200)
     expect(res.body.data.fairnessScore).toBe(3.25)
@@ -127,9 +113,9 @@ describe('GET /:matchId/participants — fairnessScore of the locked split', () 
   })
 
   it('returns fairnessScore null when no completed generation job exists', async () => {
-    const { groupId, matchId } = await seedLockedMatch([])
+    const { matchId } = await seedLockedMatch([])
 
-    const res = await request(makeApp()).get(`/${groupId}/matches/${matchId}/participants`)
+    const res = await request(makeApp()).get(`/matches/${matchId}/participants`)
 
     expect(res.status).toBe(200)
     expect(res.body.data.fairnessScore).toBeNull()

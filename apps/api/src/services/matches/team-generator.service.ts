@@ -1,6 +1,6 @@
 import { eq, and, isNull, isNotNull, count } from 'drizzle-orm'
 import { db } from '../../db'
-import { players } from '../../db/schema'
+import { players, matchAttendances } from '../../db/schema'
 import {
   TEAM_GEN_MINIMUM_RATED_PLAYERS,
   TEAM_GEN_CONFIDENCE_THRESHOLD,
@@ -233,13 +233,22 @@ function generate(players: GeneratorPlayer[], options: GeneratorOptions): Genera
 
 // ─── Status (Story 2.5) ───────────────────────────────────────────────────────
 
-async function getStatus(groupId: string): Promise<TeamGeneratorStatus> {
+/**
+ * Readiness is a property of the match, not of a crew: what matters is how many
+ * of the people actually confirmed for THIS match carry an OVR. A pickup game of
+ * ten strangers is the normal case now, and it should say so plainly rather than
+ * measuring a group the players may not belong to.
+ */
+async function getStatus(matchId: string): Promise<TeamGeneratorStatus> {
   const [{ value: rawCount }] = await db
     .select({ value: count() })
-    .from(players)
+    .from(matchAttendances)
+    .innerJoin(players, eq(players.id, matchAttendances.playerId))
     .where(
       and(
-        eq(players.groupId, groupId),
+        eq(matchAttendances.matchId, matchId),
+        eq(matchAttendances.status, 'in'),
+        isNull(matchAttendances.waitlistPosition),
         isNotNull(players.ovrScoreFloat),
         isNull(players.deletedAt),
       ),

@@ -47,7 +47,7 @@ describe('Per-rater rating row storage', () => {
     // Seed a completed match
     const [match] = await db.insert(matches).values({
       groupId,
-      organizerId,
+      hostId: organizerId,
       status: 'completed',
       scheduledAt: new Date('2025-01-01T18:00:00Z'),
       completedAt: new Date('2025-01-01T20:00:00Z'),
@@ -67,7 +67,6 @@ describe('Per-rater rating row storage', () => {
       email: `${TEST_PREFIX}rated@example.com`,
     })
     const [ratedPlayer] = await db.insert(players).values({
-      groupId,
       userId: ratedUserId,
       displayName: `${TEST_PREFIX}rated-player`,
     }).returning()
@@ -83,7 +82,6 @@ describe('Per-rater rating row storage', () => {
         email: `${TEST_PREFIX}rater${i}@example.com`,
       })
       const [rp] = await db.insert(players).values({
-        groupId,
         userId: raterUserId,
         displayName: `${TEST_PREFIX}rater-${i}`,
       }).returning()
@@ -141,7 +139,7 @@ describe('Per-rater rating row storage', () => {
         avgEffort: players.avgEffort,
       })
       .from(players)
-      .where(and(eq(players.id, ratedPlayer!.id), eq(players.groupId, groupId)))
+      .where(and(eq(players.id, ratedPlayer!.id)))
       .limit(1)
 
     const responseData = {
@@ -187,7 +185,6 @@ describe('Per-rater rating row storage', () => {
       email: `${TEST_PREFIX}rated2@example.com`,
     })
     const [ratedPlayer] = await db.insert(players).values({
-      groupId,
       userId: ratedUserId,
       displayName: `${TEST_PREFIX}rated-player-2`,
     }).returning()
@@ -203,7 +200,6 @@ describe('Per-rater rating row storage', () => {
         email: `${TEST_PREFIX}init-rater${i}@example.com`,
       })
       const [rp] = await db.insert(players).values({
-        groupId,
         userId: raterUserId,
         displayName: `${TEST_PREFIX}init-rater-${i}`,
       }).returning()

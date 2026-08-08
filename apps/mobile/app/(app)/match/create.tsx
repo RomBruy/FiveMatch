@@ -3,17 +3,21 @@ import { useTranslation } from 'react-i18next'
 import { useRouter } from 'expo-router'
 import { useForm, Controller } from 'react-hook-form'
 import { useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Ionicons } from '@expo/vector-icons'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Colors } from '../../../constants/colors'
 import { Fonts, Radius } from '../../../constants/tokens'
 import { Chip } from '../../../components/ui/Chip'
 import { Input } from '../../../components/ui/Input'
 import { PrimaryButton } from '../../../components/ui/PrimaryButton'
+import { PressableScale } from '../../../components/ui/PressableScale'
 import { DOCK_CLEARANCE } from '../../../components/ui/TabDock'
 import { PaperCalendar } from '../../../components/match/PaperCalendar'
+import { InfoStrip } from '../../../components/shared/InfoStrip'
 import { httpClient } from '../../../lib/api-client'
-import { useGroupContext } from '../../../contexts/GroupContext'
+import { useDiscoveryLocation } from '../../../hooks/use-discovery-location'
+import type { SkillLevel } from '../../../lib/matches'
 
 type MatchFormat = '5v5' | '6v6' | '7v7' | 'custom'
 type GoalkeeperMode = 'fixed' | 'rotating' | 'none'
@@ -21,21 +25,28 @@ type Recurrence = 'none' | 'weekly' | 'biweekly'
 
 interface CreateMatchForm {
   scheduledAt: string
-  location: string
+  venueName: string
+  city: string
   format: MatchFormat
   goalkeeperMode: GoalkeeperMode
   playersPerTeam: string
+  skillLevel: SkillLevel
+  pricePerPlayer: string
+  openSpots: string
+  notes: string
   recurrence: Recurrence
 }
 
-const FORMAT_PLAYERS: Record<Exclude<MatchFormat, 'custom'>, number> = {
-  '5v5': 5,
-  '6v6': 6,
-  '7v7': 7,
+interface CrewSummary {
+  id: string
+  name: string
+  userRole: 'organizer' | 'member'
 }
 
-const TIME_PRESETS = ['18:00', '19:00', '20:00']
-const PLAYERS_MIN = 5
+const FORMAT_PLAYERS: Record<Exclude<MatchFormat, 'custom'>, number> = { '5v5': 5, '6v6': 6, '7v7': 7 }
+const TIME_PRESETS = ['18:00', '19:00', '20:00', '21:00']
+const LEVELS: SkillLevel[] = ['casual', 'intermediate', 'competitive']
+const PLAYERS_MIN = 4
 const PLAYERS_MAX = 20
 const MINUS = '−'
 const PLUS = '+'
@@ -64,23 +75,49 @@ function ChipRow<T extends string>({
   )
 }
 
+/**
+ * Create a match — open to anyone, not just crew organizers.
+ *
+ * Two decisions were added and one was removed. Added: where it is (so it can
+ * be found) and whether to publish spots (so it can be filled). Removed: the
+ * requirement to own a crew, which is what made hosting a closed shop.
+ */
 export default function CreateMatchScreen() {
   const { t } = useTranslation()
   const router = useRouter()
   const insets = useSafeAreaInsets()
-  const { activeGroupId } = useGroupContext()
   const queryClient = useQueryClient()
+  const { location, requestDeviceLocation, isLocating } = useDiscoveryLocation()
+
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [customTime, setCustomTime] = useState(false)
+  const [publish, setPublish] = useState(true)
+  const [crewId, setCrewId] = useState<string | null>(null)
+  const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(null)
+
+  // Crews the user can host for. Absent for most users — the picker only shows
+  // when there is genuinely a choice to make.
+  const { data: crews } = useQuery({
+    queryKey: ['users', 'me', 'groups'],
+    queryFn: async () => {
+      const { data } = await httpClient.get<{ data: { items: CrewSummary[] } }>('/v1/users/me/groups')
+      return data.data.items.filter((c) => c.userRole === 'organizer')
+    },
+  })
 
   const { control, handleSubmit, watch, formState: { errors } } = useForm<CreateMatchForm>({
     defaultValues: {
       scheduledAt: '',
-      location: '',
+      venueName: '',
+      city: location?.city ?? '',
       format: '5v5',
       goalkeeperMode: 'none',
       playersPerTeam: '5',
+      skillLevel: 'casual',
+      pricePerPlayer: '',
+      openSpots: '1',
+      notes: '',
       recurrence: 'none',
     },
   })
@@ -88,46 +125,79 @@ export default function CreateMatchScreen() {
   const format = watch('format')
   const recurrence = watch('recurrence')
 
+  const useMyPosition = async () => {
+    const next = await requestDeviceLocation()
+    if (next) setCoords({ latitude: next.latitude, longitude: next.longitude })
+  }
+
+  const effectiveCoords = coords ?? (location && (location.latitude !== 0 || location.longitude !== 0)
+    ? { latitude: location.latitude, longitude: location.longitude }
+    : null)
+
   const onSubmit = async (data: CreateMatchForm) => {
-    if (!activeGroupId) return
     setSubmitting(true)
     setError(null)
     try {
-      // Parse "YYYY-MM-DD HH:MM" → ISO datetime
+      // "YYYY-MM-DD HH:MM" → ISO
       const iso = new Date(data.scheduledAt.replace(' ', 'T')).toISOString()
       const playersPerTeam = format === 'custom'
         ? parseInt(data.playersPerTeam, 10)
         : FORMAT_PLAYERS[format as Exclude<MatchFormat, 'custom'>]
 
-      await httpClient.post(`/v1/groups/${activeGroupId}/matches`, {
+      const price = data.pricePerPlayer.trim() ? Number(data.pricePerPlayer.replace(',', '.')) : null
+
+      const { data: created } = await httpClient.post<{ data: { id: string } }>('/v1/matches', {
+        groupId: crewId,
         scheduledAt: iso,
-        location: data.location.trim() || null,
+        venueName: data.venueName.trim() || null,
+        city: data.city.trim() || null,
+        latitude: effectiveCoords?.latitude ?? null,
+        longitude: effectiveCoords?.longitude ?? null,
         format: data.format,
         playersPerTeam,
         goalkeeperMode: data.goalkeeperMode,
+        skillLevel: data.skillLevel,
+        pricePerPlayer: price !== null && !Number.isNaN(price) ? price : null,
+        notes: data.notes.trim() || null,
+        visibility: publish ? 'public' : 'private',
+        openSpots: publish ? Math.max(1, parseInt(data.openSpots, 10) || 1) : null,
         recurrence: data.recurrence === 'none' ? null : { frequency: data.recurrence },
       })
 
-      await queryClient.invalidateQueries({ queryKey: ['matches', activeGroupId] })
-      router.back()
-    } catch {
-      setError(t('common.genericError'))
+      await queryClient.invalidateQueries({ queryKey: ['matches'] })
+      router.replace(`/(app)/match/${created.data.id}` as never)
+    } catch (err) {
+      const code = (err as { response?: { data?: { error?: { code?: string } } } })
+        .response?.data?.error?.code
+      setError(code === 'VALIDATION_ERROR' ? t('match.create.locationRequired') : t('common.genericError'))
     } finally {
       setSubmitting(false)
     }
   }
 
+  const canPublish = Boolean(effectiveCoords) || Boolean(watch('city').trim())
+
   return (
     <ScrollView
       style={styles.container}
       contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}
+      keyboardShouldPersistTaps="handled"
     >
+      <PressableScale
+        onPress={() => router.back()}
+        accessibilityRole="button"
+        accessibilityLabel={t('common.back')}
+        style={styles.backButton}
+      >
+        <Ionicons name="chevron-back" size={22} color={Colors.ink} />
+      </PressableScale>
+
       <Text style={styles.title}>{t('match.create.title')}</Text>
 
       {error && <Text style={styles.errorText}>{error}</Text>}
 
-      {/* scheduledAt stays one "YYYY-MM-DD HH:MM" form value: calendar owns the date
-          part, the time chips/input own the time part — payload unchanged. */}
+      {/* scheduledAt stays one "YYYY-MM-DD HH:MM" form value: the calendar owns
+          the date part, the chips/input own the time part. */}
       <Controller
         control={control}
         name="scheduledAt"
@@ -178,16 +248,89 @@ export default function CreateMatchScreen() {
         }}
       />
 
-      <Text style={styles.label}>{t('match.create.location')}</Text>
+      {/* ── Where ─────────────────────────────────────────────────────── */}
+      <Text style={styles.label}>{t('match.create.whereLabel')}</Text>
       <Controller
         control={control}
-        name="location"
+        name="venueName"
         render={({ field: { onChange, value } }) => (
           <Input
             value={value}
             onChangeText={onChange}
-            placeholder={t('match.create.locationPlaceholder')}
-            maxLength={200}
+            placeholder={t('match.create.venuePlaceholder')}
+            maxLength={120}
+          />
+        )}
+      />
+      <View style={styles.cityRow}>
+        <View style={styles.cityInput}>
+          <Controller
+            control={control}
+            name="city"
+            render={({ field: { onChange, value } }) => (
+              <Input
+                value={value}
+                onChangeText={onChange}
+                placeholder={t('match.create.cityPlaceholder')}
+                maxLength={120}
+                autoCapitalize="words"
+              />
+            )}
+          />
+        </View>
+        <Chip
+          label={effectiveCoords ? t('match.create.positionSet') : t('match.create.useMyPosition')}
+          variant="outlined"
+          active={Boolean(effectiveCoords)}
+          disabled={isLocating}
+          onPress={() => void useMyPosition()}
+        />
+      </View>
+
+      {/* ── Publish: the single decision that makes this a marketplace ──── */}
+      <Text style={styles.label}>{t('match.create.visibilityLabel')}</Text>
+      <View style={styles.publishCard}>
+        <View style={styles.publishHeader}>
+          <View style={styles.publishText}>
+            <Text style={styles.publishTitle}>{t('match.create.publishTitle')}</Text>
+            <Text style={styles.publishBody}>{t('match.create.publishBody')}</Text>
+          </View>
+          <Chip
+            label={publish ? t('common.on') : t('common.off')}
+            active={publish}
+            onPress={() => setPublish((p) => !p)}
+          />
+        </View>
+
+        {publish && (
+          <>
+            <Text style={styles.subLabel}>{t('match.create.openSpotsLabel')}</Text>
+            <Controller
+              control={control}
+              name="openSpots"
+              render={({ field: { onChange, value } }) => (
+                <Stepper value={value} onChange={onChange} min={1} max={PLAYERS_MAX * 2} />
+              )}
+            />
+            {!canPublish && (
+              <View style={styles.publishWarning}>
+                <InfoStrip variant="info" message={t('match.create.locationRequired')} />
+              </View>
+            )}
+          </>
+        )}
+      </View>
+
+      {/* ── Level, format, price ──────────────────────────────────────── */}
+      <Text style={styles.label}>{t('match.create.levelLabel')}</Text>
+      <Controller
+        control={control}
+        name="skillLevel"
+        render={({ field: { onChange, value } }) => (
+          <ChipRow
+            value={value}
+            onChange={onChange}
+            options={LEVELS.map((level) => ({ value: level, label: t(`player.level.${level}`) }))}
           />
         )}
       />
@@ -217,39 +360,63 @@ export default function CreateMatchScreen() {
             control={control}
             name="playersPerTeam"
             rules={{ required: true, min: PLAYERS_MIN, max: PLAYERS_MAX }}
-            render={({ field: { onChange, value } }) => {
-              const count = parseInt(value, 10)
-              const current = Number.isNaN(count) ? PLAYERS_MIN : count
-              return (
-                <View style={styles.stepper}>
-                  <Pressable
-                    style={[styles.stepperButton, current <= PLAYERS_MIN && styles.stepperButtonDisabled]}
-                    onPress={() => onChange(String(Math.max(PLAYERS_MIN, current - 1)))}
-                    disabled={current <= PLAYERS_MIN}
-                    accessibilityRole="button"
-                    hitSlop={{ top: 5, bottom: 5, left: 5, right: 5 }}
-                  >
-                    <Text style={styles.stepperButtonText}>{MINUS}</Text>
-                  </Pressable>
-                  <Text
-                    style={styles.stepperValue}
-                    accessibilityLabel={t('match.create.playersPerTeam')}
-                  >
-                    {String(current)}
-                  </Text>
-                  <Pressable
-                    style={[styles.stepperButton, current >= PLAYERS_MAX && styles.stepperButtonDisabled]}
-                    onPress={() => onChange(String(Math.min(PLAYERS_MAX, current + 1)))}
-                    disabled={current >= PLAYERS_MAX}
-                    accessibilityRole="button"
-                    hitSlop={{ top: 5, bottom: 5, left: 5, right: 5 }}
-                  >
-                    <Text style={styles.stepperButtonText}>{PLUS}</Text>
-                  </Pressable>
-                </View>
-              )
-            }}
+            render={({ field: { onChange, value } }) => (
+              <Stepper value={value} onChange={onChange} min={PLAYERS_MIN} max={PLAYERS_MAX} />
+            )}
           />
+        </>
+      )}
+
+      <Text style={styles.label}>{t('match.create.priceLabel')}</Text>
+      <Controller
+        control={control}
+        name="pricePerPlayer"
+        render={({ field: { onChange, value } }) => (
+          <Input
+            value={value}
+            onChangeText={onChange}
+            placeholder={t('match.create.pricePlaceholder')}
+            keyboardType="decimal-pad"
+            maxLength={6}
+          />
+        )}
+      />
+
+      <Text style={styles.label}>{t('match.create.notesLabel')}</Text>
+      <Controller
+        control={control}
+        name="notes"
+        render={({ field: { onChange, value } }) => (
+          <Input
+            value={value}
+            onChangeText={onChange}
+            placeholder={t('match.create.notesPlaceholder')}
+            maxLength={500}
+          />
+        )}
+      />
+
+      {/* ── Optional crew + recurrence ─────────────────────────────────── */}
+      {crews && crews.length > 0 && (
+        <>
+          <Text style={styles.label}>{t('match.create.crewLabel')}</Text>
+          <View style={styles.chipRow}>
+            <Chip
+              label={t('match.create.noCrew')}
+              active={crewId === null}
+              variant="outlined"
+              onPress={() => setCrewId(null)}
+            />
+            {crews.map((crew) => (
+              <Chip
+                key={crew.id}
+                label={crew.name}
+                active={crewId === crew.id}
+                onPress={() => setCrewId(crew.id)}
+              />
+            ))}
+          </View>
+          <Text style={styles.hint}>{t('match.create.crewHint')}</Text>
         </>
       )}
 
@@ -269,9 +436,7 @@ export default function CreateMatchScreen() {
           />
         )}
       />
-      {recurrence !== 'none' && (
-        <Text style={styles.recurrenceHint}>{t('match.create.recurrenceHint')}</Text>
-      )}
+      {recurrence !== 'none' && <Text style={styles.hint}>{t('match.create.recurrenceHint')}</Text>}
 
       <Text style={styles.label}>{t('match.create.goalkeeperMode')}</Text>
       <Controller
@@ -291,11 +456,11 @@ export default function CreateMatchScreen() {
       />
 
       <View style={styles.submitWrap}>
-        {/* The tab dock owns this screen's one glow. */}
         <PrimaryButton
           label={t('match.create.submit')}
           onPress={handleSubmit(onSubmit)}
           loading={submitting}
+          disabled={publish && !canPublish}
           glow={false}
         />
       </View>
@@ -303,20 +468,60 @@ export default function CreateMatchScreen() {
   )
 }
 
+function Stepper({
+  value,
+  onChange,
+  min,
+  max,
+}: {
+  value: string
+  onChange: (v: string) => void
+  min: number
+  max: number
+}) {
+  const parsed = parseInt(value, 10)
+  const current = Number.isNaN(parsed) ? min : parsed
+
+  return (
+    <View style={styles.stepper}>
+      <Pressable
+        style={[styles.stepperButton, current <= min && styles.stepperButtonDisabled]}
+        onPress={() => onChange(String(Math.max(min, current - 1)))}
+        disabled={current <= min}
+        accessibilityRole="button"
+        hitSlop={{ top: 5, bottom: 5, left: 5, right: 5 }}
+      >
+        <Text style={styles.stepperButtonText}>{MINUS}</Text>
+      </Pressable>
+      <Text style={styles.stepperValue}>{String(current)}</Text>
+      <Pressable
+        style={[styles.stepperButton, current >= max && styles.stepperButtonDisabled]}
+        onPress={() => onChange(String(Math.min(max, current + 1)))}
+        disabled={current >= max}
+        accessibilityRole="button"
+        hitSlop={{ top: 5, bottom: 5, left: 5, right: 5 }}
+      >
+        <Text style={styles.stepperButtonText}>{PLUS}</Text>
+      </Pressable>
+    </View>
+  )
+}
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.bg,
-  },
-  content: {
-    paddingHorizontal: 20,
-    paddingBottom: DOCK_CLEARANCE,
+  container: { flex: 1, backgroundColor: Colors.bg },
+  content: { paddingHorizontal: 20, paddingBottom: DOCK_CLEARANCE },
+  backButton: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: -10,
   },
   title: {
     color: Colors.ink,
     fontFamily: Fonts.bebas,
     fontSize: 36,
-    letterSpacing: 1.44, // 0.04em @ 36 (display register)
+    letterSpacing: 1.44,
     textTransform: 'uppercase',
     marginBottom: 12,
   },
@@ -329,30 +534,43 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     marginTop: 24,
   },
-  chipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
+  subLabel: {
+    color: Colors.inkSecondary,
+    fontSize: 10,
+    fontFamily: Fonts.interSemiBold,
+    letterSpacing: 1.3,
+    textTransform: 'uppercase',
+    marginTop: 14,
+    marginBottom: 8,
   },
-  customTimeWrap: {
-    marginTop: 10,
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  customTimeWrap: { marginTop: 10 },
+  cityRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 },
+  cityInput: { flex: 1 },
+  publishCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    padding: 16,
   },
-  recurrenceHint: {
+  publishHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  publishText: { flex: 1, gap: 2 },
+  publishTitle: { color: Colors.ink, fontFamily: Fonts.interSemiBold, fontSize: 14 },
+  publishBody: { color: Colors.inkSecondary, fontFamily: Fonts.inter, fontSize: 12.5, lineHeight: 18 },
+  publishWarning: { marginTop: 12 },
+  hint: {
     color: Colors.inkSecondary,
     fontSize: 12.5,
     fontFamily: Fonts.inter,
     lineHeight: 18,
     marginTop: 10,
   },
-  inputError: {
-    borderColor: Colors.primary,
-  },
+  inputError: { borderColor: Colors.primary },
   stepper: {
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'flex-start',
     gap: 16,
-    backgroundColor: Colors.surface,
+    backgroundColor: Colors.surfaceRaised,
     borderRadius: Radius.full,
     padding: 5,
   },
@@ -360,34 +578,21 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: Radius.full,
-    backgroundColor: Colors.surfaceRaised,
+    backgroundColor: Colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  stepperButtonDisabled: {
-    opacity: 0.4,
-  },
-  stepperButtonText: {
-    color: Colors.inkSecondary,
-    fontSize: 18,
-    fontFamily: Fonts.interMedium,
-  },
+  stepperButtonDisabled: { opacity: 0.4 },
+  stepperButtonText: { color: Colors.inkSecondary, fontSize: 18, fontFamily: Fonts.interMedium },
   stepperValue: {
     fontFamily: Fonts.bebas,
     fontSize: 22,
-    letterSpacing: 0.88, // 0.04em @ 22 (stat register)
+    letterSpacing: 0.88,
     color: Colors.ink,
     minWidth: 26,
     textAlign: 'center',
     fontVariant: ['tabular-nums'],
   },
-  submitWrap: {
-    marginTop: 36,
-  },
-  errorText: {
-    color: Colors.primary,
-    fontSize: 14,
-    fontFamily: Fonts.inter,
-    marginBottom: 16,
-  },
+  submitWrap: { marginTop: 36 },
+  errorText: { color: Colors.primary, fontSize: 14, fontFamily: Fonts.inter, marginBottom: 16 },
 })

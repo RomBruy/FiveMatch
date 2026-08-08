@@ -39,11 +39,10 @@ jobs:
       - name: Lint and test
         run: pnpm turbo lint test
 
-      - name: Run integration tests (GDPR cascade — all Epic 1–7 scopes required green)
+      - name: Run isolated integration tests
         env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/fivematch_test
+          TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/fivematch_test
         run: |
-          cd fivematch/apps/api
-          pnpm drizzle-kit migrate
-          pnpm test:integration
+          pnpm --filter @fivematch/api db:migrate:test
+          pnpm --filter @fivematch/api test:integration
           # test:integration uses vitest.integration.config.ts — runs only integration tests

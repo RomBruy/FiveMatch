@@ -36,7 +36,6 @@ describe('Bankroll ledger', () => {
     // pronosBalance is deliberately NOT specified — the column default must land.
     await db.insert(players).values({
       id: playerId,
-      groupId,
       userId,
       displayName: `${TEST_PREFIX}player`,
     })
@@ -45,7 +44,7 @@ describe('Bankroll ledger', () => {
     await db.insert(matches).values({
       id: matchId,
       groupId,
-      organizerId: userId,
+      hostId: userId,
       status: 'teams_generated',
       scheduledAt: new Date(Date.now() + 3_600_000),
       format: '5v5',

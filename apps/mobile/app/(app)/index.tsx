@@ -1,521 +1,258 @@
-import { View, Text, StyleSheet, RefreshControl } from 'react-native'
-import Animated from 'react-native-reanimated'
+import { View, Text, StyleSheet, RefreshControl, ScrollView } from 'react-native'
 import { useTranslation } from 'react-i18next'
 import { useRouter } from 'expo-router'
-import { useCallback, useRef, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useCallback, useState } from 'react'
 import { Ionicons } from '@expo/vector-icons'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { captureRef } from 'react-native-view-shot'
-import * as Sharing from 'expo-sharing'
-import { haptics } from '../../lib/haptics'
 import { Colors } from '../../constants/colors'
 import { Fonts, Radius } from '../../constants/tokens'
-import { GroupSwitcher } from '../../components/GroupSwitcher'
-import { DOCK_CLEARANCE } from '../../components/ui/TabDock'
-import { DuotoneAvatar, getInitials } from '../../components/ui/DuotoneAvatar'
-import { FormDots, type FormResult } from '../../components/ui/FormDots'
-import { TextureType } from '../../components/ui/TextureType'
+import { Chip } from '../../components/ui/Chip'
+import { Input } from '../../components/ui/Input'
 import { PrimaryButton } from '../../components/ui/PrimaryButton'
 import { SecondaryButton } from '../../components/ui/SecondaryButton'
 import { PressableScale } from '../../components/ui/PressableScale'
-import { SkeletonHero, SkeletonStrip, SkeletonRow } from '../../components/ui/Skeleton'
+import { SkeletonRow } from '../../components/ui/Skeleton'
 import { StaggerItem } from '../../components/ui/Stagger'
-import { CollapsingHeader, CollapsingHeaderTitle, useCollapsingHeader } from '../../components/ui/CollapsingHeader'
-import { MvpCeremonyCard } from '../../components/match/MvpCeremonyCard'
-import { NextMatchHero } from '../../components/match/NextMatchHero'
-import { PronosShortcutCard } from '../../components/pronos/PronosShortcutCard'
-import { Chip } from '../../components/ui/Chip'
-import { StoryShareGraphic, STORY_EXPORT_WIDTH, STORY_EXPORT_HEIGHT } from '../../components/share/StoryShareGraphic'
-import { useGroupContext } from '../../contexts/GroupContext'
-import { httpClient } from '../../lib/api-client'
+import { TextureType } from '../../components/ui/TextureType'
+import { DOCK_CLEARANCE } from '../../components/ui/TabDock'
+import { MatchCard } from '../../components/match/MatchCard'
+import { useDiscoveryLocation } from '../../hooks/use-discovery-location'
+import {
+  useDiscoverMatches,
+  DEFAULT_DISCOVER_FILTERS,
+  type DiscoverFilters,
+  type SkillLevel,
+} from '../../lib/matches'
 
-interface MatchHistoryItem {
-  matchId: string
-  scheduledAt: string
-  completedAt: string
-  scoreA: number | null
-  scoreB: number | null
-  mvpPlayerId: string | null
-  mvpDisplayName: string | null
-  userTeamSide: 'A' | 'B' | null
-  userResult: 'win' | 'loss' | 'draw' | null
-}
+const RADIUS_OPTIONS = [5, 15, 30, 50]
+const FORMAT_OPTIONS = ['5v5', '6v6', '7v7']
+const LEVEL_OPTIONS: SkillLevel[] = ['casual', 'intermediate', 'competitive']
 
-interface MatchParticipant {
-  playerId: string | null
-  goalsScored: number | null
-  assists: number | null
-}
-
-interface ActiveMatchSummary {
-  matchId: string
-  status: string
-  scheduledAt: string
-  location: string | null
-  format: string
-  playersPerTeam: number
-}
-
-interface AttendanceRow {
-  playerId: string | null
-  displayName: string | null
-  status: 'in' | 'out' | 'unknown'
-}
-
-interface WaitlistRow {
-  playerId: string | null
-  displayName: string | null
-  waitlistPosition: number | null
-}
-
-interface AttendancesData {
-  confirmed: AttendanceRow[]
-  waitlist: WaitlistRow[]
-  myPlayerId: string | null
-}
-
-interface RosterMember {
-  userId: string
-  displayName: string | null
-  role: string
-}
-
-const STAR_SYMBOL = '★'
-
-const RESULT_TO_DOT: Record<NonNullable<MatchHistoryItem['userResult']>, FormResult> = {
-  win: 'W',
-  draw: 'D',
-  loss: 'L',
-}
-
-export default function AccueilTab() {
-  const { t, i18n } = useTranslation()
+/**
+ * JOUER — the app's front door.
+ *
+ * This replaced a group home screen that dead-ended for anyone without a crew.
+ * The first thing a new user sees is now games they can actually join, and the
+ * only thing standing between them and the list is "where are you".
+ */
+export default function DiscoverTab() {
+  const { t } = useTranslation()
   const router = useRouter()
   const insets = useSafeAreaInsets()
-  const queryClient = useQueryClient()
-  const { activeGroupId, isReady: groupContextReady } = useGroupContext()
-  const [switcherVisible, setSwitcherVisible] = useState(false)
+
+  const { location, permission, isLocating, requestDeviceLocation, setManualCity } = useDiscoveryLocation()
+  const [filters, setFilters] = useState<DiscoverFilters>(DEFAULT_DISCOVER_FILTERS)
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [cityDraft, setCityDraft] = useState('')
   const [refreshing, setRefreshing] = useState(false)
-  const { scrollY, scrollHandler } = useCollapsingHeader()
 
-  // Same key/shape as the app shell's ContextPill query — served from cache, no new endpoint.
-  const { data: group, isLoading: groupLoading } = useQuery({
-    queryKey: ['groups', activeGroupId],
-    queryFn: async () => {
-      const { data } = await httpClient.get<{ data: { name: string; tier: string } }>(`/v1/groups/${activeGroupId}`)
-      return data.data
-    },
-    enabled: !!activeGroupId,
-  })
-
-  // Shared keys with the Match tab / roster screen — served from cache when warm.
-  const { data: myStatusData } = useQuery({
-    queryKey: ['groups', activeGroupId, 'my-status'],
-    queryFn: async () => {
-      const { data } = await httpClient.get<{ data: { role: string } }>(`/v1/groups/${activeGroupId}/my-status`)
-      return data.data
-    },
-    enabled: !!activeGroupId,
-  })
-  const isOrganizer = myStatusData?.role === 'organizer'
-
-  // Shared with the Match tab — soonest upcoming match feeds the hero.
-  const { data: upcomingData, isLoading: upcomingLoading } = useQuery({
-    queryKey: ['matches', activeGroupId, 'upcoming'],
-    queryFn: async () => {
-      const { data } = await httpClient.get<{ data: { matches: ActiveMatchSummary[] } }>(
-        `/v1/groups/${activeGroupId}/matches?status=upcoming&limit=10`,
-      )
-      return data.data
-    },
-    enabled: !!activeGroupId,
-    retry: false,
-  })
-  const activeMatch = upcomingData?.matches[0] ?? null
-
-  // Markets are live exactly when the odds route can price them: teams generated
-  // (teamOvrAtLock set on the `teams_generated` transition) and kick-off still ahead.
-  const openMarkets = (upcomingData?.matches ?? []).filter(
-    (match) => match.status === 'teams_generated' && new Date(match.scheduledAt).getTime() > Date.now(),
-  )
-
-  const attendancesKey = ['attendances', activeMatch?.matchId]
-  const { data: attendances } = useQuery({
-    queryKey: attendancesKey,
-    queryFn: async () => {
-      const { data } = await httpClient.get<{ data: AttendancesData }>(
-        `/v1/groups/${activeGroupId}/matches/${activeMatch!.matchId}/attendances`,
-      )
-      return data.data
-    },
-    enabled: !!activeGroupId && !!activeMatch,
-  })
-
-  const { data: rosterData, isLoading: rosterLoading } = useQuery({
-    queryKey: ['groups', activeGroupId, 'roster'],
-    queryFn: async () => {
-      const { data } = await httpClient.get<{ data: { items: RosterMember[] } }>(
-        `/v1/groups/${activeGroupId}/roster`,
-      )
-      return data.data
-    },
-    enabled: !!activeGroupId,
-  })
-
-  const { mutate: updateAttendance } = useMutation({
-    mutationFn: (newStatus: 'in' | 'out') =>
-      httpClient.patch(`/v1/groups/${activeGroupId}/matches/${activeMatch!.matchId}/attendance`, {
-        status: newStatus,
-      }),
-    onMutate: async (newStatus) => {
-      await queryClient.cancelQueries({ queryKey: attendancesKey })
-      const previous = queryClient.getQueryData<AttendancesData>(attendancesKey)
-      queryClient.setQueryData<AttendancesData>(attendancesKey, (old) => {
-        if (!old || !old.myPlayerId) return old
-        return {
-          ...old,
-          confirmed: old.confirmed.map((row) =>
-            row.playerId === old.myPlayerId ? { ...row, status: newStatus } : row,
-          ),
-        }
-      })
-      return { previous }
-    },
-    onError: (_error, _newStatus, context) => {
-      if (context?.previous) {
-        queryClient.setQueryData(attendancesKey, context.previous)
-      }
-    },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: attendancesKey })
-    },
-  })
-
-  const { data: historyData, isLoading: historyLoading } = useQuery({
-    queryKey: ['match-history', activeGroupId],
-    queryFn: () =>
-      httpClient
-        .get<{ data: { matches: MatchHistoryItem[] } }>(`/v1/groups/${activeGroupId}/matches?status=completed&limit=10`)
-        .then((r) => r.data.data),
-    enabled: !!activeGroupId,
-  })
-
-  const matches = historyData?.matches ?? []
-  const [lastMatch, ...olderMatches] = matches
-
-  // Story share data — existing endpoints under existing query keys only.
-  const { data: lastMatchDetail } = useQuery({
-    queryKey: ['match', activeGroupId, lastMatch?.matchId],
-    queryFn: () =>
-      httpClient
-        .get<{ data: { participants?: MatchParticipant[] } }>(
-          `/v1/groups/${activeGroupId}/matches/${lastMatch!.matchId}`
-        )
-        .then((r) => r.data.data),
-    enabled: !!activeGroupId && !!lastMatch,
-  })
-
-  const { data: leaderboard } = useQuery({
-    queryKey: ['leaderboard', activeGroupId],
-    queryFn: () =>
-      httpClient
-        .get<{ data: { players: { playerId: string; ovrScore: number | null }[] } }>(
-          `/v1/groups/${activeGroupId}/leaderboard`
-        )
-        .then((r) => r.data.data),
-    enabled: !!activeGroupId && !!lastMatch?.mvpPlayerId,
-  })
-
-  const mvpParticipant = lastMatchDetail?.participants?.find(
-    (p) => lastMatch?.mvpPlayerId && p.playerId === lastMatch.mvpPlayerId
-  )
-  const mvpOvr = leaderboard?.players.find(
-    (p) => lastMatch?.mvpPlayerId && p.playerId === lastMatch.mvpPlayerId
-  )?.ovrScore
-
-  const storyRef = useRef<View>(null)
-  const [isSharingStory, setIsSharingStory] = useState(false)
-
-  const handleShareStory = async () => {
-    if (!storyRef.current || isSharingStory) return
-    setIsSharingStory(true)
-    haptics.impact('Medium')
-    try {
-      // Story export spec: exactly 1080×1920 — view-shot resizes the off-screen frame.
-      const uri = await captureRef(storyRef, {
-        format: 'png',
-        quality: 1,
-        result: 'tmpfile',
-        width: 1080,
-        height: 1920,
-      })
-      await Sharing.shareAsync(uri, {
-        mimeType: 'image/png',
-        dialogTitle: t('share.story.share'),
-      })
-    } catch {
-      // Sharing cancelled by user — not an error
-    } finally {
-      setIsSharingStory(false)
-    }
-  }
-
-  const formatRowDate = (iso: string) =>
-    new Date(iso).toLocaleDateString(i18n.language, { day: 'numeric', month: 'short' }).toUpperCase()
-
-  const formatStoryDate = (iso: string) =>
-    new Date(iso)
-      .toLocaleDateString(i18n.language, { weekday: 'short', day: 'numeric', month: 'short' })
-      .toUpperCase()
-
-  const openMatch = (matchId: string) => router.push(`/(app)/match/${matchId}` as never)
-
-  const openActiveMatch = () => {
-    if (!activeMatch) return
-    const dest = isOrganizer
-      ? `/(app)/match/organizer?matchId=${activeMatch.matchId}`
-      : `/(app)/match/player?matchId=${activeMatch.matchId}`
-    router.push(dest as never)
-  }
-
-  const confirmedPlayers = attendances?.confirmed.filter((row) => row.status === 'in') ?? []
-  const myRow = attendances?.myPlayerId
-    ? attendances.confirmed.find((row) => row.playerId === attendances.myPlayerId)
-    : undefined
-  const myWaitlistRow = attendances?.myPlayerId
-    ? attendances.waitlist.find((row) => row.playerId === attendances.myPlayerId)
-    : undefined
-  const squadTotal = rosterData?.items.length ?? attendances?.confirmed.length ?? 0
-  const attendanceOpen = activeMatch?.status === 'attendance_open'
-
-  // Initial-load scaffold: the body (hero/squad/history) shows skeletons until its
-  // primary queries resolve, so nothing pops in and shifts the page.
-  const isBodyLoading = !!activeGroupId && (groupLoading || upcomingLoading || rosterLoading || historyLoading)
+  const { data: matches, isLoading, refetch } = useDiscoverMatches(location, filters)
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true)
     try {
-      await Promise.all([
-        queryClient.refetchQueries({ queryKey: ['groups', activeGroupId] }),
-        queryClient.refetchQueries({ queryKey: ['matches', activeGroupId] }),
-        queryClient.refetchQueries({ queryKey: ['match-history', activeGroupId] }),
-        queryClient.refetchQueries({ queryKey: ['leaderboard', activeGroupId] }),
-        ...(activeMatch ? [queryClient.refetchQueries({ queryKey: ['attendances', activeMatch.matchId] })] : []),
-      ])
+      await refetch()
     } finally {
       setRefreshing(false)
     }
-  }, [queryClient, activeGroupId, activeMatch])
+  }, [refetch])
+
+  const patch = (next: Partial<DiscoverFilters>) => setFilters((f) => ({ ...f, ...next }))
+  const activeFilterCount =
+    (filters.format ? 1 : 0) +
+    (filters.skillLevel ? 1 : 0) +
+    (filters.when !== 'any' ? 1 : 0) +
+    (filters.radiusKm !== DEFAULT_DISCOVER_FILTERS.radiusKm ? 1 : 0)
+
+  const handleCitySubmit = async () => {
+    if (!cityDraft.trim()) return
+    await setManualCity(cityDraft)
+    setCityDraft('')
+  }
 
   return (
     <View style={styles.container}>
-      {/* The screen's ONE texture element: crest-initials outline watermark (R9 mapping). */}
-      {group && (
-        <TextureType lines={[{ text: getInitials(group.name) }]} fontSize={200} style={styles.crestTexture} />
-      )}
+      <TextureType lines={[{ text: 'JOUER' }]} fontSize={190} style={styles.texture} />
 
-      <Animated.ScrollView
+      <ScrollView
         style={styles.scroll}
-        onScroll={scrollHandler}
-        scrollEventThrottle={16}
         contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.primary} colors={[Colors.primary]} />
         }
+        keyboardShouldPersistTaps="handled"
       >
-        {activeGroupId && group && (
-          <StaggerItem index={0}>
+        <StaggerItem index={0}>
+          <Text style={styles.title}>
+            {t('discover.title')}<Text style={styles.titleAccent}>.</Text>
+          </Text>
+          <Text style={styles.subtitle}>{t('discover.subtitle')}</Text>
+        </StaggerItem>
+
+        {/* Location bar — the one thing discovery cannot work without. */}
+        <StaggerItem index={1} style={styles.locationSection}>
+          {location ? (
             <PressableScale
-              style={styles.header}
-              onPress={() => setSwitcherVisible(true)}
+              style={styles.locationBar}
+              onPress={() => void requestDeviceLocation()}
               accessibilityRole="button"
-              accessibilityLabel={t('accueil.header.switchGroup')}
+              accessibilityLabel={t('discover.location.change')}
             >
-              <DuotoneAvatar displayName={group.name} size={42} />
-              <View style={styles.headerText}>
-                <CollapsingHeaderTitle
-                  title={group.name}
-                  scrollY={scrollY}
-                  subtitle={<View style={styles.tierPill}>
-                  <Text style={styles.tierPillText}>{t(`groups.home.tier.${group.tier}`)}</Text>
-                  </View>}
-                />
-              </View>
-              <Ionicons name="chevron-down" size={18} color={Colors.inkSecondary} />
+              <Ionicons name="location" size={16} color={Colors.primary} />
+              <Text style={styles.locationText} numberOfLines={1}>
+                {location.city ?? t('discover.location.nearby')}
+              </Text>
+              <Text style={styles.locationAction}>{t('discover.location.change')}</Text>
             </PressableScale>
-          </StaggerItem>
-        )}
-
-        {groupContextReady && !activeGroupId && (
-          <View style={styles.noGroup}>
-            <Text style={styles.noGroupTitle}>{t('auth.shell.noGroupTitle')}<Text style={styles.titleAccent}>.</Text></Text>
-            <Text style={styles.noGroupText}>{t('auth.shell.noGroup')}</Text>
-            <View style={styles.noGroupActions}>
-              {/* The tab dock owns this screen's one glow. */}
-              <PrimaryButton label={t('auth.shell.createGroup')} glow={false} onPress={() => router.push('/(app)/groups/new')} />
-              <SecondaryButton label={t('groups.search.title')} onPress={() => router.push('/(app)/groups/search')} />
-              <SecondaryButton label={t('groups.switcher.title')} onPress={() => setSwitcherVisible(true)} />
-            </View>
-          </View>
-        )}
-
-        {activeGroupId && isBodyLoading && (
-          <>
-            <View style={styles.heroSection}>
-              <SkeletonHero />
-            </View>
-            <View style={styles.pronosSection}>
-              <Text style={styles.sectionLabel}>{t('pronos.tab.title')}</Text>
-              <SkeletonRow card />
-            </View>
-            <View style={styles.squadSection}>
-              <Text style={styles.sectionLabel}>{t('accueil.squad.title')}</Text>
-              <SkeletonStrip />
-            </View>
-            <View style={styles.historySection}>
-              <Text style={styles.sectionLabel}>{t('accueil.history.title')}</Text>
-              <View style={styles.rows}>
-                <SkeletonRow card />
-                <SkeletonRow card />
+          ) : (
+            <View style={styles.locationPrompt}>
+              <Text style={styles.locationPromptText}>{t('discover.location.prompt')}</Text>
+              <PrimaryButton
+                label={t('discover.location.useDevice')}
+                onPress={() => void requestDeviceLocation()}
+                loading={isLocating}
+                glow={false}
+              />
+              {permission === 'denied' && (
+                <Text style={styles.locationDenied}>{t('discover.location.denied')}</Text>
+              )}
+              <View style={styles.cityRow}>
+                <View style={styles.cityInput}>
+                  <Input
+                    value={cityDraft}
+                    onChangeText={setCityDraft}
+                    placeholder={t('discover.location.cityPlaceholder')}
+                    returnKeyType="search"
+                    onSubmitEditing={() => void handleCitySubmit()}
+                    autoCapitalize="words"
+                  />
+                </View>
+                <SecondaryButton label={t('common.ok')} onPress={() => void handleCitySubmit()} />
               </View>
+            </View>
+          )}
+        </StaggerItem>
+
+        {location && (
+          <>
+            <StaggerItem index={2} style={styles.filterBar}>
+              <Chip
+                label={
+                  activeFilterCount > 0
+                    ? t('discover.filters.activeCount', { count: activeFilterCount })
+                    : t('discover.filters.title')
+                }
+                variant="outlined"
+                active={activeFilterCount > 0}
+                onPress={() => setFiltersOpen((open) => !open)}
+              />
+              <Chip
+                label={t('discover.when.today')}
+                active={filters.when === 'today'}
+                onPress={() => patch({ when: filters.when === 'today' ? 'any' : 'today' })}
+              />
+              <Chip
+                label={t('discover.when.week')}
+                active={filters.when === 'week'}
+                onPress={() => patch({ when: filters.when === 'week' ? 'any' : 'week' })}
+              />
+            </StaggerItem>
+
+            {filtersOpen && (
+              <View style={styles.filterPanel}>
+                <Text style={styles.filterLabel}>{t('discover.filters.radius')}</Text>
+                <View style={styles.chipRow}>
+                  {RADIUS_OPTIONS.map((km) => (
+                    <Chip
+                      key={km}
+                      label={t('discover.filters.radiusValue', { km })}
+                      active={filters.radiusKm === km}
+                      onPress={() => patch({ radiusKm: km })}
+                    />
+                  ))}
+                </View>
+
+                <Text style={styles.filterLabel}>{t('discover.filters.format')}</Text>
+                <View style={styles.chipRow}>
+                  {FORMAT_OPTIONS.map((format) => (
+                    <Chip
+                      key={format}
+                      label={format}
+                      active={filters.format === format}
+                      onPress={() => patch({ format: filters.format === format ? null : format })}
+                    />
+                  ))}
+                </View>
+
+                <Text style={styles.filterLabel}>{t('discover.filters.level')}</Text>
+                <View style={styles.chipRow}>
+                  {LEVEL_OPTIONS.map((level) => (
+                    <Chip
+                      key={level}
+                      label={t(`player.level.${level}`)}
+                      active={filters.skillLevel === level}
+                      onPress={() => patch({ skillLevel: filters.skillLevel === level ? null : level })}
+                    />
+                  ))}
+                </View>
+              </View>
+            )}
+
+            <View style={styles.results}>
+              {isLoading ? (
+                <View style={styles.resultsList}>
+                  <SkeletonRow card />
+                  <SkeletonRow card />
+                  <SkeletonRow card />
+                </View>
+              ) : matches && matches.length > 0 ? (
+                <View style={styles.resultsList}>
+                  {matches.map((match, index) => (
+                    <StaggerItem key={match.matchId} index={Math.min(index, 6)}>
+                      <MatchCard
+                        scheduledAt={match.scheduledAt}
+                        venueName={null}
+                        city={match.city}
+                        location={null}
+                        distanceKm={match.distanceKm}
+                        format={match.format}
+                        skillLevel={match.skillLevel}
+                        pricePerPlayer={match.pricePerPlayer}
+                        currency={match.currency}
+                        confirmedCount={match.confirmedCount}
+                        capacity={match.capacity}
+                        spotsRemaining={match.spotsRemaining}
+                        hostDisplayName={match.hostDisplayName}
+                        joined={match.viewerJoined}
+                        onPress={() => router.push(`/(app)/match/${match.matchId}` as never)}
+                      />
+                    </StaggerItem>
+                  ))}
+                </View>
+              ) : (
+                // The empty state is the honest one for a young marketplace: it
+                // does not pretend, it offers the other side of the loop.
+                <View style={styles.empty}>
+                  <Text style={styles.emptyTitle}>{t('discover.empty.title')}</Text>
+                  <Text style={styles.emptyText}>{t('discover.empty.body')}</Text>
+                  <PrimaryButton
+                    label={t('discover.empty.cta')}
+                    onPress={() => router.push('/(app)/match/create' as never)}
+                    glow={false}
+                  />
+                </View>
+              )}
             </View>
           </>
         )}
 
-        {activeGroupId && !isBodyLoading && activeMatch && (
-          <StaggerItem index={1} style={styles.heroSection}>
-            <NextMatchHero
-              scheduledAt={activeMatch.scheduledAt}
-              location={activeMatch.location}
-              confirmed={confirmedPlayers}
-              squadTotal={squadTotal}
-              myStatus={myRow?.status ?? 'unknown'}
-              isWaitlisted={!!myWaitlistRow}
-              waitlistPosition={myWaitlistRow?.waitlistPosition ?? undefined}
-              onSetAttendance={attendanceOpen ? (status) => updateAttendance(status) : undefined}
-              onPress={openActiveMatch}
-            />
-          </StaggerItem>
-        )}
-
-        {activeGroupId && !isBodyLoading && (
-          <StaggerItem index={2} style={styles.pronosSection}>
-            <Text style={styles.sectionLabel}>{t('pronos.tab.title')}</Text>
-            <PronosShortcutCard
-              openCount={openMarkets.length}
-              closesAt={openMarkets[0]?.scheduledAt ?? null}
-              onPress={() => router.push('/(app)/pronos' as never)}
-            />
-          </StaggerItem>
-        )}
-
-        {activeGroupId && !isBodyLoading && rosterData && rosterData.items.length > 0 && (
-          <StaggerItem index={3} style={styles.squadSection}>
-            <Text style={styles.sectionLabel}>{t('accueil.squad.title')}</Text>
-            <View style={styles.squadCard}>
-              <View style={styles.squadStack}>
-                {rosterData.items.slice(0, 5).map((member, index) => (
-                  <View key={member.userId} style={index > 0 && styles.squadOverlap}>
-                    <DuotoneAvatar displayName={member.displayName ?? '?'} size={32} />
-                  </View>
-                ))}
-              </View>
-              <Text style={styles.squadCount}>
-                {t('accueil.squad.members', { count: rosterData.items.length })}
-              </Text>
-              {isOrganizer && (
-                <Chip
-                  label={t('accueil.squad.invite')}
-                  variant="outlined"
-                  onPress={() => router.push(`/(app)/groups/${activeGroupId}/settings` as never)}
-                />
-              )}
-            </View>
-          </StaggerItem>
-        )}
-
-        {activeGroupId && !isBodyLoading && (
-          <StaggerItem index={4} style={styles.historySection}>
-            <Text style={styles.sectionLabel}>{t('accueil.history.title')}</Text>
-            {!lastMatch ? (
-              <View style={styles.historyEmptyBlock}>
-                <Text style={styles.historyEmpty}>{t('accueil.history.empty')}</Text>
-                {!activeMatch && isOrganizer && (
-                  <SecondaryButton
-                    label={t('accueil.history.cta')}
-                    onPress={() => router.push('/(app)/match/create' as never)}
-                  />
-                )}
-              </View>
-            ) : (
-              <>
-                <MvpCeremonyCard
-                  scoreA={lastMatch.scoreA}
-                  scoreB={lastMatch.scoreB}
-                  mvpDisplayName={lastMatch.mvpDisplayName}
-                  scheduledAt={lastMatch.scheduledAt}
-                  onPress={() => openMatch(lastMatch.matchId)}
-                  watermark={false}
-                  onShare={handleShareStory}
-                />
-                <View style={styles.rows}>
-                  {olderMatches.map((match) => (
-                    <PressableScale key={match.matchId} style={styles.matchRow} onPress={() => openMatch(match.matchId)} accessibilityRole="button">
-                      <Text style={styles.rowDate}>{formatRowDate(match.scheduledAt)}</Text>
-                      <View style={styles.rowMvp}>
-                        {match.mvpDisplayName && (
-                          <>
-                            <DuotoneAvatar displayName={match.mvpDisplayName} size={24} />
-                            <Text style={styles.rowMvpName} numberOfLines={1}>
-                              {`${STAR_SYMBOL} ${match.mvpDisplayName}`}
-                            </Text>
-                          </>
-                        )}
-                      </View>
-                      <Text style={styles.rowScore}>
-                        {match.scoreA !== null && match.scoreB !== null ? `${match.scoreA}–${match.scoreB}` : '—'}
-                      </Text>
-                      <View style={styles.rowDot}>
-                        {match.userResult && <FormDots results={[RESULT_TO_DOT[match.userResult]]} size={24} />}
-                      </View>
-                    </PressableScale>
-                  ))}
-                </View>
-              </>
-            )}
-          </StaggerItem>
-        )}
-      </Animated.ScrollView>
-
-      {activeGroupId && group && (
-        <CollapsingHeader
-          title={group.name}
-          scrollY={scrollY}
-          compactLeading={<DuotoneAvatar displayName={group.name} size={30} />}
-          compactTrailing={<Ionicons name="chevron-down" size={18} color={Colors.inkSecondary} />}
-          onPress={() => setSwitcherVisible(true)}
-          accessibilityLabel={t('accueil.header.switchGroup')}
-        />
-      )}
-
-      {/* Off-screen 9:16 story frame — the share capture target */}
-      {lastMatch && group && (
-        <View ref={storyRef} collapsable={false} style={styles.storyOffscreen} pointerEvents="none">
-          <StoryShareGraphic
-            groupName={group.name}
-            dateLabel={formatStoryDate(lastMatch.scheduledAt)}
-            scoreA={lastMatch.scoreA}
-            scoreB={lastMatch.scoreB}
-            mvpDisplayName={lastMatch.mvpDisplayName}
-            goals={mvpParticipant?.goalsScored}
-            assists={mvpParticipant?.assists}
-            ovrScore={mvpOvr}
+        <View style={styles.createBlock}>
+          <SecondaryButton
+            label={t('discover.createMatch')}
+            onPress={() => router.push('/(app)/match/create' as never)}
           />
         </View>
-      )}
-
-      <GroupSwitcher visible={switcherVisible} onClose={() => setSwitcherVisible(false)} />
+      </ScrollView>
     </View>
   )
 }
@@ -526,16 +263,9 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.bg,
     overflow: 'hidden',
   },
-  crestTexture: {
-    top: 30,
-    right: -70,
-  },
-  storyOffscreen: {
-    position: 'absolute',
-    left: -STORY_EXPORT_WIDTH * 30,
-    top: 0,
-    width: STORY_EXPORT_WIDTH,
-    height: STORY_EXPORT_HEIGHT,
+  texture: {
+    top: 20,
+    right: -60,
   },
   scroll: {
     flex: 1,
@@ -545,151 +275,123 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingBottom: DOCK_CLEARANCE,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 8,
-  },
-  headerText: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  tierPill: {
-    backgroundColor: Colors.surfaceRaised,
-    borderRadius: Radius.full,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  tierPillText: {
-    fontFamily: Fonts.interSemiBold,
-    fontSize: 10,
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
-    color: Colors.inkSecondary,
-  },
-  noGroup: {
-    flex: 1,
-    justifyContent: 'center',
-    padding: 24,
-  },
-  noGroupTitle: {
+  title: {
     color: Colors.ink,
     fontFamily: Fonts.bebas,
     fontSize: 40,
     letterSpacing: 1.6,
-    textAlign: 'center',
+    textTransform: 'uppercase',
   },
   titleAccent: {
     color: Colors.primary,
   },
-  noGroupText: {
+  subtitle: {
     color: Colors.inkSecondary,
-    fontSize: 15,
     fontFamily: Fonts.inter,
-    textAlign: 'center',
-    marginTop: 10,
-    marginBottom: 32,
+    fontSize: 14,
+    marginTop: 4,
   },
-  noGroupActions: {
-    gap: 12,
+  locationSection: {
+    marginTop: 22,
   },
-  heroSection: {
-    marginTop: 20,
-  },
-  pronosSection: {
-    marginTop: 26,
-  },
-  squadSection: {
-    marginTop: 26,
-  },
-  squadCard: {
+  locationBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 8,
     backgroundColor: Colors.surface,
-    borderRadius: Radius.md,
+    borderRadius: Radius.full,
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
-  squadStack: {
+  locationText: {
+    flex: 1,
+    color: Colors.ink,
+    fontFamily: Fonts.interSemiBold,
+    fontSize: 13.5,
+  },
+  locationAction: {
+    color: Colors.inkSecondary,
+    fontFamily: Fonts.interSemiBold,
+    fontSize: 10,
+    letterSpacing: 1.1,
+    textTransform: 'uppercase',
+  },
+  locationPrompt: {
+    gap: 12,
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    padding: 16,
+  },
+  locationPromptText: {
+    color: Colors.inkSecondary,
+    fontFamily: Fonts.inter,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  locationDenied: {
+    color: Colors.inkDisabled,
+    fontFamily: Fonts.inter,
+    fontSize: 12.5,
+    lineHeight: 18,
+  },
+  cityRow: {
     flexDirection: 'row',
     alignItems: 'center',
-  },
-  squadOverlap: {
-    marginLeft: -8,
-  },
-  squadCount: {
-    flex: 1,
-    color: Colors.inkSecondary,
-    fontSize: 12.5,
-    fontFamily: Fonts.interSemiBold,
-  },
-  historySection: {
-    marginTop: 28,
-  },
-  historyEmptyBlock: {
-    gap: 14,
-    paddingVertical: 6,
-  },
-  sectionLabel: {
-    color: Colors.inkSecondary,
-    fontSize: 11,
-    fontFamily: Fonts.interSemiBold,
-    letterSpacing: 1.54,
-    textTransform: 'uppercase',
-    marginBottom: 12,
-  },
-  historyEmpty: {
-    color: Colors.inkSecondary,
-    fontSize: 14,
-    fontFamily: Fonts.inter,
-    textAlign: 'center',
-    paddingVertical: 16,
-  },
-  rows: {
-    marginTop: 12,
     gap: 8,
   },
-  matchRow: {
+  cityInput: {
+    flex: 1,
+  },
+  filterBar: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 18,
+  },
+  filterPanel: {
+    marginTop: 14,
     backgroundColor: Colors.surface,
     borderRadius: Radius.md,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    padding: 16,
+    gap: 8,
   },
-  rowDate: {
-    width: 64,
+  filterLabel: {
     color: Colors.inkSecondary,
+    fontFamily: Fonts.interSemiBold,
     fontSize: 10,
-    fontFamily: Fonts.interSemiBold,
     letterSpacing: 1.4,
+    textTransform: 'uppercase',
+    marginTop: 6,
   },
-  rowMvp: {
-    flex: 1,
+  chipRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+    flexWrap: 'wrap',
+    gap: 8,
   },
-  rowMvpName: {
-    flexShrink: 1,
-    color: Colors.inkSecondary,
-    fontSize: 11,
-    fontFamily: Fonts.interSemiBold,
+  results: {
+    marginTop: 22,
   },
-  rowScore: {
-    fontFamily: Fonts.bebas,
-    fontSize: 24,
-    letterSpacing: 1.44, // 0.06em @ 24
+  resultsList: {
+    gap: 10,
+  },
+  empty: {
+    gap: 14,
+    paddingVertical: 24,
+  },
+  emptyTitle: {
     color: Colors.ink,
-    fontVariant: ['tabular-nums'],
+    fontFamily: Fonts.bebas,
+    fontSize: 26,
+    letterSpacing: 1.3,
+    textTransform: 'uppercase',
   },
-  rowDot: {
-    width: 24,
-    alignItems: 'center',
+  emptyText: {
+    color: Colors.inkSecondary,
+    fontFamily: Fonts.inter,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  createBlock: {
+    marginTop: 28,
   },
 })

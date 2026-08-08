@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { asyncHandler } from '../../middleware/async-handler'
-import { requireGroupMember } from '../../middleware/require-group-member'
+import { loadMatch, requireMatchCapability, requirePlayer } from '../../middleware/match-context'
 import { db } from '../../db'
 import { matches, players, pronoBets } from '../../db/schema'
 import { eq, and, isNull, inArray, asc } from 'drizzle-orm'
@@ -27,17 +27,12 @@ const BANKROLL_ERROR_STATUS: Record<string, number> = {
 
 // ─── Story 11.3 — betting ────────────────────────────────────────────────────
 
-/** Resolve the caller's player row for this group. */
-async function resolveCallerPlayer(userInternalId: string, groupId: string) {
-  const [callerPlayer] = await db
-    .select({ id: players.id })
-    .from(players)
-    .where(and(eq(players.userId, userInternalId), eq(players.groupId, groupId), isNull(players.deletedAt)))
-  return callerPlayer ?? null
-}
-
-/** Load the match scoped to its group, with everything the betting routes need. */
-async function loadBettableMatch(matchId: string, groupId: string) {
+/**
+ * Betting is scoped to the match, not to a crew — the bankroll is global now,
+ * and anyone playing the match can price it. `loadMatch` upstream has already
+ * established that the caller may see this match at all.
+ */
+async function loadBettableMatch(matchId: string) {
   const [match] = await db
     .select({
       id: matches.id,
@@ -46,18 +41,18 @@ async function loadBettableMatch(matchId: string, groupId: string) {
       teamBOvrAtLock: matches.teamBOvrAtLock,
     })
     .from(matches)
-    .where(and(eq(matches.id, matchId), eq(matches.groupId, groupId)))
+    .where(eq(matches.id, matchId))
   return match ?? null
 }
 
-// GET /v1/groups/:groupId/matches/:matchId/pronos/odds — the live board
+// GET /v1/matches/:matchId/pronos/odds — the live board
 router.get(
   '/odds',
-  requireGroupMember,
+  loadMatch,
   asyncHandler(async (req, res) => {
-    const { groupId, matchId } = req.params as { groupId: string; matchId: string }
+    const matchId = req.match.id
 
-    const match = await loadBettableMatch(matchId, groupId)
+    const match = await loadBettableMatch(matchId)
     if (!match) {
       return res.status(404).json({ error: { code: ErrorCode.MATCH_NOT_FOUND, statusCode: 404 } })
     }
@@ -90,20 +85,19 @@ router.get(
   }),
 )
 
-// POST /v1/groups/:groupId/matches/:matchId/pronos/bets — stake points on a market
+// POST /v1/matches/:matchId/pronos/bets — stake points on a market
 router.post(
   '/bets',
-  requireGroupMember,
+  loadMatch,
+  requireMatchCapability('canSubmitProno'),
+  requirePlayer,
   asyncHandler(async (req, res) => {
-    const { groupId, matchId } = req.params as { groupId: string; matchId: string }
+    const matchId = req.match.id
     const data = PlaceBetSchema.parse(req.body)
 
-    const callerPlayer = await resolveCallerPlayer(req.user.internalId!, groupId)
-    if (!callerPlayer) {
-      return res.status(403).json({ error: { code: ErrorCode.NOT_A_MEMBER, statusCode: 403 } })
-    }
+    const callerPlayerId = req.user.playerId!
 
-    const match = await loadBettableMatch(matchId, groupId)
+    const match = await loadBettableMatch(matchId)
     if (!match) {
       return res.status(404).json({ error: { code: ErrorCode.MATCH_NOT_FOUND, statusCode: 404 } })
     }
@@ -141,7 +135,7 @@ router.post(
 
     try {
       const { bet, balance } = await bankrollService.placeBet({
-        playerId: callerPlayer.id,
+        playerId: callerPlayerId,
         matchId,
         market: data.market,
         selection: data.selection,
@@ -166,25 +160,22 @@ router.post(
   }),
 )
 
-// GET /v1/groups/:groupId/matches/:matchId/pronos/bets/my — caller's bets + balance
+// GET /v1/matches/:matchId/pronos/bets/my — caller's bets + balance
 router.get(
   '/bets/my',
-  requireGroupMember,
+  loadMatch,
+  requirePlayer,
   asyncHandler(async (req, res) => {
-    const { groupId, matchId } = req.params as { groupId: string; matchId: string }
-
-    const callerPlayer = await resolveCallerPlayer(req.user.internalId!, groupId)
-    if (!callerPlayer) {
-      return res.status(403).json({ error: { code: ErrorCode.NOT_A_MEMBER, statusCode: 403 } })
-    }
+    const matchId = req.match.id
+    const callerPlayerId = req.user.playerId!
 
     const rows = await db
       .select()
       .from(pronoBets)
-      .where(and(eq(pronoBets.matchId, matchId), eq(pronoBets.playerId, callerPlayer.id)))
+      .where(and(eq(pronoBets.matchId, matchId), eq(pronoBets.playerId, callerPlayerId)))
       .orderBy(asc(pronoBets.placedAt))
 
-    const balance = await bankrollService.getBalance(callerPlayer.id)
+    const balance = await bankrollService.getBalance(callerPlayerId)
     const netPayout = rows.reduce((sum, b) => sum + ((b.payout ?? 0) - b.stake), 0)
 
     return res.json({
@@ -209,7 +200,7 @@ router.get(
 
 // ─── Story 11.6 — settlement reveal ──────────────────────────────────────────
 
-// GET /v1/groups/:groupId/matches/:matchId/pronos/bets/reveal
+// GET /v1/matches/:matchId/pronos/bets/reveal
 //
 // Unlike the legacy flat `GET /reveal` (which 403s until the match completes), this route
 // always answers 200 and states the case in `settled`. The betting screen fires it in
@@ -218,14 +209,11 @@ router.get(
 // client does not yet know would force a render-blocking waterfall.
 router.get(
   '/bets/reveal',
-  requireGroupMember,
+  loadMatch,
+  requirePlayer,
   asyncHandler(async (req, res) => {
-    const { groupId, matchId } = req.params as { groupId: string; matchId: string }
-
-    const callerPlayer = await resolveCallerPlayer(req.user.internalId!, groupId)
-    if (!callerPlayer) {
-      return res.status(403).json({ error: { code: ErrorCode.NOT_A_MEMBER, statusCode: 403 } })
-    }
+    const matchId = req.match.id
+    const callerPlayerId = req.user.playerId!
 
     const [match] = await db
       .select({
@@ -236,7 +224,7 @@ router.get(
         mvpPlayerId: matches.mvpPlayerId,
       })
       .from(matches)
-      .where(and(eq(matches.id, matchId), eq(matches.groupId, groupId)))
+      .where(eq(matches.id, matchId))
 
     if (!match) {
       return res.status(404).json({ error: { code: ErrorCode.MATCH_NOT_FOUND, statusCode: 404 } })
@@ -259,7 +247,7 @@ router.get(
           },
           myBets: [],
           myTotals: EMPTY_TOTALS,
-          group: [],
+          table: [],
         },
       })
     }
@@ -306,7 +294,7 @@ router.get(
       market === 'mvp' ? (nameMap.get(selection) ?? selection) : selection
 
     const myBets = rows
-      .filter((r) => r.playerId === callerPlayer.id)
+      .filter((r) => r.playerId === callerPlayerId)
       .map((r) => ({
         id: r.id,
         market: r.market,
@@ -334,11 +322,11 @@ router.get(
       totals.set(r.playerId, entry)
     }
 
-    const group = [...totals.values()]
-      .map((e) => ({ ...e, net: e.returned - e.staked, isMe: e.playerId === callerPlayer.id }))
+    const table = [...totals.values()]
+      .map((e) => ({ ...e, net: e.returned - e.staked, isMe: e.playerId === callerPlayerId }))
       .sort((a, b) => b.net - a.net || a.displayName.localeCompare(b.displayName))
 
-    const mine = totals.get(callerPlayer.id)
+    const mine = totals.get(callerPlayerId)
 
     return res.json({
       data: {
@@ -356,7 +344,7 @@ router.get(
         myTotals: mine
           ? { staked: mine.staked, returned: mine.returned, net: mine.returned - mine.staked }
           : EMPTY_TOTALS,
-        group,
+        table,
       },
     })
   }),

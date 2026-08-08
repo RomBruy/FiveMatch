@@ -1,6 +1,8 @@
 # FiveMatch — Security Checklist
 
-_Completed as part of Story 7.3 (NFR-9 pre-launch gate)._
+_Legacy checklist expanded by the Phase 8 launch gate. Checked boxes require fresh owner-reviewed evidence; this document does not assert production readiness._
+
+> Do not provision or deploy production from this checklist. Complete the ownership, region/processor, database-access, backup/restore, deployment, monitoring and staging controls in the Phase 8 documents first.
 
 ---
 
@@ -53,7 +55,26 @@ _Completed as part of Story 7.3 (NFR-9 pre-launch gate)._
 - [ ] `ADMIN_USER_IDS` never appears in any API response body, error body, or Pino log line
 - [ ] `ovrScore` returns `null` for players with `matchCount < 4` — enforced at `OvrService` layer
 
+## Phase 8 Infrastructure Baseline
+
+- [ ] Critical infrastructure accounts, billing and recovery are app-owner controlled with MFA
+- [ ] Local, test, staging and production credentials/databases/storage/API URLs are separate
+- [ ] Production PostgreSQL is private and reachable only through an approved tunnel/private network/VPN
+- [ ] Application, migration, read-only and emergency database roles are separate and tested
+- [ ] OS security updates, key-only SSH where possible, firewall and minimum exposed ports are verified
+- [ ] TLS, certificate renewal/expiry alerts and secure headers are verified
+- [ ] Development secrets are rotated before production and stored outside Git with restricted permissions
+- [ ] Unused accounts are removed and access grant/revocation is reviewed
+- [ ] Docker/container privileges, dependencies and images are scanned
+- [ ] Encrypted off-server backups, failure alerts and a full staging restore are evidenced
+- [ ] Incident response, break-glass access and post-use rotation are rehearsed
+- [ ] Processor regions, DPAs, subprocessors, retention, deletion and international transfers are approved
+- [ ] Optional photo processing remains disabled until its dedicated approval gate passes
+- [ ] Monitoring alerts are delivered to owner-controlled destinations
+- [ ] Staging outage/failed-job/failed-deployment simulations pass
+- [ ] `docs/runbooks/deployment.md` records an explicit final owner go/no-go
+
 ---
 
-_Last reviewed: 2026-06-21_
-_Reviewer: Roro_
+_Last reviewed: 2026-08-06_
+_Phase 8 reviewer: TBD_

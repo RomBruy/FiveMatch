@@ -39,7 +39,7 @@ export default function CardPhotoSettingsScreen() {
     queryFn: () =>
       httpClient
         .get<{ data: CardPhotoStatus }>(
-          `/v1/groups/${groupId}/players/${playerId}/card-photo/status`
+          `/v1/players/${playerId}/card-photo/status`
         )
         .then((r) => r.data.data),
     enabled: !!groupId && !!playerId,
@@ -51,7 +51,7 @@ export default function CardPhotoSettingsScreen() {
 
   const consentMutation = useMutation({
     mutationFn: () =>
-      httpClient.post(`/v1/groups/${groupId}/players/${playerId}/card-photo/consent`),
+      httpClient.post(`/v1/players/${playerId}/card-photo/consent`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['card-photo-status', groupId, playerId] })
     },
@@ -61,7 +61,7 @@ export default function CardPhotoSettingsScreen() {
     mutationFn: () => {
       idempotencyKeyRef.current = randomUUID()
       return httpClient.post(
-        `/v1/groups/${groupId}/players/${playerId}/card-photo/generate`,
+        `/v1/players/${playerId}/card-photo/generate`,
         {},
         { headers: { 'Idempotency-Key': idempotencyKeyRef.current } }
       )

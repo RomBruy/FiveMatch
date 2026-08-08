@@ -19,8 +19,10 @@ export default defineConfig({
     ],
   },
   test: {
-    include: ['src/tests/integration/**/*.integration.test.ts'],
+    include: ['src/tests/integration/**/*.test.ts'],
+    setupFiles: ['src/tests/integration/setup-test-database.ts'],
     environment: 'node',
     testTimeout: 30000,
+    fileParallelism: false,
   },
 })

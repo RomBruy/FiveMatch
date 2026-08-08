@@ -11,6 +11,7 @@ import { DuotoneAvatar } from '../ui/DuotoneAvatar'
 import { PrimaryButton } from '../ui/PrimaryButton'
 import { RatingSlider } from '../ui/RatingSlider'
 import { InfoStrip } from '../shared/InfoStrip'
+import { mapPostMatchRatingError } from '../../lib/post-match-opponents.mjs'
 
 // Post-match ratings collect 6 attributes — no mentality (Story 4.3 API contract).
 const ATTRIBUTES = ['pace', 'technique', 'passing', 'defending', 'physicality', 'effort'] as const
@@ -30,18 +31,17 @@ const DEFAULT_VALUES: RatingValues = {
 
 const WINDOW_MS = 48 * 60 * 60 * 1000
 
-interface Teammate {
+interface Opponent {
   playerId: string
   displayName: string | null
 }
 
 interface PostMatchRatingsProps {
   matchId: string
-  groupId: string
   /** Match completion timestamp — the 48h window anchors here. */
   completedAt: string
-  /** My teammates (my team minus me) — the API accepts one rating per teammate. */
-  teammates: Teammate[]
+  /** Final participants on the opposing team — the API rejects teammates. */
+  opponents: Opponent[]
 }
 
 /**
@@ -49,7 +49,7 @@ interface PostMatchRatingsProps {
  * never shows per-rater data, and there is deliberately no endpoint to read
  * ratings back). Same slider system as the initial assessment.
  */
-export function PostMatchRatings({ matchId, groupId, completedAt, teammates }: PostMatchRatingsProps) {
+export function PostMatchRatings({ matchId, completedAt, opponents }: PostMatchRatingsProps) {
   const { t } = useTranslation()
 
   const deadlineMs = new Date(completedAt).getTime() + WINDOW_MS
@@ -71,7 +71,7 @@ export function PostMatchRatings({ matchId, groupId, completedAt, teammates }: P
     return () => clearInterval(interval)
   }, [deadlineMs, isWindowOpen])
 
-  const pending = teammates.filter((p) => !ratedIds.has(p.playerId))
+  const pending = opponents.filter((p) => !ratedIds.has(p.playerId))
   const currentPlayer = pending[0] ?? null
 
   const markRated = (playerId: string) => {
@@ -82,7 +82,7 @@ export function PostMatchRatings({ matchId, groupId, completedAt, teammates }: P
 
   const { mutate: submitRating, isPending: isSubmitting } = useMutation({
     mutationFn: async ({ ratedPlayerId, ratingValues }: { ratedPlayerId: string; ratingValues: RatingValues }) => {
-      await httpClient.post(`/v1/groups/${groupId}/matches/${matchId}/ratings`, {
+      await httpClient.post(`/v1/matches/${matchId}/ratings`, {
         ratedPlayerId,
         ...ratingValues,
       })
@@ -92,10 +92,11 @@ export function PostMatchRatings({ matchId, groupId, completedAt, teammates }: P
     },
     onError: (err: unknown, { ratedPlayerId }) => {
       const code = (err as { response?: { data?: { error?: { code?: string } } } }).response?.data?.error?.code
-      if (code === 'ALREADY_RATED') {
+      const outcome = mapPostMatchRatingError(code)
+      if (outcome === 'rated') {
         // Duplicate from an earlier session — treat as done and advance.
         markRated(ratedPlayerId)
-      } else if (code === 'RATING_WINDOW_CLOSED') {
+      } else if (outcome === 'window_closed') {
         setIsWindowOpen(false)
       } else {
         setSubmitError(t('common.genericError'))
@@ -154,9 +155,9 @@ export function PostMatchRatings({ matchId, groupId, completedAt, teammates }: P
         </View>
       )}
 
-      {teammates.length > 0 && (
+      {opponents.length > 0 && (
         <View style={styles.rowsCard}>
-          {teammates.map((p) => {
+          {opponents.map((p) => {
             const isRated = ratedIds.has(p.playerId)
             return (
               <View key={p.playerId} style={styles.row}>

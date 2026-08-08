@@ -1,5 +1,7 @@
 # FiveMatch — Production Recovery Runbook
 
+> **Unverified legacy draft:** this file records a previously intended Hetzner/Docker topology. It does not prove that production exists, that the named accounts are owner-controlled, or that backup/restore controls have passed. Do not execute its production commands until Phase 8 is explicitly approved and `docs/runbooks/backup-and-restore.md` has completed staging evidence.
+
 **Server:** Hetzner CX31 (4 vCPU / 8 GB RAM)
 **Deploy path:** `/opt/fivematch`
 **Stack:** Docker Compose — api + postgres + pgbouncer + backup

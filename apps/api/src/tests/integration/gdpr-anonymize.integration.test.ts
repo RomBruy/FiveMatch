@@ -102,7 +102,6 @@ describe('GDPR cascade anonymization', () => {
         email: `${TEST_PREFIX}user@example.com`,
       })
       const [player] = await db.insert(players).values({
-        groupId,
         userId,
         displayName: `${TEST_PREFIX}player`,
         ovrScoreFloat: '70.000',
@@ -111,7 +110,7 @@ describe('GDPR cascade anonymization', () => {
       // Seed a match and a participant row for that user
       const [match] = await db.insert(matches).values({
         groupId,
-        organizerId,
+        hostId: organizerId,
         status: 'completed',
         scheduledAt: new Date('2025-01-01T18:00:00Z'),
         format: '5v5',
@@ -192,7 +191,6 @@ describe('GDPR cascade anonymization', () => {
         email: `${TEST_PREFIX}user@example.com`,
       })
       const [player] = await db.insert(players).values({
-        groupId,
         userId,
         displayName: `${TEST_PREFIX}player`,
       }).returning()
@@ -206,7 +204,6 @@ describe('GDPR cascade anonymization', () => {
         email: `${TEST_PREFIX}peer@example.com`,
       })
       const [peerPlayer] = await db.insert(players).values({
-        groupId,
         userId: peerId,
         displayName: `${TEST_PREFIX}peer-player`,
       }).returning()
@@ -352,7 +349,6 @@ describe('GDPR cascade anonymization', () => {
         deletedAt,
       })
       const [player] = await db.insert(players).values({
-        groupId,
         userId,
         displayName: `${TEST_PREFIX}player-5b`,
         ovrScoreFloat: '70.000',
@@ -367,7 +363,6 @@ describe('GDPR cascade anonymization', () => {
         email: `${TEST_PREFIX}peer5b@example.com`,
       })
       const [peerPlayer] = await db.insert(players).values({
-        groupId,
         userId: peerId,
         displayName: `${TEST_PREFIX}peer-player-5b`,
       }).returning()
@@ -385,7 +380,7 @@ describe('GDPR cascade anonymization', () => {
       // Seed a match + team_generation_job + team_generation_player
       const [match] = await db.insert(matches).values({
         groupId,
-        organizerId,
+        hostId: organizerId,
         status: 'completed',
         scheduledAt: new Date('2025-01-01T18:00:00Z'),
         format: '5v5',
@@ -599,7 +594,6 @@ describe('GDPR cascade anonymization', () => {
         email: `${TEST_PREFIX}member@example.com`,
       })
       const [player] = await db.insert(players).values({
-        groupId,
         userId,
         displayName: `${TEST_PREFIX}player`,
         ovrScoreFloat: '72.000',
@@ -624,7 +618,6 @@ describe('GDPR cascade anonymization', () => {
         email: `${TEST_PREFIX}peer@example.com`,
       })
       const [peerPlayer] = await db.insert(players).values({
-        groupId,
         userId: peerId,
         displayName: `${TEST_PREFIX}peer-player`,
       }).returning()
@@ -632,7 +625,7 @@ describe('GDPR cascade anonymization', () => {
       // 1 match with match_participants (player scored 2 goals, 1 assist)
       const [match] = await db.insert(matches).values({
         groupId,
-        organizerId,
+        hostId: organizerId,
         status: 'completed',
         scheduledAt: new Date('2024-12-01T18:00:00Z'),
         format: '5v5',

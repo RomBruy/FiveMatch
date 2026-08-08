@@ -56,7 +56,6 @@ export const cardGenerationService = {
 
   async createGenerationJob(
     playerId: string,
-    groupId: string,
     idempotencyKey: string
   ): Promise<{ jobId: string; state: string } | { error: string; statusCode: number; meta?: Record<string, unknown> }> {
     // Idempotency check
@@ -94,7 +93,6 @@ export const cardGenerationService = {
         .insert(cardPhotoJobs)
         .values({
           playerId,
-          groupId,
           state: 'pending',
           idempotencyKey,
           generationMonth: currentMonth(),

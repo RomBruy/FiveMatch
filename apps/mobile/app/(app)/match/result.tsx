@@ -35,7 +35,7 @@ interface PlayerStat {
 
 export default function MatchResultScreen() {
   const { t } = useTranslation()
-  const { matchId, groupId } = useLocalSearchParams<{ matchId: string; groupId: string }>()
+  const { matchId } = useLocalSearchParams<{ matchId: string }>()
   const router = useRouter()
   const queryClient = useQueryClient()
   const insets = useSafeAreaInsets()
@@ -47,14 +47,12 @@ export default function MatchResultScreen() {
   const [submitError, setSubmitError] = useState<string | null>(null)
 
   const { data: match, isLoading } = useQuery({
-    queryKey: ['matches', groupId, matchId],
+    queryKey: ['matches', matchId],
     queryFn: async () => {
-      const { data } = await httpClient.get<{ data: MatchDetail }>(
-        `/v1/groups/${groupId}/matches/${matchId}`,
-      )
+      const { data } = await httpClient.get<{ data: MatchDetail }>(`/v1/matches/${matchId}`)
       return data.data
     },
-    enabled: Boolean(groupId) && Boolean(matchId),
+    enabled: Boolean(matchId),
   })
 
   const getPlayerStat = (playerId: string) =>
@@ -93,7 +91,7 @@ export default function MatchResultScreen() {
     setIsSubmitting(true)
     setSubmitError(null)
     try {
-      await httpClient.post(`/v1/groups/${groupId}/matches/${matchId}/result`, {
+      await httpClient.post(`/v1/matches/${matchId}/result`, {
         scoreA: parsedScoreA,
         scoreB: parsedScoreB,
         playerStats: stats,
@@ -102,7 +100,7 @@ export default function MatchResultScreen() {
         format: match?.format ?? 'unknown',
         player_count: match?.participants?.length ?? stats.length,
       })
-      await queryClient.invalidateQueries({ queryKey: ['matches', groupId, matchId] })
+      await queryClient.invalidateQueries({ queryKey: ['matches'] })
       router.back()
     } catch {
       setSubmitError(t('common.genericError'))

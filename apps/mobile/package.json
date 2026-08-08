@@ -8,8 +8,10 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "lint": "eslint . --ext .ts,.tsx --ignore-pattern 'node_modules/**' && node scripts/check-i18n-parity.mjs",
-    "typecheck": "tsc --noEmit"
+    "lint": "eslint . --ext .ts,.tsx --ignore-pattern 'node_modules/**' && node scripts/check-i18n-parity.mjs && node scripts/check-design-baseline.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test lib/post-match-opponents.test.mjs && node scripts/check-design-baseline.mjs && node scripts/check-i18n-parity.mjs && tsc --noEmit",
+    "check:design-baseline": "node scripts/check-design-baseline.mjs"
   },
   "dependencies": {
     "@clerk/expo": "^3.6.5",
@@ -33,6 +35,7 @@
     "expo-image-picker": "~17.0.11",
     "expo-linear-gradient": "~15.0.8",
     "expo-localization": "~17.0.9",
+    "expo-location": "~19.0.7",
     "expo-notifications": "~0.32.17",
     "expo-router": "~6.0.24",
     "expo-secure-store": "~15.0.8",

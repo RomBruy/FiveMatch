@@ -20,6 +20,7 @@ const LANGUAGES = ['fr', 'en'] as const
 const POSITIONS = ['goalkeeper', 'defender', 'midfielder', 'forward', 'utility'] as const
 const STRONG_FEET = ['left', 'right', 'both'] as const
 const PLAYER_STYLES = ['playmaker', 'finisher', 'engine', 'wall', 'wildcard'] as const
+const SKILL_LEVELS = ['casual', 'intermediate', 'competitive'] as const
 const SPECIAL_SKILLS = ['stands', 'nutmeg', 'tackles'] as const
 const FAVORITE_EXCUSES = ['cold', 'pitch', 'foul'] as const
 const LOCKER_ROOM_STYLES = ['leader', 'clown', 'quiet'] as const
@@ -30,6 +31,7 @@ type Language = (typeof LANGUAGES)[number]
 type Position = (typeof POSITIONS)[number]
 type StrongFoot = (typeof STRONG_FEET)[number]
 type PlayerStyle = (typeof PLAYER_STYLES)[number]
+type SkillLevel = (typeof SKILL_LEVELS)[number]
 
 interface ProfileData {
   userId: string
@@ -47,6 +49,7 @@ interface ProfileData {
   badFaithLevel: number | null
   lockerRoomStyle: string | null
   thirdHalfProfile: string | null
+  skillLevel: SkillLevel | null
   onboardingCompletedAt: string | null
 }
 
@@ -75,6 +78,7 @@ export default function ProfileCompletion() {
   const [preferredPosition, setPreferredPosition] = useState<Position | null>(null)
   const [strongFoot, setStrongFoot] = useState<StrongFoot | null>(null)
   const [playerStyle, setPlayerStyle] = useState<PlayerStyle | null>(null)
+  const [skillLevel, setSkillLevel] = useState<SkillLevel>('casual')
   const [specialSkill, setSpecialSkill] = useState('')
   const [favoriteExcuse, setFavoriteExcuse] = useState('')
   const [badFaithLevel, setBadFaithLevel] = useState(1)
@@ -117,6 +121,7 @@ export default function ProfileCompletion() {
       setCurrentClub(profile.currentClub ?? '')
       setFormerClub(profile.formerClub ?? '')
       setPreferredPosition(profile.preferredPosition)
+      if (profile.skillLevel) setSkillLevel(profile.skillLevel)
       setStrongFoot(profile.strongFoot)
       setPlayerStyle(profile.playerStyle)
       setSpecialSkill(profile.specialSkill ?? '')
@@ -171,11 +176,14 @@ export default function ProfileCompletion() {
     }
   }
 
+  // Only the first two steps gate anything. Steps 2 and 3 are the flavour that
+  // makes the card worth sharing — worth asking for, never worth blocking on.
+  const isRequiredStep = step <= 1
   const canContinue = step === 0
     ? name.trim().length > 0
     : step === 1
-      ? true
-      : preferredPosition !== null && strongFoot !== null && playerStyle !== null
+      ? preferredPosition !== null
+      : true
 
   const handleContinue = async () => {
     if (!profileReady || !canContinue || saving) return
@@ -183,17 +191,25 @@ export default function ProfileCompletion() {
       setStep((current) => current + 1)
       return
     }
+    await saveProfile()
+  }
 
+  /** Persist and enter the app. Reachable from the finish button or "skip". */
+  const saveProfile = async () => {
+    if (!profileReady || saving) return
     setSaving(true)
     setError(null)
     try {
       const { data } = await httpClient.patch<{ data: ProfileData }>('/v1/auth/me', {
+        // Required
         name: name.trim(),
         languagePreference: language,
+        preferredPosition,
+        skillLevel,
+        // Optional — only sent when the user actually filled them in
         profilePhotoUrl,
         currentClub: currentClub.trim() || null,
         formerClub: formerClub.trim() || null,
-        preferredPosition,
         strongFoot,
         playerStyle,
         specialSkill: specialSkill.trim() || null,
@@ -216,10 +232,8 @@ export default function ProfileCompletion() {
   const textureLines = step === 0
     ? [{ text: 'YOUR' }, { text: 'NAME', x: 72 }]
     : step === 1
-      ? [{ text: 'YOUR' }, { text: 'STORY', x: 72 }]
-      : step === 2
-        ? [{ text: 'YOUR' }, { text: 'GAME', x: 72 }]
-        : [{ text: 'YOUR' }, { text: 'STORY', x: 72 }]
+      ? [{ text: 'YOUR' }, { text: 'GAME', x: 72 }]
+      : [{ text: 'YOUR' }, { text: 'STORY', x: 72 }]
 
   return (
     <View style={styles.screen}>
@@ -275,36 +289,8 @@ export default function ProfileCompletion() {
               </View>
             )}
 
+            {/* The only other required step: what a host needs to place you. */}
             {step === 1 && (
-              <View>
-                <View style={styles.storyCallout}>
-                  <Text style={styles.storyCalloutEyebrow}>{t('auth.profileCompletion.storyEyebrow')}</Text>
-                  <Text style={styles.storyCalloutText}>{t('auth.profileCompletion.storyCallout')}</Text>
-                </View>
-
-                <Text style={styles.fieldLabel}>{t('auth.profileCompletion.currentClub')}</Text>
-                <Input
-                  value={currentClub}
-                  onChangeText={setCurrentClub}
-                  placeholder={t('auth.profileCompletion.currentClubPlaceholder')}
-                  autoCapitalize="words"
-                  maxLength={100}
-                />
-                <Text style={styles.optionalHint}>{t('auth.profileCompletion.clubOptional')}</Text>
-
-                <Text style={styles.fieldLabel}>{t('auth.profileCompletion.formerClub')}</Text>
-                <Input
-                  value={formerClub}
-                  onChangeText={setFormerClub}
-                  placeholder={t('auth.profileCompletion.formerClubPlaceholder')}
-                  autoCapitalize="words"
-                  maxLength={100}
-                />
-                <Text style={styles.optionalHint}>{t('auth.profileCompletion.formerClubHint')}</Text>
-              </View>
-            )}
-
-            {step === 2 && (
               <View>
                 <Text style={styles.fieldLabel}>{t('auth.profileCompletion.position')}</Text>
                 <View style={styles.chipRow}>
@@ -317,6 +303,43 @@ export default function ProfileCompletion() {
                     />
                   ))}
                 </View>
+
+                <Text style={styles.fieldLabel}>{t('auth.profileCompletion.skillLevel')}</Text>
+                <View style={styles.chipRow}>
+                  {SKILL_LEVELS.map((item) => (
+                    <Chip
+                      key={item}
+                      label={t(`player.level.${item}`)}
+                      active={skillLevel === item}
+                      onPress={() => setSkillLevel(item)}
+                    />
+                  ))}
+                </View>
+                <Text style={styles.optionalHint}>{t('auth.profileCompletion.skillLevelHint')}</Text>
+              </View>
+            )}
+
+            {step === 2 && (
+              <View>
+                <Text style={styles.funHint}>{t('auth.profileCompletion.funOptional')}</Text>
+
+                <Text style={styles.fieldLabel}>{t('auth.profileCompletion.currentClub')}</Text>
+                <Input
+                  value={currentClub}
+                  onChangeText={setCurrentClub}
+                  placeholder={t('auth.profileCompletion.currentClubPlaceholder')}
+                  autoCapitalize="words"
+                  maxLength={100}
+                />
+
+                <Text style={styles.fieldLabel}>{t('auth.profileCompletion.formerClub')}</Text>
+                <Input
+                  value={formerClub}
+                  onChangeText={setFormerClub}
+                  placeholder={t('auth.profileCompletion.formerClubPlaceholder')}
+                  autoCapitalize="words"
+                  maxLength={100}
+                />
 
                 <Text style={styles.fieldLabel}>{t('auth.profileCompletion.strongFoot')}</Text>
                 <View style={styles.chipRow}>
@@ -476,6 +499,29 @@ export default function ProfileCompletion() {
                 />
               </View>
             </View>
+
+            {/* From the last required step onward, the user can be in the app in
+                one tap. The card fields are a reward to come back for. */}
+            {profileReady && !isRequiredStep && step < 3 && (
+              <Pressable
+                style={styles.skipButton}
+                onPress={() => void saveProfile()}
+                disabled={saving}
+                accessibilityRole="button"
+              >
+                <Text style={styles.skipButtonText}>{t('auth.profileCompletion.skip')}</Text>
+              </Pressable>
+            )}
+            {profileReady && step === 1 && canContinue && (
+              <Pressable
+                style={styles.skipButton}
+                onPress={() => void saveProfile()}
+                disabled={saving}
+                accessibilityRole="button"
+              >
+                <Text style={styles.skipButtonText}>{t('auth.profileCompletion.startPlaying')}</Text>
+              </Pressable>
+            )}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -497,6 +543,8 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   progressRow: { flexDirection: 'row', gap: 7, marginTop: 10, marginBottom: 30 },
+  skipButton: { alignSelf: 'center', marginTop: 18, minHeight: 44, justifyContent: 'center', paddingHorizontal: 16 },
+  skipButtonText: { color: Colors.inkSecondary, fontFamily: Fonts.interSemiBold, fontSize: 13 },
   progressBar: { flex: 1, height: 3, borderRadius: Radius.full, backgroundColor: Colors.line },
   progressBarActive: { backgroundColor: Colors.primary },
   header: { marginBottom: 28 },

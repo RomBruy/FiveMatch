@@ -37,7 +37,7 @@ import { useFonts, BebasNeue_400Regular } from '@expo-google-fonts/bebas-neue'
 import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter'
 import { queryClient } from '../lib/query-client'
 import { setClerkGetToken } from '../lib/api-client'
-import { GroupContextProvider, useGroupContext } from '../contexts/GroupContext'
+import { GroupContextProvider } from '../contexts/GroupContext'
 import { BrandSplash } from '../components/BrandSplash'
 
 function AuthGuard() {
@@ -51,10 +51,16 @@ function AuthGuard() {
 
   useEffect(() => {
     if (!isLoaded) return
-    const inAuthGroup = segments[0] === '(auth)'
-    const inProfileCompletion = inAuthGroup && segments[1] === 'profile-completion'
-    const inJoinRoute = segments[0] === 'join'
-    if (!isSignedIn && !inAuthGroup && !inJoinRoute) {
+    // Compared as plain strings: expo-router's generated route union lags the
+    // filesystem until the dev server regenerates it, and a stale union must not
+    // turn a real route into a type error.
+    const root = segments[0] as string | undefined
+    const inAuthGroup = root === '(auth)'
+    const inProfileCompletion = inAuthGroup && (segments[1] as string | undefined) === 'profile-completion'
+    // The two public entry points: a crew invite code, and a shared match link.
+    // Neither may bounce a signed-out visitor to sign-in — they are the pitch.
+    const inPublicRoute = root === 'join' || root === 'm'
+    if (!isSignedIn && !inAuthGroup && !inPublicRoute) {
       router.replace('/(auth)/sign-in')
     } else if (isSignedIn && inAuthGroup && !inProfileCompletion) {
       // A session restored from SecureStore should enter immediately. Explicit
@@ -67,9 +73,11 @@ function AuthGuard() {
 }
 
 function BootstrappedApp() {
-  const { isLoaded: authLoaded, isSignedIn } = useAuth()
-  const { isReady: groupReady } = useGroupContext()
-  const bootstrapReady = authLoaded && (!isSignedIn || groupReady)
+  const { isLoaded: authLoaded } = useAuth()
+  // Crews are optional now, so cold start no longer waits on one being resolved.
+  // Holding the splash for a crew lookup punished exactly the user this app is
+  // for: someone with no group who just wants to see tonight's matches.
+  const bootstrapReady = authLoaded
   const hasCompletedColdStart = useRef(false)
 
   if (bootstrapReady) hasCompletedColdStart.current = true

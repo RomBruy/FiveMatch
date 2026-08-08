@@ -1,16 +1,26 @@
-import { pgTable, uuid, text, timestamp, integer, numeric, pgEnum, unique, boolean } from 'drizzle-orm/pg-core'
+import { pgTable, uuid, text, timestamp, integer, numeric, pgEnum, boolean } from 'drizzle-orm/pg-core'
 import { PRONOS_STARTING_BANKROLL } from '@fivematch/types/algorithm-constants'
 import { users } from './users'
-import { groups } from './groups'
 
 export const cardStateEnum = pgEnum('card_state', [
   'not_started', 'in_progress_1', 'in_progress_2', 'in_progress_3', 'unlocked',
 ])
 
+/** Self-declared level. Shown on open matches so hosts and joiners can size each other up. */
+export const skillLevelEnum = pgEnum('skill_level', ['casual', 'intermediate', 'competitive'])
+
+/**
+ * The player identity — ONE row per user, global across every match they play.
+ *
+ * This used to be scoped per group (unique on groupId+userId), which made OVR,
+ * the card and the bankroll unreachable to anyone who joined an open match
+ * without belonging to a crew. Discovery is the product now, so identity follows
+ * the user rather than the group: a crew leaderboard is just this table joined
+ * through `group_memberships`.
+ */
 export const players = pgTable('players', {
   id: uuid('id').defaultRandom().primaryKey(),
-  groupId: uuid('group_id').notNull().references(() => groups.id),
-  userId: uuid('user_id').notNull().references(() => users.id),
+  userId: uuid('user_id').notNull().unique().references(() => users.id),
   displayName: text('display_name').notNull(),
   matchCount: integer('match_count').notNull().default(0),
   ovrScoreFloat: numeric('ovr_score_float', { precision: 6, scale: 3 }),
@@ -24,7 +34,17 @@ export const players = pgTable('players', {
   avgPhysicality: numeric('avg_physicality', { precision: 5, scale: 2 }),
   avgEffort: numeric('avg_effort', { precision: 5, scale: 2 }),
   lastMatchAt: timestamp('last_match_at', { withTimezone: true }),  // nullable — null until first match
-  // Pronos betting bankroll (Epic 11) — per-group fictional-points balance.
+
+  // --- Trust signals -------------------------------------------------------
+  // These, not OVR, are what a host and a stranger use to decide about each
+  // other. `commitmentCount` counts every confirmed IN; `noShowCount` counts
+  // confirmed-IN players who were never locked into a team. Reliability is
+  // derived (played / committed) at read time rather than stored, so it cannot drift.
+  skillLevel: skillLevelEnum('skill_level').notNull().default('casual'),
+  commitmentCount: integer('commitment_count').notNull().default(0),
+  noShowCount: integer('no_show_count').notNull().default(0),
+
+  // Pronos betting bankroll (Epic 11) — fictional-points balance, now global.
   // Cached projection of the prono_bets ledger: 1000 + Σpayouts − Σstakes.
   // Mutated ONLY through bankrollService (atomic SQL arithmetic, never read-modify-write).
   pronosBalance: integer('pronos_balance').notNull().default(PRONOS_STARTING_BANKROLL),
@@ -32,9 +52,7 @@ export const players = pgTable('players', {
   profilePhotoCardUrl: text('profile_photo_card_url'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
-}, (table) => ({
-  uniquePlayerInGroup: unique().on(table.groupId, table.userId),
-}))
+})
 
 export type Player = typeof players.$inferSelect
 export type NewPlayer = typeof players.$inferInsert

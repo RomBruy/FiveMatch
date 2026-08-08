@@ -6,13 +6,19 @@ vi.mock('../../db', () => ({
   db: { select: vi.fn(), insert: vi.fn(), update: vi.fn(), transaction: vi.fn(), delete: vi.fn() },
 }))
 
-vi.mock('../../middleware/require-group-member', () => ({
-  requireGroupMember: vi.fn(
-    (req: express.Request, _res: express.Response, next: express.NextFunction) => {
-      req.user.internalId = 'user-uuid-1'
-      req.user.groupRole = 'member'
-      next()
-    },
+// Betting hangs off /v1/matches/:matchId/pronos now, so the guards are the
+// match-scoped ones. loadMatch has already proved the caller may see the match.
+vi.mock('../../middleware/match-context', () => ({
+  loadMatch: vi.fn((req: express.Request, _res: express.Response, next: express.NextFunction) => {
+    req.match = { id: 'match-1', groupId: 'group-1' } as express.Request['match']
+    req.matchRelation = 'participant'
+    next()
+  }),
+  requireMatchCapability: vi.fn(() =>
+    (_req: express.Request, _res: express.Response, next: express.NextFunction) => next(),
+  ),
+  requirePlayer: vi.fn(
+    (_req: express.Request, _res: express.Response, next: express.NextFunction) => next(),
   ),
 }))
 
@@ -95,7 +101,6 @@ const MVP_NAMES = [
 
 /** player → match → bets → mvp names: the order the handler queries in. */
 function mockRevealChain(match: unknown | null, bets: unknown[], names: unknown[] = MVP_NAMES) {
-  vi.mocked(db.select).mockReturnValueOnce(selectWhere([{ id: 'player-caller' }]))
   vi.mocked(db.select).mockReturnValueOnce(selectWhere(match ? [match] : []))
   vi.mocked(db.select).mockReturnValueOnce(selectWhere(bets))
   vi.mocked(db.select).mockReturnValueOnce(selectWhere(names))
@@ -105,7 +110,11 @@ function makeApp() {
   const app = express()
   app.use(express.json())
   app.use((req, _res, next) => {
-    req.user = { userId: 'clerk-1', internalId: 'user-uuid-1' } as express.Request['user']
+    req.user = {
+      userId: 'clerk-1',
+      internalId: 'user-uuid-1',
+      playerId: 'player-caller',
+    } as express.Request['user']
     next()
   })
   app.use('/', router)
@@ -169,12 +178,12 @@ describe('GET /bets/reveal', () => {
     expect(res.body.data.match.mvpDisplayName).toBeNull()
   })
 
-  it('aggregates every better into group rows sorted by net descending', async () => {
+  it('aggregates every better into table rows sorted by net descending', async () => {
     mockRevealChain(COMPLETED_MATCH, [...CALLER_BETS, ...OTHER_BETS])
 
     const res = await request(makeApp()).get('/bets/reveal')
 
-    expect(res.body.data.group).toEqual([
+    expect(res.body.data.table).toEqual([
       { playerId: 'player-caller', displayName: 'Toi', staked: 350, returned: 553, net: 203, isMe: true },
       { playerId: 'player-sofiane', displayName: 'Sofiane M.', staked: 100, returned: 213, net: 113, isMe: false },
       { playerId: 'player-hugo', displayName: 'Hugo L.', staked: 150, returned: 0, net: -150, isMe: false },
@@ -182,7 +191,6 @@ describe('GET /bets/reveal', () => {
   })
 
   it('answers 200 with settled:false before the match completes — never 403', async () => {
-    vi.mocked(db.select).mockReturnValueOnce(selectWhere([{ id: 'player-caller' }]))
     vi.mocked(db.select).mockReturnValueOnce(
       selectWhere([{ ...COMPLETED_MATCH, status: 'teams_generated', scoreA: null, scoreB: null }]),
     )
@@ -194,7 +202,7 @@ describe('GET /bets/reveal', () => {
     expect(res.body.data.match.actualResult).toBeNull()
     expect(res.body.data.myBets).toEqual([])
     expect(res.body.data.myTotals).toEqual({ staked: 0, returned: 0, net: 0 })
-    expect(res.body.data.group).toEqual([])
+    expect(res.body.data.table).toEqual([])
   })
 
   it('returns an empty reveal rather than a 404 when nobody bet', async () => {
@@ -205,11 +213,10 @@ describe('GET /bets/reveal', () => {
     expect(res.status).toBe(200)
     expect(res.body.data.settled).toBe(true)
     expect(res.body.data.myTotals).toEqual({ staked: 0, returned: 0, net: 0 })
-    expect(res.body.data.group).toEqual([])
+    expect(res.body.data.table).toEqual([])
   })
 
-  it('404 when the match is not in this group', async () => {
-    vi.mocked(db.select).mockReturnValueOnce(selectWhere([{ id: 'player-caller' }]))
+  it('404 when the match cannot be priced', async () => {
     vi.mocked(db.select).mockReturnValueOnce(selectWhere([]))
 
     const res = await request(makeApp()).get('/bets/reveal')
@@ -218,12 +225,4 @@ describe('GET /bets/reveal', () => {
     expect(res.body.error.code).toBe('MATCH_NOT_FOUND')
   })
 
-  it('403 when the caller has no player row in this group', async () => {
-    vi.mocked(db.select).mockReturnValueOnce(selectWhere([]))
-
-    const res = await request(makeApp()).get('/bets/reveal')
-
-    expect(res.status).toBe(403)
-    expect(res.body.error.code).toBe('NOT_A_MEMBER')
-  })
 })

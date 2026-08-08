@@ -18,9 +18,10 @@ function getTitle(payload: NotificationPayload): string {
     case 'CARD_INITIAL_UNLOCKED': return 'Your card is being built'
     case 'PLAYER_TIER_CHANGED': return 'Tier change'
     case 'GROUP_TIER_CHANGED': return `${payload.groupName} — Nouveau tier`
-    case 'MATCH_CREATED': return `${payload.groupName} — Nouveau match`
+    case 'MATCH_CREATED': return payload.groupName ? `${payload.groupName} — Nouveau match` : 'Nouveau match'
     case 'ATTENDANCE_REMINDER': return 'Match bientôt — tu joues ?'
     case 'MATCH_FULL': return 'Match complet'
+    case 'SPOT_CLAIMED': return 'Une place vient d’être prise'
     case 'WAITLIST_SPOT_OPEN': return 'Place disponible !'
     default: return 'FiveMatch'
   }
@@ -40,6 +41,9 @@ function getBody(payload: NotificationPayload): string {
     case 'MATCH_CREATED': return `Un match est prévu le ${new Date(payload.scheduledAt).toLocaleDateString('fr-FR')}.`
     case 'ATTENDANCE_REMINDER': return 'Le match approche. Confirme ta présence maintenant.'
     case 'MATCH_FULL': return 'Toutes les places sont prises pour ce match.'
+    case 'SPOT_CLAIMED': return payload.spotsRemaining > 0
+      ? `${payload.playerDisplayName} a rejoint le match. ${payload.spotsRemaining} place(s) restante(s).`
+      : `${payload.playerDisplayName} a rejoint le match. L'effectif est complet.`
     case 'WAITLIST_SPOT_OPEN': return `Une place s'est libérée. Tu es maintenant confirmé(e).`
     default: return 'You have a new notification.'
   }
@@ -80,7 +84,14 @@ async function dispatch(payload: NotificationPayload): Promise<void> {
       sound: 'default' as const,
       title: getTitle(payload),
       body: getBody(payload),
-      data: { type: payload.type },
+      // matchId travels with every match-scoped notification so the app can
+      // deep-link straight to the match instead of dumping the user on a tab.
+      data: {
+        type: payload.type,
+        ...('matchId' in payload ? { matchId: payload.matchId } : {}),
+        ...('groupId' in payload && payload.groupId ? { groupId: payload.groupId } : {}),
+        ...('playerId' in payload ? { playerId: payload.playerId } : {}),
+      },
     }))
 
   if (messages.length === 0) return

@@ -1,14 +1,14 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { eq, like } from 'drizzle-orm'
+import { eq, like, inArray } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
 import { db } from '../../db'
-import { users, groups, players } from '../../db/schema'
+import { users, groups, players, matches, matchAttendances } from '../../db/schema'
 import { teamGeneratorService } from '../../services/matches/team-generator.service'
 import { TEAM_GEN_MINIMUM_RATED_PLAYERS } from '@fivematch/types/algorithm-constants'
 
 const TEST_PREFIX = 'test-2-5-'
 
-async function seedGroup(organizerSuffix: string): Promise<{ groupId: string; organizerUserId: string }> {
+async function seedMatch(organizerSuffix: string): Promise<{ groupId: string; matchId: string }> {
   const organizerUserId = randomUUID()
   await db.insert(users).values({
     id: organizerUserId,
@@ -27,24 +27,39 @@ async function seedGroup(organizerSuffix: string): Promise<{ groupId: string; or
     generatorStyle: 'pure_ovr',
   })
 
-  return { groupId, organizerUserId }
+  const [match] = await db.insert(matches).values({
+    groupId,
+    hostId: organizerUserId,
+    status: 'attendance_open',
+    scheduledAt: new Date('2026-09-01T18:00:00Z'),
+    format: '5v5',
+    playersPerTeam: 5,
+    goalkeeperMode: 'none',
+  }).returning({ id: matches.id })
+
+  return { groupId, matchId: match!.id }
 }
 
-async function seedRatedPlayers(groupId: string, count: number): Promise<string[]> {
+async function seedRatedPlayers(matchId: string, count: number): Promise<string[]> {
   const userIds: string[] = []
   for (let i = 0; i < count; i++) {
     const userId = randomUUID()
     await db.insert(users).values({
       id: userId,
-      clerkUserId: `${TEST_PREFIX}player-${groupId}-${i}`,
+      clerkUserId: `${TEST_PREFIX}player-${matchId}-${i}`,
       name: `Player ${i}`,
-      email: `${TEST_PREFIX}player-${groupId}-${i}@example.com`,
+      email: `${TEST_PREFIX}player-${matchId}-${i}@example.com`,
     })
-    await db.insert(players).values({
-      groupId,
+    const [player] = await db.insert(players).values({
       userId,
       displayName: `Player ${i}`,
       ovrScoreFloat: '70.000',
+    }).returning({ id: players.id })
+    await db.insert(matchAttendances).values({
+      matchId,
+      playerId: player!.id,
+      status: 'in',
+      source: 'crew',
     })
     userIds.push(userId)
   }
@@ -52,7 +67,16 @@ async function seedRatedPlayers(groupId: string, count: number): Promise<string[
 }
 
 async function cleanup(groupId: string): Promise<void> {
-  await db.delete(players).where(eq(players.groupId, groupId))
+  // Players are global now, so they are torn down by the test user prefix
+  // rather than by group.
+  const testUsers = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(like(users.clerkUserId, `${TEST_PREFIX}%`))
+  await db.delete(matches).where(eq(matches.groupId, groupId))
+  if (testUsers.length > 0) {
+    await db.delete(players).where(inArray(players.userId, testUsers.map((u) => u.id)))
+  }
   await db.delete(groups).where(eq(groups.id, groupId))
   await db.delete(users).where(like(users.clerkUserId, `${TEST_PREFIX}%`))
 }
@@ -69,12 +93,12 @@ describe('team-generator unlock gate', () => {
 
   it('returns canGenerate = false when group has fewer than TEAM_GEN_MINIMUM_RATED_PLAYERS rated players', async () => {
     const suffix = randomUUID()
-    const { groupId } = await seedGroup(suffix)
+    const { groupId, matchId } = await seedMatch(suffix)
     createdGroupIds.push(groupId)
 
-    await seedRatedPlayers(groupId, TEAM_GEN_MINIMUM_RATED_PLAYERS - 1)
+    await seedRatedPlayers(matchId, TEAM_GEN_MINIMUM_RATED_PLAYERS - 1)
 
-    const status = await teamGeneratorService.getStatus(groupId)
+    const status = await teamGeneratorService.getStatus(matchId)
 
     expect(status.canGenerate).toBe(false)
     expect(status.reason).toBe('INSUFFICIENT_RATED_PLAYERS')
@@ -84,12 +108,12 @@ describe('team-generator unlock gate', () => {
 
   it('returns canGenerate = true when group has exactly TEAM_GEN_MINIMUM_RATED_PLAYERS rated players', async () => {
     const suffix = randomUUID()
-    const { groupId } = await seedGroup(suffix)
+    const { groupId, matchId } = await seedMatch(suffix)
     createdGroupIds.push(groupId)
 
-    await seedRatedPlayers(groupId, TEAM_GEN_MINIMUM_RATED_PLAYERS)
+    await seedRatedPlayers(matchId, TEAM_GEN_MINIMUM_RATED_PLAYERS)
 
-    const status = await teamGeneratorService.getStatus(groupId)
+    const status = await teamGeneratorService.getStatus(matchId)
 
     expect(status.canGenerate).toBe(true)
     expect(status.reason).toBeNull()

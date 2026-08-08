@@ -88,7 +88,7 @@ export default function BettingScreen() {
     queryKey: ['pronos-odds', activeGroupId, matchId],
     queryFn: async () => {
       const { data } = await httpClient.get<{ data: OddsBoard }>(
-        `/v1/groups/${activeGroupId}/matches/${matchId}/pronos/odds`,
+        `/v1/matches/${matchId}/pronos/odds`,
       )
       return data.data
     },
@@ -102,7 +102,7 @@ export default function BettingScreen() {
     queryKey: ['pronos-reveal', activeGroupId, matchId],
     queryFn: async () => {
       const { data } = await httpClient.get<{ data: RevealData }>(
-        `/v1/groups/${activeGroupId}/matches/${matchId}/pronos/bets/reveal`,
+        `/v1/matches/${matchId}/pronos/bets/reveal`,
       )
       return data.data
     },
@@ -118,23 +118,23 @@ export default function BettingScreen() {
     queryKey: ['pronos-bets', activeGroupId, matchId],
     queryFn: async () => {
       const { data } = await httpClient.get<{ data: { bets: MyBet[]; balance: number } }>(
-        `/v1/groups/${activeGroupId}/matches/${matchId}/pronos/bets/my`,
+        `/v1/matches/${matchId}/pronos/bets/my`,
       )
       return data.data
     },
     enabled: enabled && !settled,
   })
 
-  // Group-scoped, so this screen and the Pronos tab share one balance and one count-up.
+  // One global bankroll per player, not one per crew — the identity that owns it
+  // is global now, and a player betting on an open match has no crew to scope to.
   const { data: bankroll } = useQuery({
-    queryKey: ['pronos-bankroll', activeGroupId],
+    queryKey: ['pronos-bankroll'],
     queryFn: async () => {
       const { data } = await httpClient.get<{ data: { balance: number; startingBankroll: number } }>(
-        `/v1/groups/${activeGroupId}/pronos/bankroll`,
+        '/v1/players/me/bankroll',
       )
       return data.data
     },
-    enabled: Boolean(activeGroupId),
   })
 
   // The settlement flourish, once per mount — a refetch or a re-render must not re-buzz.
@@ -194,7 +194,7 @@ export default function BettingScreen() {
     mutationFn: async ({ pick, stake }: { pick: SlipSelection; stake: number }) => {
       // No odds field — the server freezes the price (Story 11.3 AC4).
       const { data } = await httpClient.post<{ data: { balance: number } }>(
-        `/v1/groups/${activeGroupId}/matches/${matchId}/pronos/bets`,
+        `/v1/matches/${matchId}/pronos/bets`,
         { market: pick.market, selection: pick.selection, stake },
       )
       return data.data

@@ -10,7 +10,7 @@ export const teamGenerationJobs = pgTable('team_generation_jobs', {
   id: uuid('id').defaultRandom().primaryKey(),
   jobId: text('job_id').notNull().unique(),
   matchId: uuid('match_id').notNull().references(() => matches.id),
-  groupId: uuid('group_id').notNull().references(() => groups.id),
+  groupId: uuid('group_id').references(() => groups.id), // nullable — standalone matches have no crew
   status: teamGenJobStatusEnum('status').notNull().default('processing'),
   generationNumber: integer('generation_number').notNull(),
   fairnessScore: text('fairness_score'),
