@@ -31,3 +31,31 @@ export const PHOTO_FETCH_TIMEOUT_MS = 10_000
 
 /** Generations allowed per player per calendar month. */
 export const PHOTO_GENERATIONS_PER_MONTH = 3
+
+// ─── Card cutout (the photo the card actually renders) ───────────────────────
+
+/**
+ * Output dimensions. The card slot is 150x170 at scale 1 and the export surface
+ * is 1080 wide, so the asset is rendered at 4x the slot to stay sharp when the
+ * card is exported rather than merely viewed.
+ */
+export const CARD_CUTOUT_WIDTH = 600
+export const CARD_CUTOUT_HEIGHT = 680
+
+/**
+ * The flat colour the generator renders behind the subject, knocked out to
+ * transparency afterwards. Pure magenta occurs in neither skin nor hair, so
+ * nothing of the subject is removed with it.
+ */
+export const CARD_CUTOUT_KEY_RGB = [255, 0, 255] as const
+
+/** Squared-distance tolerance for matching the key colour, 0-441. */
+export const CARD_CUTOUT_KEY_TOLERANCE = 90
+
+/**
+ * How far to grow a detected face box into head and shoulders, as multiples of
+ * the face height. Rekognition boxes forehead to chin, which crops the skull and
+ * leaves no body.
+ */
+export const CARD_FACE_BOX_HEADROOM = 0.65
+export const CARD_FACE_BOX_SHOULDERS = 0.85
