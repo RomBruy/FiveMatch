@@ -6,6 +6,7 @@ import { createRekognitionClientFromEnv } from '../lib/rekognition'
 import { createGeminiClientFromEnv } from '../lib/gemini'
 import { cardPhotoKey, createObjectStorageFromEnv } from '../lib/object-storage'
 import { fetchSourceImage, ImageFetchError } from '../lib/image-fetch'
+import { buildCardCutout } from '../lib/image-cutout'
 import { photoConsentService } from '../services/cards/photo-consent.service'
 
 async function transitionJob(
@@ -112,11 +113,14 @@ export async function processCardGenerationJob(jobId: string): Promise<void> {
     return
   }
 
-  // Step 3: moderate the OUTPUT before it is ever stored (rule 40).
+  // Step 3: moderate the OUTPUT before it is ever stored (rule 40), and take the
+  // face box from the same pass.
   //
   // Moderating only the input assumes a generator cannot produce something the
   // source did not contain, which is not a safe assumption about an image model.
-  // This runs before upload so flagged output never reaches the bucket at all.
+  // The box must be measured on the generated image, not the source: the model
+  // returns a new rendering whose geometry has nothing to do with the original.
+  let generatedFaceBox: { left: number; top: number; width: number; height: number } | undefined
   try {
     const rekognition = createRekognitionClientFromEnv()
     const outputCheck = await rekognition.checkImage(generatedBytes)
@@ -127,18 +131,40 @@ export async function processCardGenerationJob(jobId: string): Promise<void> {
       })
       return
     }
+    // A vintage sticker style pulls toward caricature. A portrait with no
+    // detectable face is not worth putting on someone's card.
+    if (!outputCheck.hasFace) {
+      await transitionJob(jobId, 'failed', { errorMessage: 'OUTPUT_NO_FACE' })
+      Sentry.captureMessage('Card generation failed: no face in generated output', {
+        extra: { jobId, playerId: job.playerId, step: 'output-moderation' },
+      })
+      return
+    }
+    generatedFaceBox = outputCheck.faceBox
   } catch (err) {
     await transitionJob(jobId, 'failed', { errorMessage: 'OUTPUT_MODERATION_ERROR' })
     Sentry.captureException(err, { extra: { jobId, playerId: job.playerId, step: 'output-moderation' } })
     return
   }
 
-  // Step 4: Upload to object storage
+  // Step 4: crop to head and shoulders and knock out the key colour, so what is
+  // stored is the cutout the card renders rather than a rectangle with a
+  // background behind it.
+  let cutoutBytes: Buffer
+  try {
+    cutoutBytes = await buildCardCutout(generatedBytes, generatedFaceBox)
+  } catch (err) {
+    await transitionJob(jobId, 'failed', { errorMessage: 'CUTOUT_ERROR' })
+    Sentry.captureException(err, { extra: { jobId, playerId: job.playerId, step: 'cutout' } })
+    return
+  }
+
+  // Step 5: Upload to object storage
   const storageKey = cardPhotoKey(jobId)
   let photoUrl: string
   try {
     const storage = createObjectStorageFromEnv()
-    photoUrl = await storage.put(storageKey, generatedBytes, 'image/png')
+    photoUrl = await storage.put(storageKey, cutoutBytes, 'image/png')
   } catch (err) {
     await transitionJob(jobId, 'failed', { errorMessage: 'UPLOAD_ERROR' })
     Sentry.captureException(err, { extra: { jobId, playerId: job.playerId, step: 'upload' } })
