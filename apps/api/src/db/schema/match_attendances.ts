@@ -53,6 +53,14 @@ export const matchAttendances = pgTable('match_attendances', {
   // One sheet row per player per match. The open-join path races against the
   // crew seed, so this constraint is what actually keeps them honest.
   uniquePlayerInMatch: unique('match_attendances_match_player_unique').on(table.matchId, table.playerId),
+  /**
+   * One player per waitlist position. Positions are assigned behind the
+   * per-match lock, so a collision should be impossible — this makes it
+   * impossible rather than merely unlikely. NULLs are distinct in Postgres, so
+   * confirmed players do not collide with each other (AF-005).
+   */
+  uniqueWaitlistPosition: unique('match_attendances_match_waitlist_position_unique')
+    .on(table.matchId, table.waitlistPosition),
 }))
 
 export type MatchAttendance = typeof matchAttendances.$inferSelect

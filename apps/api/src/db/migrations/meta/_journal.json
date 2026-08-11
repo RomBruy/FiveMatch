@@ -162,6 +162,13 @@
       "when": 1786268000000,
       "tag": "0022_phase6_publication",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1786272000000,
+      "tag": "0023_phase6_waitlist_integrity",
+      "breakpoints": true
     }
   ]
 }

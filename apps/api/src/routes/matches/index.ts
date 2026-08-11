@@ -1032,6 +1032,49 @@ function sendPostMatchReminders(matchId: string, groupId: string | null): void {
 
 export default router
 
+// ─── Phase 6 — waitlist ───────────────────────────────────────────────────────
+
+// POST /v1/matches/:matchId/waitlist
+// Join the queue for a full published match. Previously an outsider hitting a
+// full match got a flat refusal, which is the worst answer available: it is the
+// match they want, and places open up constantly (AF-008).
+router.post(
+  '/:matchId/waitlist',
+  loadMatch,
+  requireMatchCapability('canJoinWaitlist'),
+  requirePlayer,
+  asyncHandler(async (req, res) => {
+    const result = await attendanceService.joinWaitlist(req.match.id, req.user.internalId!)
+    return res.status(201).json({ data: result })
+  }),
+)
+
+// POST /v1/matches/:matchId/waitlist/:playerId/promote
+// Host promotes a specific player rather than the next in line — usually
+// solving something the queue cannot see, like needing a goalkeeper.
+router.post(
+  '/:matchId/waitlist/:playerId/promote',
+  loadMatch,
+  requireMatchHost,
+  asyncHandler(async (req, res) => {
+    const { promotedUserId, groupId } = await attendanceService.promoteFromWaitlist(
+      req.match.id,
+      req.params['playerId'] as string,
+    )
+
+    if (promotedUserId) {
+      notificationService.send({
+        type: 'WAITLIST_SPOT_OPEN',
+        matchId: req.match.id,
+        groupId,
+        recipientUserId: promotedUserId,
+      })
+    }
+
+    return res.json({ data: { promoted: true } })
+  }),
+)
+
 // ─── Phase 4 — card eligibility ───────────────────────────────────────────────
 
 // POST /v1/matches/:matchId/void

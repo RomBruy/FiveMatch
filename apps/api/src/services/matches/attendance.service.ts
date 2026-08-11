@@ -13,6 +13,19 @@ function fail(code: string, statusCode: number, meta?: unknown) {
   return Object.assign(new Error(code), { code, statusCode, meta })
 }
 
+/**
+ * Take the per-match lock.
+ *
+ * Every decision about who holds a seat — confirming, waitlisting, promoting —
+ * must happen behind this. Reading a count and then acting on it is two
+ * statements, and between them another request can take the last place. That is
+ * how a match overfills and how two people land on the same waitlist position
+ * (AF-004, AF-005; ADR-010 puts this boundary in PostgreSQL).
+ */
+async function lockMatch(tx: typeof db, matchId: string) {
+  await tx.select({ id: matches.id }).from(matches).where(eq(matches.id, matchId)).for('update')
+}
+
 /** Confirmed IN and not waitlisted — the only count that means "has a seat". */
 async function countConfirmed(tx: typeof db, matchId: string, source?: AttendanceSource) {
   const conditions = [
@@ -89,6 +102,9 @@ async function markAttendance(
   let waitlistPromoteePlayerId: string | null = null
 
   await db.transaction(async (tx) => {
+    // Serialize every seat decision on this match.
+    await lockMatch(tx as unknown as typeof db, matchId)
+
     if (newStatus === 'in') {
       const confirmedCount = await countConfirmed(tx as unknown as typeof db, matchId)
       const capacity = matchCapacity(match.playersPerTeam)
@@ -494,7 +510,125 @@ async function checkAndTriggerReminder(matchId: string) {
   }
 }
 
+/**
+ * Join the waitlist for a full published match.
+ *
+ * An outsider hitting a full match used to get a flat refusal, which is the
+ * worst possible answer: the match is exactly the one they want and places open
+ * up constantly as people cancel (AF-008).
+ *
+ * Position assignment sits behind the per-match lock, so two people joining at
+ * the same instant get two positions rather than one shared one.
+ */
+async function joinWaitlist(matchId: string, internalUserId: string) {
+  const [player] = await db
+    .select()
+    .from(players)
+    .where(and(eq(players.userId, internalUserId), isNull(players.deletedAt)))
+    .limit(1)
+  if (!player) throw fail('PLAYER_NOT_FOUND', 403)
+
+  const [match] = await db.select().from(matches).where(eq(matches.id, matchId)).limit(1)
+  if (!match) throw fail('MATCH_NOT_FOUND', 404)
+  if (match.status !== 'attendance_open') throw fail('ATTENDANCE_CLOSED', 422)
+  if (match.scheduledAt.getTime() <= Date.now()) throw fail('MATCH_STARTED', 422)
+  if (!isPubliclyOpen(match)) throw fail('MATCH_NOT_PUBLIC', 422)
+
+  return db.transaction(async (tx) => {
+    await lockMatch(tx as unknown as typeof db, matchId)
+
+    const [existing] = await tx
+      .select({
+        id: matchAttendances.id,
+        status: matchAttendances.status,
+        waitlistPosition: matchAttendances.waitlistPosition,
+      })
+      .from(matchAttendances)
+      .where(and(eq(matchAttendances.matchId, matchId), eq(matchAttendances.playerId, player.id)))
+      .limit(1)
+
+    if (existing?.status === 'in' && existing.waitlistPosition === null) {
+      throw fail('ALREADY_JOINED', 409)
+    }
+    if (existing?.waitlistPosition !== null && existing?.waitlistPosition !== undefined) {
+      // Already waiting — return their place rather than moving them to the back.
+      return { waitlistPosition: existing.waitlistPosition }
+    }
+
+    const [maxRow] = await tx
+      .select({ max: sql<number>`COALESCE(MAX(waitlist_position), 0)` })
+      .from(matchAttendances)
+      .where(and(eq(matchAttendances.matchId, matchId), isNotNull(matchAttendances.waitlistPosition)))
+
+    const nextPosition = Number(maxRow?.max ?? 0) + 1
+    const source = await inferSource(match, internalUserId)
+
+    if (existing) {
+      await tx
+        .update(matchAttendances)
+        .set({ status: 'in', waitlistPosition: nextPosition, respondedAt: new Date() })
+        .where(eq(matchAttendances.id, existing.id))
+    } else {
+      await tx.insert(matchAttendances).values({
+        matchId,
+        playerId: player.id,
+        status: 'in',
+        source,
+        waitlistPosition: nextPosition,
+        respondedAt: new Date(),
+      })
+    }
+
+    return { waitlistPosition: nextPosition }
+  })
+}
+
+/**
+ * Promote a specific waitlisted player, by the host's choice rather than by
+ * queue order.
+ *
+ * Automatic promotion takes the next in line, which is right when a seat frees
+ * itself. A host promoting by hand is usually solving something the queue cannot
+ * see — a goalkeeper, someone who can bring the ball — so the choice is theirs.
+ */
+async function promoteFromWaitlist(matchId: string, playerId: string) {
+  return db.transaction(async (tx) => {
+    await lockMatch(tx as unknown as typeof db, matchId)
+
+    const [match] = await tx.select().from(matches).where(eq(matches.id, matchId)).limit(1)
+    if (!match) throw fail('MATCH_NOT_FOUND', 404)
+
+    const [row] = await tx
+      .select({ id: matchAttendances.id, waitlistPosition: matchAttendances.waitlistPosition })
+      .from(matchAttendances)
+      .where(and(eq(matchAttendances.matchId, matchId), eq(matchAttendances.playerId, playerId)))
+      .limit(1)
+
+    if (!row || row.waitlistPosition === null) throw fail('NOT_ON_WAITLIST', 404)
+
+    // Capacity is re-checked under the lock: a host may be looking at a stale
+    // screen from before the sheet filled up.
+    const confirmed = await countConfirmed(tx as unknown as typeof db, matchId)
+    if (confirmed >= matchCapacity(match.playersPerTeam)) throw fail('NO_SPOTS_AVAILABLE', 409)
+
+    await tx
+      .update(matchAttendances)
+      .set({ status: 'in', waitlistPosition: null, respondedAt: new Date() })
+      .where(eq(matchAttendances.id, row.id))
+
+    const [promoted] = await tx
+      .select({ userId: players.userId })
+      .from(players)
+      .where(eq(players.id, playerId))
+      .limit(1)
+
+    return { promotedUserId: promoted?.userId ?? null, groupId: match.groupId }
+  })
+}
+
 export const attendanceService = {
+  joinWaitlist,
+  promoteFromWaitlist,
   markAttendance,
   joinOpenMatch,
   leaveMatch,

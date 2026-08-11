@@ -432,7 +432,24 @@ Migration `0022` is additive — two columns. `open_spots` is deliberately not b
 
 Gates: 48 files / 406 unit tests, 15 files / 117 isolated PostgreSQL integration tests, typecheck, lint, 686/686 parity, 5-tab baseline.
 
-**Remaining Phase 6 packages, not started:** 6B external waitlist and manual promotion (AF-008) · 6C match lifecycle — edit, cancel, invite, directions (AF-009) · 6D guest discovery and auth return intent (AF-001, AF-002) · 6E next-match and needs-attention sections, progressive creation · 6F merge legacy group detail into Crew. The mobile create flow does not yet expose the host-plays toggle or the crew-first opening time; both default sensibly without it.
+### 6B local completion record — 2026-08-11
+
+External waitlist and manual promotion. Closes AF-008, and closes **AF-005 (P0)** ahead of its scheduled phase.
+
+- **A full published match now offers the queue.** An outsider used to get a flat refusal, which is the worst answer available: it is exactly the match they want, and places open up constantly.
+- **AF-005 was fixed here rather than deferred to Phase 7.** Waitlist positions were assigned by reading `MAX(position)` and writing `MAX+1` as two separate statements, so two simultaneous joins read the same maximum and landed on the same place in the queue. Building a waitlist feature on that would have been negligent.
+- **Every seat decision now happens behind a per-match row lock** — confirming, waitlisting and promoting alike (ADR-010 puts this boundary in PostgreSQL). A unique constraint on `(match_id, waitlist_position)` backs it up, so if the lock is ever bypassed by new code the write fails loudly instead of silently seating two people in one place.
+- **The concurrency test was verified to have teeth**: with the lock temporarily removed, three concurrent joins fail on the duplicate key. Both layers do their job.
+- **Manual promotion** lets a host promote a specific waiting player rather than the next in line — usually solving something the queue cannot see, like needing a goalkeeper. Capacity is re-checked under the lock, because the host may be looking at a screen from before the sheet filled.
+- Joining the queue twice returns the existing place rather than moving the player to the back.
+
+Migration `0023` is additive: one unique constraint.
+
+Gates: 48 files / 406 unit tests, 16 files / 125 isolated PostgreSQL integration tests, typecheck, lint, 686/686 parity, 5-tab baseline.
+
+**Not built:** no mobile surface for either. The join-waitlist and promote endpoints exist and nothing in the app calls them.
+
+**Remaining Phase 6 packages, not started:** 6C match lifecycle — edit, cancel, invite, directions (AF-009) · 6D guest discovery and auth return intent (AF-001, AF-002) · 6E next-match and needs-attention sections, progressive creation · 6F merge legacy group detail into Crew. The mobile create flow does not yet expose the host-plays toggle or the crew-first opening time; both default sensibly without it.
 
 ## 9. Phase 7 — Scalability and operational reliability
 

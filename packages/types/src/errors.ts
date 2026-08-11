@@ -56,6 +56,7 @@ export const ErrorCode = {
   REPORT_NOT_FOUND: 'REPORT_NOT_FOUND',
   REPORT_ALREADY_RESOLVED: 'REPORT_ALREADY_RESOLVED',
   REPORT_EXPIRED: 'REPORT_EXPIRED',
+  NOT_ON_WAITLIST: 'NOT_ON_WAITLIST',
 } as const
 
 export type ErrorCode = typeof ErrorCode[keyof typeof ErrorCode]
