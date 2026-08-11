@@ -28,5 +28,7 @@ export type NotificationPayload =
   | { type: 'ORGANIZER_TRANSFERRED'; groupId: string; recipientUserId: string }
   | { type: 'CARD_INITIAL_UNLOCKED'; groupId: string; ratedPlayerId: string; recipientUserId: string }
   | { type: 'GROUP_TIER_CHANGED'; groupId: string; groupName: string; newTier: string; previousTier: string; recipientUserIds: string[] }
+  | { type: 'MATCH_CANCELLED'; matchId: string; groupId: string | null; scheduledAt: string; recipientUserIds: string[] }
+  | { type: 'MATCH_UPDATED'; matchId: string; groupId: string | null; scheduledAt: string; recipientUserIds: string[] }
   | { type: 'MATCH_CREATED'; groupId: string | null; groupName: string | null; matchId: string; scheduledAt: string; recipientUserIds: string[] }
   | { type: 'PRONOS_BETS_SETTLED'; matchId: string; groupId: string | null; netPayout: number; recipientUserId: string }

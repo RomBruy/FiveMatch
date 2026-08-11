@@ -449,7 +449,24 @@ Gates: 48 files / 406 unit tests, 16 files / 125 isolated PostgreSQL integration
 
 **Not built:** no mobile surface for either. The join-waitlist and promote endpoints exist and nothing in the app calls them.
 
-**Remaining Phase 6 packages, not started:** 6C match lifecycle — edit, cancel, invite, directions (AF-009) · 6D guest discovery and auth return intent (AF-001, AF-002) · 6E next-match and needs-attention sections, progressive creation · 6F merge legacy group detail into Crew. The mobile create flow does not yet expose the host-plays toggle or the crew-first opening time; both default sensibly without it.
+### 6C local completion record — 2026-08-11
+
+Match lifecycle. Closes AF-009 (its minimum-playable-size half was already closed by ADR-032 in 6A).
+
+- `PATCH /matches/:matchId` edits time, venue, address, price, notes and publication. **Format, players per team and goalkeeper mode are deliberately not editable**: they decide capacity and team shape, so changing them after people commit silently invalidates the sheet they said yes to. Changing those means a new match.
+- Editing kickoff is safe for reliability scoring — cancellations store their timestamp and the excused/late decision is derived at finalization, so moving the time re-derives against the new one (ADR-028). That design paying off was not an accident but it is worth noting.
+- `POST /matches/:matchId/cancel` calls a match off, notifying everyone who was confirmed. Recipients are gathered **before** the update, while the sheet still says who was coming. Distinct from voiding (Phase 4): cancelled means it never happened, voided means it happened but stops counting.
+- `PATCH /groups/:groupId/members/:membershipId/role` appoints or removes a co-host. **The role has existed since 3B without any way to appoint one** — the dispute workflow needed somebody impartial to settle a report the organizer was party to, and nobody could ever be made that person. Restricted to member ↔ co_host; ownership transfer remains its own endpoint.
+- Two notification types added: `MATCH_CANCELLED`, `MATCH_UPDATED`. Only a change to *when* or *where* notifies; editing notes does not interrupt anyone.
+- Mobile: `HostMatchActions` on match detail — edit, share, directions, waitlist promotion and cancel — plus an edit screen. Directions use coordinates when present and fall back to a venue-name search, because a name a human typed is more use to a driver than nothing.
+
+This also gives the 6B waitlist endpoints their first UI: a host can now promote from the queue.
+
+Gates: 48 files / 406 unit tests, 16 files / 125 integration tests, typecheck, lint, 705/705 parity, 5-tab baseline, `expo export --platform ios`.
+
+**Not built:** no player-facing "join the waitlist" button yet — the endpoint exists and only the host side of the queue has UI. Editing kickoff time and the crew-first opening time are API-only; the edit screen covers place, notes and publication.
+
+**Remaining Phase 6 packages, not started:** 6D match lifecycle — edit, cancel, invite, directions (AF-009) · 6D guest discovery and auth return intent (AF-001, AF-002) · 6E next-match and needs-attention sections, progressive creation · 6F merge legacy group detail into Crew. The mobile create flow does not yet expose the host-plays toggle or the crew-first opening time; both default sensibly without it.
 
 ## 9. Phase 7 — Scalability and operational reliability
 

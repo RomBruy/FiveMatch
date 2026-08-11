@@ -24,6 +24,8 @@ import {
   SubmitBehaviourReportSchema,
   ResolveBehaviourReportSchema,
   VoidMatchSchema,
+  EditMatchSchema,
+  CancelMatchSchema,
 } from './schemas'
 import { ErrorCode } from '@fivematch/types'
 import { TEAM_GEN_MAX_GENERATIONS, TEAM_GEN_OVR_FALLBACK } from '@fivematch/types/algorithm-constants'
@@ -1031,6 +1033,45 @@ function sendPostMatchReminders(matchId: string, groupId: string | null): void {
 }
 
 export default router
+
+// ─── Phase 6C — match lifecycle ───────────────────────────────────────────────
+
+// PATCH /v1/matches/:matchId
+// Edit a match that has not happened yet. Format and team shape are not
+// editable: they decide capacity, and changing them after people commit
+// silently invalidates the sheet they said yes to.
+router.patch(
+  '/:matchId',
+  loadMatch,
+  requireMatchHost,
+  asyncHandler(async (req, res) => {
+    const input = EditMatchSchema.parse(req.body)
+    const result = await matchService.editMatch(req.match.id, input)
+
+    if (!result) return res.status(404).json(errorFor(ErrorCode.MATCH_NOT_FOUND, 404))
+    if ('conflict' in result) return res.status(422).json(errorFor(ErrorCode.WRONG_MATCH_STATUS, 422))
+
+    return res.json({ data: { matchId: result.match.id } })
+  }),
+)
+
+// POST /v1/matches/:matchId/cancel
+// Distinct from voiding: cancelled means it never happened, voided means it
+// happened but stops counting toward cards.
+router.post(
+  '/:matchId/cancel',
+  loadMatch,
+  requireMatchHost,
+  asyncHandler(async (req, res) => {
+    const { reason } = CancelMatchSchema.parse(req.body)
+    const result = await matchService.cancelMatch(req.match.id, reason)
+
+    if (!result) return res.status(404).json(errorFor(ErrorCode.MATCH_NOT_FOUND, 404))
+    if ('conflict' in result) return res.status(422).json(errorFor(ErrorCode.WRONG_MATCH_STATUS, 422))
+
+    return res.json({ data: { cancelled: true } })
+  }),
+)
 
 // ─── Phase 6 — waitlist ───────────────────────────────────────────────────────
 

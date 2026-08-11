@@ -828,7 +828,117 @@ async function endSeries(hostInternalId: string, seriesId: string) {
   return { seriesId, cancelledCount }
 }
 
+/** Everyone who should hear that a match changed or was called off. */
+async function affectedUserIds(matchId: string): Promise<string[]> {
+  const rows = await db
+    .select({ userId: players.userId })
+    .from(matchAttendances)
+    .innerJoin(players, eq(players.id, matchAttendances.playerId))
+    .where(and(
+      eq(matchAttendances.matchId, matchId),
+      eq(matchAttendances.status, 'in'),
+      isNull(players.deletedAt),
+    ))
+
+  return [...new Set(rows.map((row) => row.userId))]
+}
+
+/**
+ * Edit a match that has not happened yet.
+ *
+ * Format, players per team and goalkeeper mode are deliberately not editable:
+ * they decide capacity and team shape, so changing them after people commit
+ * silently invalidates the sheet they said yes to. Everything else — time,
+ * place, price, notes, publication — is fair game.
+ *
+ * Changing kickoff is safe for reliability scoring: cancellations store their
+ * timestamp and the excused/late decision is derived at finalization, so moving
+ * the time simply re-derives against the new one (ADR-028).
+ */
+async function editMatch(matchId: string, input: Record<string, unknown>) {
+  const [match] = await db.select().from(matches).where(eq(matches.id, matchId)).limit(1)
+  if (!match) return null
+
+  // Nothing to edit once it has been played or called off.
+  if (match.status === 'completed' || match.status === 'cancelled') return { conflict: true as const }
+
+  const patch: Record<string, unknown> = { updatedAt: new Date() }
+  const copy = [
+    'durationMinutes', 'location', 'venueName', 'city',
+    'notes', 'visibility', 'openSpots', 'hostPlays',
+  ] as const
+  for (const key of copy) {
+    if (input[key] !== undefined) patch[key] = input[key]
+  }
+  if (input.scheduledAt !== undefined) patch.scheduledAt = new Date(input.scheduledAt as string)
+  if (input.publicOpensAt !== undefined) {
+    patch.publicOpensAt = input.publicOpensAt ? new Date(input.publicOpensAt as string) : null
+  }
+  for (const key of ['latitude', 'longitude', 'pricePerPlayer'] as const) {
+    if (input[key] !== undefined) patch[key] = input[key] === null ? null : String(input[key])
+  }
+
+  const [updated] = await db.update(matches).set(patch).where(eq(matches.id, matchId)).returning()
+
+  // Only worth interrupting people for a change to when or where.
+  const materialChange = input.scheduledAt !== undefined
+    || input.location !== undefined
+    || input.venueName !== undefined
+    || input.city !== undefined
+
+  if (materialChange) {
+    const recipientUserIds = await affectedUserIds(matchId)
+    if (recipientUserIds.length > 0) {
+      notificationService.send({
+        type: 'MATCH_UPDATED',
+        matchId,
+        groupId: updated.groupId,
+        scheduledAt: updated.scheduledAt.toISOString(),
+        recipientUserIds,
+      })
+    }
+  }
+
+  return { match: updated }
+}
+
+/**
+ * Call a match off.
+ *
+ * Distinct from voiding (Phase 4): cancelled means it never happened, voided
+ * means it happened but stops counting. A cancelled match produces no
+ * eligibility, so nothing needs invalidating.
+ */
+async function cancelMatch(matchId: string, reason?: string) {
+  const [match] = await db.select().from(matches).where(eq(matches.id, matchId)).limit(1)
+  if (!match) return null
+  if (match.status === 'completed' || match.status === 'cancelled') return { conflict: true as const }
+
+  // Gathered before the update, while the sheet still says who was coming.
+  const recipientUserIds = await affectedUserIds(matchId)
+
+  const [updated] = await db
+    .update(matches)
+    .set({ status: 'cancelled', notes: reason ? `${match.notes ?? ''}\n[annulé] ${reason}`.trim() : match.notes, updatedAt: new Date() })
+    .where(eq(matches.id, matchId))
+    .returning()
+
+  if (recipientUserIds.length > 0) {
+    notificationService.send({
+      type: 'MATCH_CANCELLED',
+      matchId,
+      groupId: updated.groupId,
+      scheduledAt: updated.scheduledAt.toISOString(),
+      recipientUserIds,
+    })
+  }
+
+  return { match: updated }
+}
+
 export const matchService = {
+  editMatch,
+  cancelMatch,
   createMatch,
   getMatch,
   getSpotCounts,

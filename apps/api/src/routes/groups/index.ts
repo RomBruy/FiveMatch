@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import { z } from 'zod'
 import { eq, and, inArray, isNull, count, ilike, sql } from 'drizzle-orm'
 import { asyncHandler } from '../../middleware/async-handler'
 import { requireGroupMember } from '../../middleware/require-group-member'
@@ -734,6 +735,51 @@ router.delete(
     await membershipService.endMembership(groupId, targetUserId)
 
     return res.json({ data: { removed: true } })
+  }),
+)
+
+// PATCH /v1/groups/:groupId/members/:membershipId/role — organizer only
+//
+// Grant or revoke co-host. The role has existed since the dispute workflow
+// needed somebody impartial to settle a report the organizer was party to
+// (ADR-027), but there was no way to actually appoint one.
+//
+// Only member <-> co_host. Handing over ownership is transfer-organizer, and a
+// pending member is not in the crew yet.
+router.patch(
+  '/:groupId/members/:membershipId/role',
+  requireGroupMember,
+  asyncHandler(async (req, res) => {
+    if (req.user.groupRole !== 'organizer') {
+      return res.status(403).json({
+        error: { code: ErrorCode.FORBIDDEN, message: 'Organizer access required', statusCode: 403 },
+      })
+    }
+
+    const groupId = req.params['groupId'] as string
+    const membershipId = req.params['membershipId'] as string
+    const { role } = z.object({ role: z.enum(['member', 'co_host']) }).parse(req.body)
+
+    const [updated] = await db
+      .update(groupMemberships)
+      .set({ role })
+      .where(and(
+        eq(groupMemberships.groupId, groupId),
+        eq(groupMemberships.id, membershipId),
+        // Never touch the organizer's own row, and never promote someone whose
+        // membership has not been approved.
+        inArray(groupMemberships.role, ['member', 'co_host']),
+        isNull(groupMemberships.deletedAt),
+      ))
+      .returning({ id: groupMemberships.id, role: groupMemberships.role })
+
+    if (!updated) {
+      return res.status(404).json({
+        error: { code: ErrorCode.MEMBER_NOT_FOUND, message: 'Member not found', statusCode: 404 },
+      })
+    }
+
+    return res.json({ data: { membershipId: updated.id, role: updated.role } })
   }),
 )
 

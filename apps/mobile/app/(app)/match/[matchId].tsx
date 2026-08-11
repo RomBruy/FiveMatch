@@ -25,6 +25,7 @@ import { StoryShareGraphic, STORY_EXPORT_WIDTH, STORY_EXPORT_HEIGHT } from '../.
 import { SpotsMeter } from '../../../components/match/SpotsMeter'
 import { TrustRow } from '../../../components/players/TrustRow'
 import { AttendanceFinalization } from '../../../components/match/AttendanceFinalization'
+import { HostMatchActions } from '../../../components/match/HostMatchActions'
 import { ReportPlayerSheet } from '../../../components/match/ReportPlayerSheet'
 import { AttendanceSegmentedPill } from '../../../components/match/AttendanceSegmentedPill'
 import { PrimaryButton } from '../../../components/ui/PrimaryButton'
@@ -440,6 +441,21 @@ export default function MatchScreen() {
         {match.capabilities.canRate && match.completedAt && opponents.length > 0 && matchId && (
           <View style={styles.ratingsSection}>
             <PostMatchRatings matchId={matchId} completedAt={match.completedAt} opponents={opponents} />
+          </View>
+        )}
+
+        {isHost && matchId && match.status !== 'completed' && match.status !== 'cancelled' && (
+          <View style={styles.ratingsSection}>
+            <HostMatchActions
+              matchId={matchId}
+              scheduledAt={match.scheduledAt}
+              venueName={match.venueName ?? null}
+              city={match.city ?? null}
+              latitude={match.latitude ?? null}
+              longitude={match.longitude ?? null}
+              waitlist={sheet?.waitlist ?? []}
+              canCancel
+            />
           </View>
         )}
 

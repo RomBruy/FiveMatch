@@ -152,3 +152,34 @@ export const VoidMatchSchema = z.object({
 })
 
 export type VoidMatchInput = z.infer<typeof VoidMatchSchema>
+
+// ─── Phase 6C — match lifecycle ───────────────────────────────────────────────
+
+/**
+ * Editable match details. Deliberately excludes format, players per team and
+ * goalkeeper mode: those decide capacity and team shape, and changing them once
+ * people have committed silently invalidates the sheet they said yes to.
+ */
+export const EditMatchSchema = z.object({
+  scheduledAt: z.string().datetime().optional(),
+  durationMinutes: z.number().int().positive().max(300).optional(),
+  location: z.string().trim().max(300).nullable().optional(),
+  venueName: z.string().trim().max(200).nullable().optional(),
+  city: z.string().trim().max(120).nullable().optional(),
+  latitude: z.number().min(-90).max(90).nullable().optional(),
+  longitude: z.number().min(-180).max(180).nullable().optional(),
+  pricePerPlayer: z.number().nonnegative().max(999).nullable().optional(),
+  notes: z.string().trim().max(1000).nullable().optional(),
+  visibility: z.enum(['private', 'public']).optional(),
+  openSpots: z.number().int().positive().nullable().optional(),
+  publicOpensAt: z.string().datetime().nullable().optional(),
+  hostPlays: z.boolean().optional(),
+})
+
+export type EditMatchInput = z.infer<typeof EditMatchSchema>
+
+export const CancelMatchSchema = z.object({
+  reason: z.string().trim().max(200).optional(),
+})
+
+export type CancelMatchInput = z.infer<typeof CancelMatchSchema>
