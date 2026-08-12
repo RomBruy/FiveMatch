@@ -142,6 +142,21 @@ async function finalizeMatchInTransaction(
   // moved off result-recording — a team sheet is not proof of turning up.
   const { newlyUnlocked } = await eligibilityService.recordCompletedMatchInTransaction(tx, matchId)
 
+  // Queued inside the transaction that unlocked the cards. Enqueueing after the
+  // commit leaves a window where the card unlocks and the player is never told
+  // — the one moment in this product least acceptable to lose (7C).
+  for (const unlocked of newlyUnlocked) {
+    await notificationService.enqueue(
+      {
+        type: 'CARD_UNLOCKED',
+        groupId: match.groupId,
+        playerId: unlocked.playerId,
+        recipientUserId: unlocked.userId,
+      },
+      { tx },
+    )
+  }
+
   return { finalized, newlyUnlocked }
 }
 
@@ -154,25 +169,9 @@ async function finalizeMatchInTransaction(
  * unlock the system settled on the host's behalf.
  */
 async function finalizeMatch(matchId: string, finalizedByPlayerId: string | null) {
-  const [match] = await db
-    .select({ groupId: matches.groupId })
-    .from(matches)
-    .where(eq(matches.id, matchId))
-    .limit(1)
-
-  const result = await db.transaction((tx) =>
-    finalizeMatchInTransaction(tx, matchId, finalizedByPlayerId))
-
-  for (const unlocked of result.newlyUnlocked) {
-    notificationService.send({
-      type: 'CARD_UNLOCKED',
-      groupId: match?.groupId ?? null,
-      playerId: unlocked.playerId,
-      recipientUserId: unlocked.userId,
-    })
-  }
-
-  return result
+  // Unlock notifications are enqueued inside the transaction, so there is
+  // nothing to announce out here.
+  return db.transaction((tx) => finalizeMatchInTransaction(tx, matchId, finalizedByPlayerId))
 }
 
 /**

@@ -626,7 +626,20 @@ Migration `0024` is additive: one enum, one table, one index.
 
 Gates: 50 files / 429 unit tests, 22 files / 182 integration tests, typecheck, lint.
 
-**Not done:** no call site yet passes `tx` — the capability exists and is tested, but every existing `send()` still enqueues outside its caller's transaction, so a notification can still be queued for a change that later rolls back. Converting the twenty-five sites is a separate, mechanical pass.
+### 7C follow-up — transactional enqueue at the sites that matter — 2026-08-12
+
+Four notifications now commit with the change that caused them, rather than being enqueued after it:
+
+- **`MATCH_CANCELLED`** — a commit followed by a lost notification sends people to a pitch for a match that is not happening. The worst outcome any notification here has.
+- **`MATCH_UPDATED`** — being told the time moved when it did not, or not told when it did, are both worse than either alone, so the edit and its announcement now commit together.
+- **`WAITLIST_SPOT_OPEN`** — being told is the entire value of a waitlist place.
+- **`CARD_UNLOCKED`** — the product's best moment, and the one least acceptable to lose silently.
+
+Asserted end to end: cancelling a match leaves both the cancelled status and its queued notification, in one transaction.
+
+**Deliberately not converted:** the remaining twenty-one sites are informational — `MATCH_FULL`, `SPOT_CLAIMED`, tier changes, MVP and rating reminders. Losing one is a missed nudge rather than someone acting on false information, and several sit in request handlers with no transaction in scope. Converting them would mean restructuring those handlers for a much smaller benefit; the durability the outbox already gives them is enough.
+
+Note on isolation: the integration config sets `fileParallelism: false`, so the table-wide outbox cleanup these tests use cannot interfere across files.
 
 ## 10. Phase 8 — Production infrastructure, ownership and European compliance
 

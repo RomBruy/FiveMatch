@@ -7,6 +7,7 @@ import {
   matchAttendances,
   matchSeries,
   matches,
+  notificationOutbox,
   players,
   users,
 } from '../../db/schema'
@@ -28,6 +29,7 @@ const hoursFromNow = (h: number) => new Date(Date.now() + h * 60 * 60 * 1000)
 const created: string[] = []
 
 async function cleanup() {
+  await db.delete(notificationOutbox)
   if (created.length > 0) {
     await db.delete(matchAttendances).where(inArray(matchAttendances.matchId, created))
     await db.delete(matches).where(inArray(matches.id, created))
@@ -158,6 +160,28 @@ describe('Phase 6 publication and host participation', () => {
     const spots = await attendanceService.getSpots(await reload(match.id))
 
     expect(spots.spotsRemaining).toBeGreaterThan(0)
+  })
+
+  it('queues the cancellation notification in the same transaction as the cancel', async () => {
+    const match = await createMatch({ visibility: 'public' })
+
+    const before = await db.select({ id: notificationOutbox.id }).from(notificationOutbox)
+      .where(eq(notificationOutbox.type, 'MATCH_CANCELLED'))
+
+    await matchService.cancelMatch(match.id, 'pitch flooded')
+
+    const after = await db.select({ payload: notificationOutbox.payload })
+      .from(notificationOutbox)
+      .where(eq(notificationOutbox.type, 'MATCH_CANCELLED'))
+
+    // The host is seeded onto their own sheet, so there is someone to tell.
+    // A commit followed by a lost notification would send them to a pitch for
+    // a match that is not happening (7C).
+    expect(after.length).toBe(before.length + 1)
+    expect((after.at(-1)?.payload as { matchId: string }).matchId).toBe(match.id)
+
+    const [row] = await db.select({ status: matches.status }).from(matches).where(eq(matches.id, match.id))
+    expect(row.status).toBe('cancelled')
   })
 
   it('offers nothing publicly on a private match', async () => {

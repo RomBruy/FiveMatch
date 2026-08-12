@@ -891,26 +891,31 @@ async function editMatch(matchId: string, input: Record<string, unknown>) {
     if (input[key] !== undefined) patch[key] = input[key] === null ? null : String(input[key])
   }
 
-  const [updated] = await db.update(matches).set(patch).where(eq(matches.id, matchId)).returning()
-
   // Only worth interrupting people for a change to when or where.
   const materialChange = input.scheduledAt !== undefined
     || input.location !== undefined
     || input.venueName !== undefined
     || input.city !== undefined
 
-  if (materialChange) {
-    const recipientUserIds = await affectedUserIds(matchId)
-    if (recipientUserIds.length > 0) {
-      notificationService.send({
+  const recipientUserIds = materialChange ? await affectedUserIds(matchId) : []
+
+  // The edit and its announcement commit together: someone told the time moved
+  // when it did not, or not told when it did, are both worse than either alone.
+  const updated = await db.transaction(async (tx) => {
+    const [row] = await tx.update(matches).set(patch).where(eq(matches.id, matchId)).returning()
+
+    if (materialChange && recipientUserIds.length > 0) {
+      await notificationService.enqueue({
         type: 'MATCH_UPDATED',
         matchId,
-        groupId: updated.groupId,
-        scheduledAt: updated.scheduledAt.toISOString(),
+        groupId: row.groupId,
+        scheduledAt: row.scheduledAt.toISOString(),
         recipientUserIds,
-      })
+      }, { tx })
     }
-  }
+
+    return row
+  })
 
   return { match: updated }
 }
@@ -930,21 +935,28 @@ async function cancelMatch(matchId: string, reason?: string) {
   // Gathered before the update, while the sheet still says who was coming.
   const recipientUserIds = await affectedUserIds(matchId)
 
-  const [updated] = await db
-    .update(matches)
-    .set({ status: 'cancelled', notes: reason ? `${match.notes ?? ''}\n[annulé] ${reason}`.trim() : match.notes, updatedAt: new Date() })
-    .where(eq(matches.id, matchId))
-    .returning()
+  // Cancelling and announcing it commit together. A commit followed by a lost
+  // notification sends people to a pitch for a match that is not happening —
+  // the worst outcome any notification in this product has.
+  const updated = await db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(matches)
+      .set({ status: 'cancelled', notes: reason ? `${match.notes ?? ''}\n[annulé] ${reason}`.trim() : match.notes, updatedAt: new Date() })
+      .where(eq(matches.id, matchId))
+      .returning()
 
-  if (recipientUserIds.length > 0) {
-    notificationService.send({
-      type: 'MATCH_CANCELLED',
-      matchId,
-      groupId: updated.groupId,
-      scheduledAt: updated.scheduledAt.toISOString(),
-      recipientUserIds,
-    })
-  }
+    if (recipientUserIds.length > 0) {
+      await notificationService.enqueue({
+        type: 'MATCH_CANCELLED',
+        matchId,
+        groupId: row.groupId,
+        scheduledAt: row.scheduledAt.toISOString(),
+        recipientUserIds,
+      }, { tx })
+    }
+
+    return row
+  })
 
   return { match: updated }
 }

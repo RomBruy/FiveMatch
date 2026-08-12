@@ -100,7 +100,6 @@ async function markAttendance(
   let shouldNotifyFull = false
   let hostUserId: string | null = null
   let waitlistPromoteeUserId: string | null = null
-  let waitlistPromoteePlayerId: string | null = null
 
   await db.transaction(async (tx) => {
     // Serialize every seat decision on this match.
@@ -201,8 +200,19 @@ async function markAttendance(
             .where(eq(players.id, nextWaitlist.playerId))
             .limit(1)
 
-          waitlistPromoteePlayerId = nextWaitlist.playerId
           waitlistPromoteeUserId = promoted?.userId ?? null
+
+          // Announced inside the transaction that gave them the seat. Enqueueing
+          // afterwards leaves a window where someone is promoted and never told,
+          // which is the entire value of a waitlist place (7C).
+          if (waitlistPromoteeUserId) {
+            await notificationService.enqueue({
+              type: 'WAITLIST_SPOT_OPEN',
+              matchId,
+              groupId: match.groupId,
+              recipientUserId: waitlistPromoteeUserId,
+            }, { tx })
+          }
         }
       }
     }
@@ -217,14 +227,7 @@ async function markAttendance(
     })
   }
 
-  if (waitlistPromoteeUserId && waitlistPromoteePlayerId) {
-    notificationService.send({
-      type: 'WAITLIST_SPOT_OPEN',
-      matchId,
-      groupId: match.groupId,
-      recipientUserId: waitlistPromoteeUserId,
-    })
-  }
+  // The promotion notification is enqueued inside the transaction above.
 }
 
 /** Crew if they belong to the match's group, otherwise they came off discovery. */
