@@ -9,6 +9,7 @@ import { ErrorCode } from '@fivematch/types'
 import { asyncHandler } from '../../middleware/async-handler'
 import { bankrollService } from '../../services/pronos/bankroll.service'
 import { pronosFeedService } from '../../services/pronos/pronos-feed.service'
+import { attentionService } from '../../services/matches/attention.service'
 import { playerProfileService } from '../../services/players/player-profile.service'
 import { logger } from '../../lib/logger'
 
@@ -44,6 +45,20 @@ router.get(
     if (!req.user.playerId) return res.status(404).json(notFound())
     const balance = await bankrollService.getBalance(req.user.playerId)
     return res.json({ data: { balance, startingBankroll: PRONOS_STARTING_BANKROLL } })
+  }),
+)
+
+// GET /v1/players/me/attention
+//
+// What is actually waiting on this person, ordered by how much someone else is
+// blocked by it. A host who has not recorded a result is holding up everyone's
+// ratings and cards; an unanswered RSVP only affects the person who owes it.
+router.get(
+  '/me/attention',
+  asyncHandler(async (req, res) => {
+    if (!req.user.playerId || !req.user.internalId) return res.status(404).json(notFound())
+    const items = await attentionService.getAttention(req.user.internalId, req.user.playerId)
+    return res.json({ data: items })
   }),
 )
 

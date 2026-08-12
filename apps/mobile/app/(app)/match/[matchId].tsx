@@ -12,7 +12,7 @@ import { Fonts, Radius } from '../../../constants/tokens'
 import { httpClient } from '../../../lib/api-client'
 import { haptics } from '../../../lib/haptics'
 import {
-  useMatch, useAttendances, useJoinMatch, useLeaveMatch,
+  useMatch, useAttendances, useJoinMatch, useJoinWaitlist, useLeaveMatch,
   useSetAttendance, useSetVisibility, errorCodeOf, matchKeys,
   type AttendanceEntry,
 } from '../../../lib/matches'
@@ -91,6 +91,10 @@ export default function MatchScreen() {
   )
 
   const isHost = match?.capabilities.canManageAttendance ?? false
+  const joinWaitlist = useJoinWaitlist(matchId)
+  // Their own place in the queue, so the screen can say where they stand rather
+  // than only that the match is full.
+  const myWaitlistPosition = sheet?.waitlist.find((e) => e.playerId === sheet.myPlayerId)?.waitlistPosition ?? null
   const [reportOpen, setReportOpen] = useState(false)
   // Server-authored, and manager-only. Once settled the section reads as done
   // rather than offering the action again.
@@ -282,7 +286,25 @@ export default function MatchScreen() {
                 glow={false}
               />
             )}
-            {isOutsider && !match.capabilities.canJoin && match.spotsRemaining === 0 && (
+            {match.capabilities.canJoinWaitlist && (
+              <SecondaryButton
+                label={t('match.cta.joinWaitlist')}
+                onPress={() => void runAction(async () => {
+                  const { waitlistPosition } = await joinWaitlist.mutateAsync()
+                  Alert.alert(t('match.cta.waitlistJoined', { position: waitlistPosition }))
+                })}
+                disabled={joinWaitlist.isPending}
+              />
+            )}
+
+            {myWaitlistPosition !== null && (
+              <Text style={styles.mutedNote}>
+                {t('match.cta.waitlistPosition', { position: myWaitlistPosition })}
+              </Text>
+            )}
+
+            {isOutsider && !match.capabilities.canJoin && !match.capabilities.canJoinWaitlist
+              && match.spotsRemaining === 0 && (
               <Text style={styles.mutedNote}>{t('match.cta.fullNote')}</Text>
             )}
 

@@ -466,6 +466,20 @@ Gates: 48 files / 406 unit tests, 16 files / 125 integration tests, typecheck, l
 
 **Not built:** no player-facing "join the waitlist" button yet — the endpoint exists and only the host side of the queue has UI. Editing kickoff time and the crew-first opening time are API-only; the edit screen covers place, notes and publication.
 
+### 6E local completion record — 2026-08-12
+
+Needs-attention, and the player side of the waitlist.
+
+- `GET /v1/players/me/attention` answers "what is waiting on me" in one call: missing result, unsettled sheet, unrated opponents, unanswered RSVP. One endpoint rather than four client-side queries, because it is a single question and assembling it in the UI would put the ordering judgement somewhere it cannot be tested.
+- **Ordered by how much someone else is blocked.** A host who has not recorded a result is holding up everyone's ratings, cards and bet settlement; an unanswered RSVP only affects the person who owes it. The order is asserted in a test rather than left as a comment.
+- Cancelled and voided matches are excluded — neither is anyone's problem any more — as is anything older than 30 days.
+- `NeedsAttention` sits at the top of Mes matchs and **renders nothing when there is nothing to do**. An empty "needs attention" box is worse than no box: it trains people to ignore the space.
+- **The player-facing waitlist button finally exists.** 6B shipped the endpoint with only a host-side UI, so a full match still showed nothing but a note saying it was full. A player can now queue and see their position.
+
+Gates: 48 files / 406 unit tests, 17 files / 135 integration tests, typecheck, lint, 713/713 parity, 5-tab baseline, `expo export --platform ios`.
+
+**Not built:** progressive match creation (essential fields first, advanced second) is still outstanding from this package — the create flow is unchanged and does not expose host-plays or the crew-first opening time.
+
 **Remaining Phase 6 packages, not started:** 6D match lifecycle — edit, cancel, invite, directions (AF-009) · 6D guest discovery and auth return intent (AF-001, AF-002) · 6E next-match and needs-attention sections, progressive creation · 6F merge legacy group detail into Crew. The mobile create flow does not yet expose the host-plays toggle or the crew-first opening time; both default sensibly without it.
 
 ## 9. Phase 7 — Scalability and operational reliability

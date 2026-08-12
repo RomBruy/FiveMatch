@@ -332,6 +332,26 @@ export function useJoinMatch(matchId: string | undefined) {
   })
 }
 
+/**
+ * Queue for a full published match.
+ *
+ * A full match used to offer nothing but a note saying it was full, which is
+ * the worst answer available — it is the match they want, and places open up
+ * constantly as people cancel.
+ */
+export function useJoinWaitlist(matchId: string | undefined) {
+  const invalidate = useSeatInvalidation(matchId)
+  return useMutation({
+    mutationFn: async () => {
+      const { data } = await httpClient.post<{ data: { waitlistPosition: number } }>(
+        `/v1/matches/${matchId}/waitlist`,
+      )
+      return data.data
+    },
+    onSettled: invalidate,
+  })
+}
+
 export function useLeaveMatch(matchId: string | undefined) {
   const invalidate = useSeatInvalidation(matchId)
   return useMutation({

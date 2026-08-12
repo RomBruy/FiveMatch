@@ -14,6 +14,7 @@ import { StaggerItem } from '../../components/ui/Stagger'
 import { FormDots } from '../../components/ui/FormDots'
 import { DOCK_CLEARANCE } from '../../components/ui/TabDock'
 import { MatchCard } from '../../components/match/MatchCard'
+import { NeedsAttention } from '../../components/match/NeedsAttention'
 import { useMyMatches, type MyMatch } from '../../lib/matches'
 
 /**
@@ -63,6 +64,8 @@ export default function MyMatchesTab() {
       <Text style={styles.title}>
         {t('myMatches.title')}<Text style={styles.titleAccent}>.</Text>
       </Text>
+
+      {scope === 'upcoming' && <NeedsAttention />}
 
       <View style={styles.tabs}>
         <Chip
