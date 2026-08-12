@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { requestPushPermission } from '../hooks/use-push-registration'
 import { httpClient } from './api-client'
 import type { DiscoveryLocation } from '../hooks/use-discovery-location'
 import type {
@@ -328,6 +329,11 @@ export function useJoinMatch(matchId: string | undefined) {
   const invalidate = useSeatInvalidation(matchId)
   return useMutation({
     mutationFn: () => httpClient.post(`/v1/matches/${matchId}/join`),
+    onSuccess: () => {
+      // Now notifications mean something: this person has a place in a real
+      // fixture that can move, fill or be called off (AF-003).
+      void requestPushPermission()
+    },
     onSettled: invalidate,
   })
 }
@@ -342,6 +348,10 @@ export function useJoinMatch(matchId: string | undefined) {
 export function useJoinWaitlist(matchId: string | undefined) {
   const invalidate = useSeatInvalidation(matchId)
   return useMutation({
+    onSuccess: () => {
+      // The whole value of a waitlist place is being told when it comes up.
+      void requestPushPermission()
+    },
     mutationFn: async () => {
       const { data } = await httpClient.post<{ data: { waitlistPosition: number } }>(
         `/v1/matches/${matchId}/waitlist`,

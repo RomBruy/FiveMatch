@@ -1,4 +1,5 @@
 import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native'
+import { requestPushPermission } from '../../../hooks/use-push-registration'
 import { useTranslation } from 'react-i18next'
 import { useRouter } from 'expo-router'
 import { useForm, Controller } from 'react-hook-form'
@@ -95,6 +96,12 @@ export default function CreateMatchScreen() {
   const [publish, setPublish] = useState(true)
   const [crewId, setCrewId] = useState<string | null>(null)
   const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(null)
+  // Essentials first, the rest behind a disclosure. Everything below has a
+  // sensible default, so a host who never opens it still creates a good match.
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [hostPlays, setHostPlays] = useState(true)
+  const [limitSpots, setLimitSpots] = useState(false)
+  const [crewFirstHours, setCrewFirstHours] = useState(0)
 
   // Crews the user can host for. Absent for most users — the picker only shows
   // when there is genuinely a choice to make.
@@ -160,11 +167,23 @@ export default function CreateMatchScreen() {
         pricePerPlayer: price !== null && !Number.isNaN(price) ? price : null,
         notes: data.notes.trim() || null,
         visibility: publish ? 'public' : 'private',
-        openSpots: publish ? Math.max(1, parseInt(data.openSpots, 10) || 1) : null,
+        // Null publishes whatever is actually left. The client used to force a
+        // minimum of 1, so every public match offered a single place however
+        // big it was — the API default changed in 6A and this did not.
+        openSpots: publish && limitSpots
+          ? Math.max(1, parseInt(data.openSpots, 10) || 1)
+          : null,
+        hostPlays,
+        publicOpensAt: publish && crewFirstHours > 0
+          ? new Date(Date.now() + crewFirstHours * 60 * 60 * 1000).toISOString()
+          : null,
         recurrence: data.recurrence === 'none' ? null : { frequency: data.recurrence },
       })
 
       await queryClient.invalidateQueries({ queryKey: ['matches'] })
+      // A host is the person notifications serve most — people joining,
+      // dropping out, the sheet filling up (AF-003).
+      void requestPushPermission()
       router.replace(`/(app)/match/${created.data.id}` as never)
     } catch (err) {
       const code = (err as { response?: { data?: { error?: { code?: string } } } })
@@ -302,24 +321,82 @@ export default function CreateMatchScreen() {
           />
         </View>
 
-        {publish && (
-          <>
-            <Text style={styles.subLabel}>{t('match.create.openSpotsLabel')}</Text>
-            <Controller
-              control={control}
-              name="openSpots"
-              render={({ field: { onChange, value } }) => (
-                <Stepper value={value} onChange={onChange} min={1} max={PLAYERS_MAX * 2} />
-              )}
-            />
-            {!canPublish && (
-              <View style={styles.publishWarning}>
-                <InfoStrip variant="info" message={t('match.create.locationRequired')} />
-              </View>
-            )}
-          </>
+        {publish && !canPublish && (
+          <View style={styles.publishWarning}>
+            <InfoStrip variant="info" message={t('match.create.locationRequired')} />
+          </View>
         )}
       </View>
+
+      {/* ── Everything else, defaulted and folded away ─────────────────── */}
+      <PressableScale
+        onPress={() => setShowAdvanced((v) => !v)}
+        style={styles.disclosure}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: showAdvanced }}
+      >
+        <Text style={styles.disclosureText}>{t('match.create.advanced')}</Text>
+        <Ionicons
+          name={showAdvanced ? 'chevron-up' : 'chevron-down'}
+          size={16}
+          color={Colors.inkSecondary}
+        />
+      </PressableScale>
+
+      {showAdvanced && (
+        <View style={styles.advanced}>
+          <View style={styles.toggleRow}>
+            <View style={styles.toggleText}>
+              <Text style={styles.toggleLabel}>{t('match.create.hostPlays')}</Text>
+              <Text style={styles.toggleHelp}>{t('match.create.hostPlaysHelp')}</Text>
+            </View>
+            <Chip
+              label={hostPlays ? t('common.on') : t('common.off')}
+              active={hostPlays}
+              onPress={() => setHostPlays((v) => !v)}
+            />
+          </View>
+
+          {publish && (
+            <>
+              <View style={styles.toggleRow}>
+                <View style={styles.toggleText}>
+                  <Text style={styles.toggleLabel}>{t('match.create.limitSpots')}</Text>
+                  <Text style={styles.toggleHelp}>{t('match.create.limitSpotsHelp')}</Text>
+                </View>
+                <Chip
+                  label={limitSpots ? t('common.on') : t('common.off')}
+                  active={limitSpots}
+                  onPress={() => setLimitSpots((v) => !v)}
+                />
+              </View>
+
+              {limitSpots && (
+                <Controller
+                  control={control}
+                  name="openSpots"
+                  render={({ field: { onChange, value } }) => (
+                    <Stepper value={value} onChange={onChange} min={1} max={PLAYERS_MAX * 2} />
+                  )}
+                />
+              )}
+
+              {crewId && (
+                <>
+                  <Text style={styles.subLabel}>{t('match.create.crewFirst')}</Text>
+                  <Text style={styles.toggleHelp}>{t('match.create.crewFirstHelp')}</Text>
+                  <Stepper
+                    value={String(crewFirstHours)}
+                    onChange={(v) => setCrewFirstHours(parseInt(v, 10) || 0)}
+                    min={0}
+                    max={72}
+                  />
+                </>
+              )}
+            </>
+          )}
+        </View>
+      )}
 
       {/* ── Level, format, price ──────────────────────────────────────── */}
       <Text style={styles.label}>{t('match.create.levelLabel')}</Text>
@@ -565,6 +642,22 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   inputError: { borderColor: Colors.primary },
+  disclosure: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+  },
+  disclosureText: {
+    fontFamily: Fonts.interSemiBold,
+    fontSize: 13,
+    color: Colors.inkSecondary,
+  },
+  advanced: { gap: 12, marginBottom: 8 },
+  toggleRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  toggleText: { flex: 1, gap: 3 },
+  toggleLabel: { fontFamily: Fonts.interSemiBold, fontSize: 14, color: Colors.ink },
+  toggleHelp: { fontFamily: Fonts.inter, fontSize: 11, color: Colors.inkDisabled },
   stepper: {
     flexDirection: 'row',
     alignItems: 'center',

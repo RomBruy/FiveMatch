@@ -546,7 +546,21 @@ All six packages implemented locally. Findings along the way outnumbered the pla
 
 Closes AF-005, AF-007, AF-008, AF-009 and the discovery/return-intent halves of AF-001 and AF-002.
 
-**Outstanding:** progressive match creation (essential fields first) was never built — the create flow still does not expose host-plays or the crew-first opening time, both of which 6A added to the API. Contextual push permission (AF-003) is untouched. match lifecycle — edit, cancel, invite, directions (AF-009) · 6D guest discovery and auth return intent (AF-001, AF-002) · 6E next-match and needs-attention sections, progressive creation · 6F merge legacy group detail into Crew. The mobile create flow does not yet expose the host-plays toggle or the crew-first opening time; both default sensibly without it.
+### Phase 6 gap closure — 2026-08-12
+
+Both remaining gaps closed, and a fourth instance of the 6A regression found in the client.
+
+**The create screen was still forcing `openSpots` to at least 1.** `Math.max(1, parseInt(...) || 1)` with a default of `'1'`, so every public match created from the app offered exactly one place however large it was — the API default changed in 6A and the client never did. This is the same defect in its fourth location, and the first one on the write path rather than a read path: no amount of fixing the readers would have helped, because the wrong value was being stored.
+
+**Progressive creation.** Essentials stay on the surface; host-plays, the public-places cap and crew-first hours sit behind an "Advanced options" disclosure. Everything there has a working default, so a host who never opens it still creates a good match. Publishing every remaining place is now the default rather than something to configure.
+
+**Contextual push permission (AF-003).** `usePushRegistration` no longer prompts — it refreshes a token only when permission is already granted. The ask moved to `requestPushPermission`, called after joining a match, joining a waitlist, or hosting one. It is a no-op when the OS reports `canAskAgain: false`, because iOS will not show the dialog twice and re-asking only makes the app look like it is nagging.
+
+The reasoning behind moving it: the prompt fired on app entry, before the user had seen a single match. That asks a stranger for something with nothing offered in return, and a reflexive refusal costs every future notification permanently.
+
+Gates: 49 files / 417 unit tests, 19 files / 150 integration tests, mobile 11 tests, typecheck, lint, 734/734 parity, 5-tab baseline, `expo export --platform ios`.
+
+**Still outstanding from Phase 6:** nothing. match lifecycle — edit, cancel, invite, directions (AF-009) · 6D guest discovery and auth return intent (AF-001, AF-002) · 6E next-match and needs-attention sections, progressive creation · 6F merge legacy group detail into Crew. The mobile create flow does not yet expose the host-plays toggle or the crew-first opening time; both default sensibly without it.
 
 ## 9. Phase 7 — Scalability and operational reliability
 
