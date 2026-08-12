@@ -350,3 +350,30 @@ No phase is complete with a failing required test, an excluded critical test, or
 No UI-bearing phase is complete without its PR-055 implementation record and visual/accessibility verification.
 
 Phase 8 requires the normal command gate plus dated staging rehearsal, restore, monitoring, access-revocation, security/privacy and owner-approval evidence. A successful deploy command alone is not a pass.
+
+## Lifecycle scenario tests — the shape that was missing
+
+Added 2026-08-12, after Phase 6 surfaced four defects that every existing suite passed over.
+
+### Why the existing shapes did not catch them
+
+Route tests mock the database, so the SQL never runs. Integration tests call services directly, so routes and serializers never run. Both shapes were healthy; the gap between them was not covered at all, and that is precisely where the defects lived:
+
+- three copies of the availability arithmetic disagreed after a change to what a null `open_spots` means, and only one copy had a test;
+- a correlated subquery compared a match id to the attendance row's own id, so every attendance count returned zero — on the public preview a host pastes into WhatsApp, on discovery, and on `viewerJoined`.
+
+### Two rules that follow
+
+**1. Never assert an aggregate only at zero.** The subquery defect survived because every fixture had zero confirmed players. Zero was simultaneously the correct answer and the broken one, so no assertion could tell them apart. Every count, total or availability figure must be asserted in at least one case where the right answer is non-zero and asymmetric.
+
+**2. Derived values must be asserted across every surface that reports them.** `apps/api/src/tests/integration/lifecycle-scenario.integration.test.ts` requests the same match through the public preview, guest discovery and authenticated match detail, and requires all three to agree. Duplication can return; silent divergence cannot.
+
+### What the scenario test is
+
+HTTP in, real PostgreSQL out. **Only Clerk is faked** — `requireAuth` and `getAuth` are stubbed so a test header supplies the identity. Authorization, capability resolution, `attachPlayer`, serializers and every SQL statement are the real ones, because that is where the bugs were.
+
+Both defect classes were verified to fail it before being trusted: reintroducing the subquery bug produces `confirmedCount: 0`, and reintroducing the `openSpots ?? 0` default produces `spotsRemaining: 0`. A regression test nobody has watched fail is a wish.
+
+### When to add to it
+
+Any new surface that reports a derived number belongs in `availabilityEverywhere`. Any new lifecycle step — publication, waitlist, finalization, card unlock — is worth a leg here rather than only a service-level test.
