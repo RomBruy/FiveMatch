@@ -183,3 +183,19 @@ export const CancelMatchSchema = z.object({
 })
 
 export type CancelMatchInput = z.infer<typeof CancelMatchSchema>
+
+// ─── Phase 6D — guest discovery ───────────────────────────────────────────────
+
+/**
+ * Anonymous discovery query. The limit is capped hard: an unauthenticated
+ * caller has no business pulling a whole city in one request.
+ */
+export const GuestDiscoverQuerySchema = z.object({
+  latitude: z.coerce.number().min(-90).max(90).optional(),
+  longitude: z.coerce.number().min(-180).max(180).optional(),
+  radiusKm: z.coerce.number().positive().max(100).optional(),
+  city: z.string().trim().min(1).max(120).optional(),
+  limit: z.coerce.number().int().positive().max(50).default(20),
+})
+
+export type GuestDiscoverQuery = z.infer<typeof GuestDiscoverQuerySchema>

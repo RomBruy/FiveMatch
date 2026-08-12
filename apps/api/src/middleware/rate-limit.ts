@@ -9,6 +9,22 @@ export const apiRateLimit = rateLimit({
   message: { error: { code: 'RATE_LIMITED', message: 'Too many requests', statusCode: 429 } },
 })
 
+/**
+ * Unauthenticated endpoints, keyed by IP.
+ *
+ * Tighter than the authenticated limit because there is no account behind a
+ * caller here — nothing to suspend, and nothing that makes bulk collection
+ * costly. Generous enough for a person browsing, mean enough that scraping a
+ * city's fixtures is tedious.
+ */
+export const publicRateLimit = rateLimit({
+  windowMs: 60_000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: { code: 'RATE_LIMITED', message: 'Too many requests', statusCode: 429 } },
+})
+
 export const teamGenRateLimit = rateLimit({
   windowMs: 60_000,
   max: TEAM_GEN_RATE_LIMIT_PER_MIN,

@@ -477,6 +477,11 @@ async function discoverMatches(filters: DiscoverFilters, viewerPlayerId: string 
     eq(matches.visibility, 'public'),
     inArray(matches.status, ['attendance_open', 'attendance_locked', 'teams_generated']),
     gte(matches.scheduledAt, from),
+    // A crew-first match is private until its window opens. Without this it was
+    // listed in discovery immediately, which is the opposite of first refusal
+    // (ADR-033).
+    sql`(${matches.publicOpensAt} IS NULL OR ${matches.publicOpensAt} <= now())`,
+    isNull(matches.voidedAt),
   ]
 
   if (filters.to) conditions.push(lte(matches.scheduledAt, filters.to))
@@ -527,17 +532,17 @@ async function discoverMatches(filters: DiscoverFilters, viewerPlayerId: string 
       distanceKm: distanceExpr,
       confirmedCount: sql<number>`(
         SELECT COUNT(*)::int FROM match_attendances ma
-        WHERE ma.match_id = ${matches.id} AND ma.status = 'in' AND ma.waitlist_position IS NULL
+        WHERE ma.match_id = "matches"."id" AND ma.status = 'in' AND ma.waitlist_position IS NULL
       )`,
       openTakenCount: sql<number>`(
         SELECT COUNT(*)::int FROM match_attendances ma
-        WHERE ma.match_id = ${matches.id} AND ma.status = 'in'
+        WHERE ma.match_id = "matches"."id" AND ma.status = 'in'
           AND ma.waitlist_position IS NULL AND ma.source = 'open'
       )`,
       viewerJoined: viewerPlayerId
         ? sql<boolean>`EXISTS (
             SELECT 1 FROM match_attendances ma
-            WHERE ma.match_id = ${matches.id} AND ma.player_id = ${viewerPlayerId} AND ma.status = 'in'
+            WHERE ma.match_id = "matches"."id" AND ma.player_id = ${viewerPlayerId} AND ma.status = 'in'
           )`
         : sql<boolean>`false`,
     })
@@ -619,7 +624,7 @@ async function getMyMatches(
   if (playerId) {
     stake.push(sql`EXISTS (
       SELECT 1 FROM match_attendances ma
-      WHERE ma.match_id = ${matches.id} AND ma.player_id = ${playerId}
+      WHERE ma.match_id = "matches"."id" AND ma.player_id = ${playerId}
     )`)
   }
 
@@ -653,18 +658,18 @@ async function getMyMatches(
       mvpPlayerId: matches.mvpPlayerId,
       confirmedCount: sql<number>`(
         SELECT COUNT(*)::int FROM match_attendances ma
-        WHERE ma.match_id = ${matches.id} AND ma.status = 'in' AND ma.waitlist_position IS NULL
+        WHERE ma.match_id = "matches"."id" AND ma.status = 'in' AND ma.waitlist_position IS NULL
       )`,
       myStatus: playerId
         ? sql<string | null>`(
             SELECT ma.status FROM match_attendances ma
-            WHERE ma.match_id = ${matches.id} AND ma.player_id = ${playerId} LIMIT 1
+            WHERE ma.match_id = "matches"."id" AND ma.player_id = ${playerId} LIMIT 1
           )`
         : sql<string | null>`NULL`,
       myWaitlistPosition: playerId
         ? sql<number | null>`(
             SELECT ma.waitlist_position FROM match_attendances ma
-            WHERE ma.match_id = ${matches.id} AND ma.player_id = ${playerId} LIMIT 1
+            WHERE ma.match_id = "matches"."id" AND ma.player_id = ${playerId} LIMIT 1
           )`
         : sql<number | null>`NULL`,
       myTeamSide: playerId

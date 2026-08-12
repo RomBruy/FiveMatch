@@ -502,7 +502,29 @@ Gates: 49 files / 417 unit tests, 17 files / 135 integration tests, mobile 11 te
 
 **Not built — 6D part 2:** guest discovery (AF-001) is untouched. It needs a pre-auth discovery endpoint with its own rate limit and a guest DTO, plus a signed-out browse screen. Deliberately left for a fresh pass rather than rushed onto the end of this one: it is the only remaining change that opens an unauthenticated surface, and it deserves the same care the return-intent design got.
 
-**Remaining Phase 6 packages, not started:** 6D part 2 (guest discovery) · 6F match lifecycle — edit, cancel, invite, directions (AF-009) · 6D guest discovery and auth return intent (AF-001, AF-002) · 6E next-match and needs-attention sections, progressive creation · 6F merge legacy group detail into Crew. The mobile create flow does not yet expose the host-plays toggle or the crew-first opening time; both default sensibly without it.
+### 6D part 2 local completion record — 2026-08-12
+
+Guest discovery (AF-001), and a pre-existing bug found by testing it.
+
+**A correlated-subquery bug that silenced every attendance count.** Drizzle renders `${matches.id}` inside a `sql` template as bare `"id"`, unqualified. Inside `SELECT ... FROM match_attendances ma WHERE ma.match_id = "id"`, that resolves to the *attendance row's own* primary key, so the condition was never true and the count was always zero. Eleven instances across three files.
+
+Consequences, all live until now: the **public match preview** — the acquisition surface a host pastes into WhatsApp — always reported zero confirmed players and therefore wrong availability; authenticated discovery did the same; and `viewerJoined` was always false. Fixed by qualifying the reference as `"matches"."id"` in all eleven. User-data bindings were left as parameters and only the column reference became literal text.
+
+This was found because a guest-discovery test seeded a full match and got the wrong answer. Nothing else had ever asserted a non-zero count from these queries.
+
+**Guest discovery itself:**
+
+- `GET /v1/discover/public`, mounted before `requireAuth`. Three things keep an anonymous surface safe: its own tighter IP-keyed rate limit (30/min against the authenticated 100), a **dedicated query that never selects address, venue, coordinates or notes** rather than a shared one that filters afterwards, and output parsed through the strict public schema so a column added later throws rather than leaking.
+- **The host name is withheld**, unlike the single-match preview. That preview needs an unguessable match id; a list hands out every host in a city to anyone who asks. Distance is given without coordinates.
+- Crew-first matches stay out until their window opens. **The authenticated discovery had the same gap** and never checked `publicOpensAt`, so it listed crew-first matches immediately — fixed alongside.
+- The two other pre-auth routes gained the same rate limit; they had none.
+- Mobile: `(public)/discover.tsx`, reachable from sign-in. Tapping through goes to the existing shared-link preview, which 6D part 1 taught to carry the match through sign-up — so the two halves compose and nobody loses the fixture they came for.
+
+Gates: 49 files / 417 unit tests, 18 files / 146 integration tests, mobile 11 tests, typecheck, lint, 723/723 parity, 5-tab baseline, `expo export --platform ios`.
+
+**Not covered:** the public preview route has no direct test of its counts. The fix is identical text in all eleven places and guest discovery proves the pattern, but the preview itself is asserted only by typecheck.
+
+**Remaining Phase 6 packages, not started:** 6F match lifecycle — edit, cancel, invite, directions (AF-009) · 6D guest discovery and auth return intent (AF-001, AF-002) · 6E next-match and needs-attention sections, progressive creation · 6F merge legacy group detail into Crew. The mobile create flow does not yet expose the host-plays toggle or the crew-first opening time; both default sensibly without it.
 
 ## 9. Phase 7 — Scalability and operational reliability
 

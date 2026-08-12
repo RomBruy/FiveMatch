@@ -1,4 +1,7 @@
 import { Router } from 'express'
+import { publicRateLimit } from '../middleware/rate-limit'
+import { GuestDiscoverQuerySchema } from './matches/schemas'
+import { guestDiscoveryService } from '../services/matches/guest-discovery.service'
 import { isPubliclyOpen, publicSpotsRemaining } from '../services/matches/availability'
 import { requireAuth } from '@clerk/express'
 import { attachUser } from '../middleware/auth'
@@ -24,11 +27,38 @@ const router = Router()
 router.get('/health', (_req, res) => res.json({ status: 'ok' }))
 
 /**
+ * Guest discovery — open matches, to someone with no account (AF-001).
+ *
+ * Mounted before `requireAuth`, so this is genuinely anonymous. Three things
+ * keep that safe:
+ *
+ * 1. Its own tighter rate limit, keyed by IP. There is no account behind the
+ *    caller, so there is nothing to suspend.
+ * 2. A dedicated query that never selects address, venue, coordinates or notes,
+ *    rather than a shared one that filters them out afterwards.
+ * 3. Output parsed through the strict public schema, so a column added later
+ *    cannot ride out to an anonymous caller — it throws instead.
+ */
+router.get('/discover/public', publicRateLimit, asyncHandler(async (req, res) => {
+  const query = GuestDiscoverQuerySchema.parse(req.query)
+
+  const data = await guestDiscoveryService.discoverPublicMatches({
+    latitude: query.latitude,
+    longitude: query.longitude,
+    radiusKm: query.radiusKm,
+    city: query.city,
+    limit: query.limit,
+  })
+
+  return res.json({ data })
+}))
+
+/**
  * Public preview of an open match. This is the acquisition surface: a host
  * pastes the link into WhatsApp and anyone can see what the game is before
  * installing. Deliberately thin — no player list, no ids beyond the match.
  */
-router.get('/matches/:matchId/preview', asyncHandler(async (req, res) => {
+router.get('/matches/:matchId/preview', publicRateLimit, asyncHandler(async (req, res) => {
   const matchId = req.params['matchId'] as string
 
   const [match] = await db
@@ -49,11 +79,11 @@ router.get('/matches/:matchId/preview', asyncHandler(async (req, res) => {
       status: matches.status,
       confirmedCount: sql<number>`(
         SELECT COUNT(*)::int FROM match_attendances ma
-        WHERE ma.match_id = ${matches.id} AND ma.status = 'in' AND ma.waitlist_position IS NULL
+        WHERE ma.match_id = "matches"."id" AND ma.status = 'in' AND ma.waitlist_position IS NULL
       )`,
       openConfirmedCount: sql<number>`(
         SELECT COUNT(*)::int FROM match_attendances ma
-        WHERE ma.match_id = ${matches.id} AND ma.status = 'in'
+        WHERE ma.match_id = "matches"."id" AND ma.status = 'in'
           AND ma.waitlist_position IS NULL AND ma.source = 'open'
       )`,
     })
@@ -105,7 +135,7 @@ router.get('/matches/:matchId/preview', asyncHandler(async (req, res) => {
   })
 }))
 
-router.get('/invite/:code', asyncHandler(async (req, res) => {
+router.get('/invite/:code', publicRateLimit, asyncHandler(async (req, res) => {
   const code = req.params['code'] as string
 
   const [group] = await db.select({

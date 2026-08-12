@@ -197,6 +197,13 @@ export default function SignIn() {
               <PrimaryButton label={t('auth.signIn.withEmail')} disabled={busy} onPress={handleEmailPassword} />
             </View>
 
+            <Pressable
+              onPress={() => router.push('/(public)/discover' as never)}
+              accessibilityRole="link"
+              style={styles.link}
+            >
+              <Text style={styles.linkText}>{t('guestDiscover.browseWithoutAccount')}</Text>
+            </Pressable>
             <Pressable onPress={() => router.push(`/(auth)/sign-up${nextSuffix}` as never)} accessibilityRole="link" style={styles.link}>
               <Text style={styles.linkText}>{t('auth.signIn.noAccount')}</Text>
             </Pressable>
