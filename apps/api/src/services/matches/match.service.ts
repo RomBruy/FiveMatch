@@ -9,6 +9,7 @@ import {
 } from '@fivematch/types'
 import type { MatchRelation } from '../permissions/capability.service'
 import { trustProjectionService } from '../trust/trust-projection.service'
+import { publicSpotsRemaining } from './availability'
 
 export interface MatchLocationInput {
   location?: string | null
@@ -193,7 +194,9 @@ async function createMatch(hostInternalId: string, data: CreateMatchInput) {
           latitude: data.latitude != null ? String(data.latitude) : null,
           longitude: data.longitude != null ? String(data.longitude) : null,
           visibility: data.visibility ?? 'private',
-          openSpots: data.visibility === 'public' ? (data.openSpots ?? 1) : null,
+          // Null publishes whatever is left. This was missed when the default
+          // changed in 6A, so recurring public matches still offered one place.
+          openSpots: data.visibility === 'public' ? (data.openSpots ?? null) : null,
           skillLevel: data.skillLevel ?? 'casual',
           pricePerPlayer: data.pricePerPlayer != null ? String(data.pricePerPlayer) : null,
           format: data.format,
@@ -282,9 +285,14 @@ async function getSpotCounts(matchId: string, playersPerTeam: number, openSpots:
   const takenFromOpen = bySource['open'] ?? 0
 
   // A published spot is only real if the pitch still has room for it.
-  const remaining = openSpots === null
-    ? 0
-    : Math.max(0, Math.min(openSpots - takenFromOpen, capacity - confirmed))
+  const remaining = publicSpotsRemaining({
+    capacity,
+    confirmed,
+    openConfirmed: takenFromOpen,
+    openSpots,
+    // The caller has already established this match is being published.
+    publiclyOpen: true,
+  })
 
   return { confirmed, capacity, spotsRemaining: remaining }
 }

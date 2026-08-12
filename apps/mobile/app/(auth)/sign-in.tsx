@@ -2,7 +2,7 @@ import * as WebBrowser from 'expo-web-browser'
 import * as AuthSession from 'expo-auth-session'
 import { KeyboardAvoidingView, Platform, ScrollView, View, Text, Pressable, StyleSheet } from 'react-native'
 import { useSSO, useSignIn } from '@clerk/expo'
-import { useRouter } from 'expo-router'
+import { useLocalSearchParams, useRouter } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
 import { Colors } from '../../constants/colors'
@@ -27,6 +27,9 @@ function clerkErrorMessage(err: unknown): string {
 }
 
 export default function SignIn() {
+  const { next } = useLocalSearchParams<{ next?: string }>()
+  // Forwarded verbatim; it is validated where it is finally used.
+  const nextSuffix = next ? `?next=${next}` : ''
   const { t } = useTranslation()
   const router = useRouter()
   const { startSSOFlow } = useSSO()
@@ -48,7 +51,7 @@ export default function SignIn() {
       })
       if (createdSessionId && ssoSetActive) {
         await ssoSetActive({ session: createdSessionId })
-        router.replace('/(auth)/profile-completion')
+        router.replace(`/(auth)/profile-completion${nextSuffix}` as never)
       } else {
         setError(t('auth.signIn.ssoIncomplete'))
       }
@@ -66,7 +69,7 @@ export default function SignIn() {
       setError(clerkErrorMessage(finalizeError))
       return
     }
-    router.replace('/(auth)/profile-completion')
+    router.replace(`/(auth)/profile-completion${nextSuffix}` as never)
   }
 
   const handleEmailPassword = async () => {
@@ -194,7 +197,7 @@ export default function SignIn() {
               <PrimaryButton label={t('auth.signIn.withEmail')} disabled={busy} onPress={handleEmailPassword} />
             </View>
 
-            <Pressable onPress={() => router.push('/(auth)/sign-up')} accessibilityRole="link" style={styles.link}>
+            <Pressable onPress={() => router.push(`/(auth)/sign-up${nextSuffix}` as never)} accessibilityRole="link" style={styles.link}>
               <Text style={styles.linkText}>{t('auth.signIn.noAccount')}</Text>
             </Pressable>
           </View>

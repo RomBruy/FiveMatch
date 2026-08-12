@@ -1,6 +1,6 @@
 import { KeyboardAvoidingView, Platform, ScrollView, View, Text, Pressable, StyleSheet } from 'react-native'
 import { useSignUp } from '@clerk/expo'
-import { useRouter } from 'expo-router'
+import { useLocalSearchParams, useRouter } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
 import { Colors } from '../../constants/colors'
@@ -22,6 +22,9 @@ function clerkErrorMessage(err: unknown): string {
 }
 
 export default function SignUp() {
+  const { next } = useLocalSearchParams<{ next?: string }>()
+  // Forwarded verbatim; it is validated where it is finally used.
+  const nextSuffix = next ? `?next=${next}` : ''
   const { t } = useTranslation()
   const router = useRouter()
   const { signUp } = useSignUp()
@@ -75,7 +78,7 @@ export default function SignUp() {
         setError(clerkErrorMessage(finalizeError))
         return
       }
-      router.replace('/(auth)/profile-completion')
+      router.replace(`/(auth)/profile-completion${nextSuffix}` as never)
     } catch (err) {
       setError(clerkErrorMessage(err))
     } finally {
@@ -128,7 +131,7 @@ export default function SignUp() {
       {error && <Text style={styles.errorText}>{error}</Text>}
       <PrimaryButton label={t('auth.signUp.button')} disabled={busy} onPress={handleSignUp} />
 
-      <Pressable onPress={() => router.replace('/(auth)/sign-in')} accessibilityRole="link" style={styles.link}>
+      <Pressable onPress={() => router.replace(`/(auth)/sign-in${nextSuffix}` as never)} accessibilityRole="link" style={styles.link}>
         <Text style={styles.linkText}>{t('auth.signUp.hasAccount')}</Text>
       </Pressable>
     </AuthFrame>

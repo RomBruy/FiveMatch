@@ -480,7 +480,29 @@ Gates: 48 files / 406 unit tests, 17 files / 135 integration tests, typecheck, l
 
 **Not built:** progressive match creation (essential fields first, advanced second) is still outstanding from this package — the create flow is unchanged and does not expose host-plays or the crew-first opening time.
 
-**Remaining Phase 6 packages, not started:** 6D match lifecycle — edit, cancel, invite, directions (AF-009) · 6D guest discovery and auth return intent (AF-001, AF-002) · 6E next-match and needs-attention sections, progressive creation · 6F merge legacy group detail into Crew. The mobile create flow does not yet expose the host-plays toggle or the crew-first opening time; both default sensibly without it.
+### 6D part 1 local completion record — 2026-08-12
+
+Return intent (AF-002), the public-route guard, and three regressions found while reading carefully.
+
+**AF-002 — a shared match link lost its target at the first hop.** The chain was `m/[matchId]` → sign-up → profile completion → app root, with the match dropped immediately. Someone tapping a friend's link to join Thursday's game landed on a discovery feed with no idea where the match went.
+
+The obvious fix — carrying the destination path through the flow — is an open redirect waiting to happen. So **a path is never accepted**: only a validated kind and UUID travel through, and `return-intent.mjs` builds the route from literals in its own source. There is no input that can make it produce a route it does not already know. Covered by 8 tests including 8 attack strings and a 400-iteration fuzz, and wired into the mobile test command — which previously ran only one file, so a new test would have sat there never executing.
+
+**The `(public)` group was unreachable signed out**, so the privacy-policy screen would have bounced a visitor to sign-in. Not currently linked, so never hit, but latent — and the guest-discovery screen belongs in that same group. Signed-in users are unaffected: the redirect-away branch only fires inside `(auth)`, so there is no loop.
+
+**Three regressions from 6A, all mine.** The spot arithmetic existed in three copies and 6A updated one. With `openSpots: null` now meaning "publish everything", `openSpots ?? 0` evaluated to zero:
+
+- the public preview route advertised **every newly created public match as full on its own shared link**;
+- `match.service.getSpotCounts` returned zero remaining for the same reason;
+- series materialization still defaulted to `?? 1`, so recurring public matches offered a single place.
+
+Fixed structurally rather than three times over: `services/matches/availability.ts` now holds the only copy, pure and dependency-free, with 11 tests pinning it so it cannot drift again. This is exactly the failure mode duplicated arithmetic produces, and it went unnoticed for two packages.
+
+Gates: 49 files / 417 unit tests, 17 files / 135 integration tests, mobile 11 tests, typecheck, lint, 713/713 parity, 5-tab baseline, `expo export --platform ios`.
+
+**Not built — 6D part 2:** guest discovery (AF-001) is untouched. It needs a pre-auth discovery endpoint with its own rate limit and a guest DTO, plus a signed-out browse screen. Deliberately left for a fresh pass rather than rushed onto the end of this one: it is the only remaining change that opens an unauthenticated surface, and it deserves the same care the return-intent design got.
+
+**Remaining Phase 6 packages, not started:** 6D part 2 (guest discovery) · 6F match lifecycle — edit, cancel, invite, directions (AF-009) · 6D guest discovery and auth return intent (AF-001, AF-002) · 6E next-match and needs-attention sections, progressive creation · 6F merge legacy group detail into Crew. The mobile create flow does not yet expose the host-plays toggle or the crew-first opening time; both default sensibly without it.
 
 ## 9. Phase 7 — Scalability and operational reliability
 

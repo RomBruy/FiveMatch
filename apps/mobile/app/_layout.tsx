@@ -57,9 +57,14 @@ function AuthGuard() {
     const root = segments[0] as string | undefined
     const inAuthGroup = root === '(auth)'
     const inProfileCompletion = inAuthGroup && (segments[1] as string | undefined) === 'profile-completion'
-    // The two public entry points: a crew invite code, and a shared match link.
-    // Neither may bounce a signed-out visitor to sign-in — they are the pitch.
-    const inPublicRoute = root === 'join' || root === 'm'
+    // Public entry points: a crew invite code, a shared match link, and the
+    // (public) group — guest discovery and the privacy policy. None may bounce
+    // a signed-out visitor to sign-in; they are the pitch, and a privacy policy
+    // you need an account to read is not a privacy policy.
+    //
+    // Signed-in users are not redirected away from these: the second branch
+    // below only fires inside (auth), so there is no loop.
+    const inPublicRoute = root === 'join' || root === 'm' || root === '(public)'
     if (!isSignedIn && !inAuthGroup && !inPublicRoute) {
       router.replace('/(auth)/sign-in')
     } else if (isSignedIn && inAuthGroup && !inProfileCompletion) {

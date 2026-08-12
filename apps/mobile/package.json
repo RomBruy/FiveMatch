@@ -10,7 +10,7 @@
     "web": "expo start --web",
     "lint": "eslint . --ext .ts,.tsx --ignore-pattern 'node_modules/**' && node scripts/check-i18n-parity.mjs && node scripts/check-design-baseline.mjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --test lib/post-match-opponents.test.mjs && node scripts/check-design-baseline.mjs && node scripts/check-i18n-parity.mjs && tsc --noEmit",
+    "test": "node --test lib/post-match-opponents.test.mjs lib/return-intent.test.mjs && node scripts/check-design-baseline.mjs && node scripts/check-i18n-parity.mjs && tsc --noEmit",
     "check:design-baseline": "node scripts/check-design-baseline.mjs"
   },
   "dependencies": {

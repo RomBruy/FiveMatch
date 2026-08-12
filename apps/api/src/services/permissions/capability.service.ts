@@ -3,7 +3,7 @@ import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { db } from '../../db'
 import { ACTIVE_CREW_ROLES, groupMemberships, matchAttendances, matchParticipants } from '../../db/schema'
 import type { Match } from '../../db/schema'
-import { isPubliclyOpen } from '../matches/attendance.service'
+import { isPubliclyOpen } from '../matches/availability'
 
 export type MatchRelation = 'host' | 'participant' | 'crew' | 'viewer'
 

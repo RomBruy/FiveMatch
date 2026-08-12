@@ -1,7 +1,8 @@
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
+import { returnIntentPath } from '../../lib/return-intent.mjs'
 import { LinearGradient } from 'expo-linear-gradient'
 import * as ImagePicker from 'expo-image-picker'
-import { useRouter } from 'expo-router'
+import { useLocalSearchParams, useRouter } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useAuth, useUser } from '@clerk/expo'
 import { useQueryClient } from '@tanstack/react-query'
@@ -63,6 +64,7 @@ function initialsOf(displayName: string): string {
 }
 
 export default function ProfileCompletion() {
+  const { next } = useLocalSearchParams<{ next?: string }>()
   const { t, i18n } = useTranslation()
   const router = useRouter()
   const insets = useSafeAreaInsets()
@@ -220,7 +222,9 @@ export default function ProfileCompletion() {
       })
       queryClient.setQueryData(['auth', 'me'], data.data)
       await queryClient.invalidateQueries({ queryKey: ['users', 'me', 'groups'] })
-      router.replace('/(app)')
+      // The route is built by return-intent from a validated kind and id, so
+      // this cannot be steered anywhere the module does not already know.
+      router.replace(returnIntentPath(next) as never)
     } catch {
       setError('common.genericError')
     } finally {

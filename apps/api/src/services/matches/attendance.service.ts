@@ -5,6 +5,7 @@ import type { Match } from '../../db/schema'
 import { notificationService } from '../notifications/notification.service'
 import { AttendanceResponseSchema, MATCH_MIN_PLAYABLE_TOTAL, type MatchCapabilities } from '@fivematch/types'
 import type { MatchRelation } from '../permissions/capability.service'
+import { isPubliclyOpen, publicSpotsRemaining } from './availability'
 import { trustProjectionService } from '../trust/trust-projection.service'
 
 type AttendanceSource = 'crew' | 'open'
@@ -244,18 +245,6 @@ async function inferSource(match: Match, internalUserId: string): Promise<Attend
   return membership ? 'crew' : 'open'
 }
 
-/**
- * Whether outsiders may take a place yet.
- *
- * Public visibility alone is not enough: a crew-first match stays private until
- * `publicOpensAt` passes, so the crew gets first refusal on their own fixture
- * (ADR-033).
- */
-export function isPubliclyOpen(match: Pick<Match, 'visibility' | 'publicOpensAt'>, now = new Date()): boolean {
-  if (match.visibility !== 'public') return false
-  return match.publicOpensAt === null || match.publicOpensAt.getTime() <= now.getTime()
-}
-
 async function assertOpenSpotAvailable(match: Match) {
   if (!isPubliclyOpen(match)) throw fail('MATCH_NOT_PUBLIC', 422)
 
@@ -332,19 +321,19 @@ async function joinOpenMatch(matchId: string, internalUserId: string) {
  */
 async function getSpots(match: Match) {
   const confirmed = await countConfirmed(db, match.id)
-  const takenFromOpen = await countConfirmed(db, match.id, 'open')
+  const openConfirmed = await countConfirmed(db, match.id, 'open')
   const capacity = matchCapacity(match.playersPerTeam)
-
-  const actuallyLeft = Math.max(0, capacity - confirmed)
-  const publicAllowance = match.openSpots === null
-    ? actuallyLeft
-    : Math.max(0, match.openSpots - takenFromOpen)
 
   return {
     confirmed,
     capacity,
-    // Never more than the sheet really has, whatever the publication cap says.
-    spotsRemaining: isPubliclyOpen(match) ? Math.min(actuallyLeft, publicAllowance) : 0,
+    spotsRemaining: publicSpotsRemaining({
+      capacity,
+      confirmed,
+      openConfirmed,
+      openSpots: match.openSpots,
+      publiclyOpen: isPubliclyOpen(match),
+    }),
   }
 }
 
@@ -625,6 +614,8 @@ async function promoteFromWaitlist(matchId: string, playerId: string) {
     return { promotedUserId: promoted?.userId ?? null, groupId: match.groupId }
   })
 }
+
+export { isPubliclyOpen }
 
 export const attendanceService = {
   joinWaitlist,

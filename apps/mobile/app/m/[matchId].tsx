@@ -10,6 +10,7 @@ import { Fonts, Radius } from '../../constants/tokens'
 import { PrimaryButton } from '../../components/ui/PrimaryButton'
 import { SpotsMeter } from '../../components/match/SpotsMeter'
 import { httpClient } from '../../lib/api-client'
+import { encodeReturnIntent } from '../../lib/return-intent.mjs'
 import type { PublicMatchPreview } from '@fivematch/types'
 
 /**
@@ -102,7 +103,11 @@ export default function MatchPreviewScreen() {
       <View style={styles.cta}>
         <PrimaryButton
           label={match.availability.spotsRemaining > 0 ? t('preview.joinCta') : t('preview.signInCta')}
-          onPress={() => router.replace('/(auth)/sign-up')}
+          onPress={() => router.replace(
+            // Carry the match through sign-up so someone who tapped a friend's
+            // link lands on that fixture, not on a discovery feed (AF-002).
+            `/(auth)/sign-up?next=${encodeReturnIntent('match', matchId)}` as never,
+          )}
         />
         <Text style={styles.ctaNote}>{t('preview.ctaNote')}</Text>
       </View>

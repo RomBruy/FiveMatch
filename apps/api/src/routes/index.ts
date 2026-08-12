@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import { isPubliclyOpen, publicSpotsRemaining } from '../services/matches/availability'
 import { requireAuth } from '@clerk/express'
 import { attachUser } from '../middleware/auth'
 import { attachPlayer } from '../middleware/match-context'
@@ -43,6 +44,7 @@ router.get('/matches/:matchId/preview', asyncHandler(async (req, res) => {
       currency: matches.currency,
       visibility: matches.visibility,
       openSpots: matches.openSpots,
+      publicOpensAt: matches.publicOpensAt,
       hostId: matches.hostId,
       status: matches.status,
       confirmedCount: sql<number>`(
@@ -70,10 +72,13 @@ router.get('/matches/:matchId/preview', asyncHandler(async (req, res) => {
     .where(eq(players.userId, match.hostId))
 
   const capacity = matchCapacity(match.playersPerTeam)
-  const spotsRemaining = Math.max(0, Math.min(
-    (match.openSpots ?? 0) - match.openConfirmedCount,
-    capacity - match.confirmedCount,
-  ))
+  const spotsRemaining = publicSpotsRemaining({
+    capacity,
+    confirmed: match.confirmedCount,
+    openConfirmed: match.openConfirmedCount,
+    openSpots: match.openSpots,
+    publiclyOpen: isPubliclyOpen(match),
+  })
 
   return res.json({
     data: PublicMatchPreviewSchema.parse({
