@@ -63,6 +63,18 @@ The key-out and edge handling are verified visually and are sound. Only the fram
 
 ---
 
+## 4b. A malformed bearer token returns 500, not 401
+
+**Severity: medium — observability, and possibly session recovery.**
+
+Verified 2026-08-12 against the running API: a request carrying an `Authorization: Bearer` header whose signature segment is not valid base64 produces **500 INTERNAL_ERROR**, from a `SyntaxError` thrown inside Clerk's JWT decoder and caught by the generic error handler. It is logged as "Unhandled error", so this pollutes Sentry with what is really a client-side problem.
+
+**What is NOT established:** what a genuinely *expired* Clerk token returns. An expired token is well-formed base64 and would fail verification rather than parsing, so it may well produce a clean 401. This was tested with a deliberately malformed token, which is not the same thing.
+
+Why it matters if expired tokens do not return 401: `apps/mobile/lib/api-client.ts` force-refreshes the token and retries **only on 401**. If an expired session produces anything else, that recovery never fires and the user sees a generic error instead of a silent refresh.
+
+**How to check:** leave a device signed in until the session token expires, then use the app. This is exactly what a device pass is for, and it cannot be established from the test suite — the integration tests mock Clerk, so they assert the behaviour of the mock.
+
 ## 5. No Expo Go device pass on anything from Phase 3 onward
 
 **Severity: medium.**
