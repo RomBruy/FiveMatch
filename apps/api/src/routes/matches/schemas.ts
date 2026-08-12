@@ -43,6 +43,7 @@ export const DiscoverQuerySchema = z.object({
   format: z.enum(['5v5', '6v6', '7v7', 'custom']).optional(),
   skillLevel: SkillLevelSchema.optional(),
   limit: z.coerce.number().int().min(1).max(50).default(20),
+  cursor: z.string().max(512).optional(),
 })
 
 export type DiscoverQuery = z.infer<typeof DiscoverQuerySchema>
@@ -196,6 +197,8 @@ export const GuestDiscoverQuerySchema = z.object({
   radiusKm: z.coerce.number().positive().max(100).optional(),
   city: z.string().trim().min(1).max(120).optional(),
   limit: z.coerce.number().int().positive().max(50).default(20),
+  /** Opaque; pass back what the previous page returned. */
+  cursor: z.string().max(512).optional(),
 })
 
 export type GuestDiscoverQuery = z.infer<typeof GuestDiscoverQuerySchema>

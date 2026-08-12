@@ -42,15 +42,18 @@ router.get('/health', (_req, res) => res.json({ status: 'ok' }))
 router.get('/discover/public', publicRateLimit, asyncHandler(async (req, res) => {
   const query = GuestDiscoverQuerySchema.parse(req.query)
 
-  const data = await guestDiscoveryService.discoverPublicMatches({
+  const page = await guestDiscoveryService.discoverPublicMatches({
     latitude: query.latitude,
     longitude: query.longitude,
     radiusKm: query.radiusKm,
     city: query.city,
     limit: query.limit,
+    cursor: query.cursor,
   })
 
-  return res.json({ data })
+  // The array stays at `data` so existing clients keep working; the cursor
+  // rides alongside it.
+  return res.json({ data: page.matches, nextCursor: page.nextCursor })
 }))
 
 /**

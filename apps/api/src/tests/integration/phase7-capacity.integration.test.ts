@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { and, eq, inArray, isNotNull, isNull } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull } from 'drizzle-orm'
 import { db } from '../../db'
 import { matchAttendances, matchSeries, matches, players, users } from '../../db/schema'
 import { attendanceService } from '../../services/matches/attendance.service'

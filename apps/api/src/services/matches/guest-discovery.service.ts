@@ -3,6 +3,7 @@ import { PublicMatchPreviewSchema, type PublicMatchPreview } from '@fivematch/ty
 import { db } from '../../db'
 import { matchCapacity, matches } from '../../db/schema'
 import { publicSpotsRemaining } from './availability'
+import { cursorMatchesSort, decodeCursor, encodeCursor } from '../../lib/cursor'
 
 /**
  * Discovery for someone with no account (AF-001).
@@ -28,6 +29,13 @@ export type GuestDiscoveryFilters = {
   radiusKm?: number
   city?: string
   limit: number
+  cursor?: string
+}
+
+export type GuestDiscoveryPage = {
+  matches: PublicMatchPreview[]
+  /** Null when the list is exhausted. Opaque — pass it back verbatim. */
+  nextCursor: string | null
 }
 
 const DEFAULT_RADIUS_KM = 15
@@ -37,7 +45,7 @@ const HORIZON_DAYS = 30
 
 export async function discoverPublicMatches(
   filters: GuestDiscoveryFilters,
-): Promise<PublicMatchPreview[]> {
+): Promise<GuestDiscoveryPage> {
   const now = new Date()
   const horizon = new Date(now.getTime() + HORIZON_DAYS * 24 * 60 * 60 * 1000)
 
@@ -54,6 +62,16 @@ export async function discoverPublicMatches(
   ]
 
   if (filters.city) conditions.push(sql`lower(${matches.city}) = lower(${filters.city})`)
+
+  // Guests always page by kickoff time. Distance is a filter here, not an
+  // ordering — and a distance cursor would be measured from wherever the caller
+  // happened to be standing on the previous page.
+  const cursor = decodeCursor(filters.cursor)
+  if (cursorMatchesSort(cursor, 'time')) {
+    // Row-value comparison: strictly after the last row seen, with the id
+    // breaking ties between matches kicking off in the same second.
+    conditions.push(sql`(${matches.scheduledAt}, ${matches.id}) > (${new Date(cursor.value as string)}, ${cursor.id})`)
+  }
 
   const hasGeo = filters.latitude != null && filters.longitude != null
   const radiusKm = filters.radiusKm ?? DEFAULT_RADIUS_KM
@@ -104,10 +122,16 @@ export async function discoverPublicMatches(
     })
     .from(matches)
     .where(and(...conditions))
-    .orderBy(asc(matches.scheduledAt))
-    .limit(filters.limit)
+    .orderBy(asc(matches.scheduledAt), asc(matches.id))
+    // One extra row answers "is there another page?" without a second query
+    // and without a count, which would have to scan the whole set.
+    .limit(filters.limit + 1)
 
-  return rows
+  const hasMore = rows.length > filters.limit
+  const page = hasMore ? rows.slice(0, filters.limit) : rows
+  const last = page[page.length - 1]
+
+  const results = page
     .map((row) => {
       const capacity = matchCapacity(row.playersPerTeam)
       const spotsRemaining = publicSpotsRemaining({
@@ -148,6 +172,16 @@ export async function discoverPublicMatches(
     // A full match is still worth showing: places open up constantly, and a
     // guest can queue once they have an account.
     .filter((match) => match.status === 'attendance_open')
+
+  return {
+    matches: results,
+    // Built from the last row of the raw page, not of the filtered results: the
+    // cursor marks where the scan reached, and dropping a row from the output
+    // must not make the next page re-read it.
+    nextCursor: hasMore && last
+      ? encodeCursor({ sort: 'time', value: last.scheduledAt.toISOString(), id: last.id })
+      : null,
+  }
 }
 
 export const guestDiscoveryService = { discoverPublicMatches }

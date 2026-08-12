@@ -585,6 +585,28 @@ Requirements: PR-010, PR-050 through PR-054.
 - Jobs survive replay/restart without duplicate effects.
 - Public/mobile contracts share the canonical schema.
 
+### 7A local completion record — 2026-08-12
+
+**AF-004 (P0) and AF-005 (P0) both closed**, proven rather than assumed.
+
+Phase 6B added a per-match row lock around every seat decision, but whether that actually closed AF-004 was a question for evidence, not for reading the diff. The audit asks for a concurrent 20-claim test specifically; that test now exists and passes five cases: capacity never exceeded, nobody silently lost, waitlist positions unique, repeated claims from one person taking one place, and a place freed mid-rush being taken rather than left empty.
+
+**Verified to have teeth.** With the lock removed, 13 players seat in a 6-place match and three of the five fail — AF-004 exactly as described. One assertion is deliberately stricter than the finding: capacity must be *exactly* filled, because a lock that serialised everyone into the waitlist would satisfy "not exceeded" while leaving the pitch empty.
+
+### 7B local completion record — 2026-08-12
+
+Cursor pagination for discovery.
+
+- `lib/cursor.ts` encodes an opaque base64url keyset cursor naming the last row seen. Offset pagination drifts — rows are inserted and matches fill between pages, so `OFFSET 20` silently skips or repeats fixtures, and the database counts and discards everything it skips. Discovery is precisely the list that changes while being read.
+- **The cursor carries its own sort.** Paging with a distance cursor into a time-ordered query would compare against a value from a different axis and skip or repeat arbitrary rows; a mismatch restarts the list instead. Guests always page by kickoff time, because a distance cursor is measured from wherever the caller happened to be standing on the previous page.
+- An unparseable or stale cursor restarts the list rather than erroring — an old app version should not break, it should start again.
+- One extra row is fetched to answer "is there another page?" without a second query or a count that would scan the whole set. The cursor is built from the last row of the *raw* page, not the filtered output, so dropping a row from the response cannot make the next page re-read it.
+- The response keeps the array at `data` and adds `nextCursor` alongside, so the existing mobile client is unaffected.
+
+Gates: 50 files / 429 unit tests, 20 files / 158 integration tests, typecheck, lint, mobile 11 tests, 734/734 parity, 5-tab baseline, `expo export`.
+
+**Not done:** authenticated discovery still takes `limit` only — the cursor plumbing exists and its schema accepts one, but the service is unchanged. Its distance ordering needs the `distance` cursor variant wired, which is why it was not bundled in here.
+
 ## 10. Phase 8 — Production infrastructure, ownership and European compliance
 
 Requirements: PR-054, PR-055 and the production launch obligations documented in this phase.

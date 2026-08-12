@@ -64,7 +64,11 @@ async function seedMatch(matchId: string, over: Record<string, unknown> = {}) {
   } as never)
 }
 
-const discover = (over = {}) =>
+// Unwraps the page so existing cases keep reading a plain array.
+const discover = async (over = {}) =>
+  (await guestDiscoveryService.discoverPublicMatches({ limit: 20, ...over })).matches
+
+const discoverPage = (over = {}) =>
   guestDiscoveryService.discoverPublicMatches({ limit: 20, ...over })
 
 beforeEach(async () => {
@@ -162,6 +166,50 @@ describe('Phase 6 guest discovery', () => {
       await seedMatch(id, { scheduledAt: hours(24 + index) })
     }
     expect(await discover({ limit: 2 })).toHaveLength(2)
+  })
+
+  it('pages without repeating or skipping', async () => {
+    for (const [index, id] of fx.windowMatches.slice(0, 5).entries()) {
+      await seedMatch(id, { scheduledAt: hours(24 + index) })
+    }
+
+    const first = await discoverPage({ limit: 2 })
+    expect(first.matches).toHaveLength(2)
+    expect(first.nextCursor).not.toBeNull()
+
+    const second = await discoverPage({ limit: 2, cursor: first.nextCursor! })
+    const third = await discoverPage({ limit: 2, cursor: second.nextCursor! })
+
+    const seen = [...first.matches, ...second.matches, ...third.matches].map((m) => m.matchId)
+
+    expect(seen).toHaveLength(5)
+    expect(new Set(seen).size).toBe(5)
+    // Exhausted, so no cursor is offered.
+    expect(third.nextCursor).toBeNull()
+  })
+
+  it('does not skip a match when one is inserted mid-page', async () => {
+    for (const [index, id] of fx.windowMatches.slice(0, 4).entries()) {
+      await seedMatch(id, { scheduledAt: hours(48 + index * 2) })
+    }
+
+    const first = await discoverPage({ limit: 2 })
+
+    // A new fixture appears before the ones already read — exactly the case
+    // where OFFSET 2 would shift everything and silently skip a row.
+    await seedMatch(fx.matches.completed, { scheduledAt: hours(1) })
+
+    const second = await discoverPage({ limit: 2, cursor: first.nextCursor! })
+    const overlap = second.matches.filter((m) => first.matches.some((f) => f.matchId === m.matchId))
+
+    expect(overlap).toHaveLength(0)
+  })
+
+  it('starts over rather than breaking on a stale or foreign cursor', async () => {
+    await seedMatch(fx.windowMatches[0])
+
+    const garbage = await discoverPage({ limit: 20, cursor: 'not-a-real-cursor' })
+    expect(garbage.matches).toHaveLength(1)
   })
 
   it('shows a full match rather than hiding it', async () => {
