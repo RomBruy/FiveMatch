@@ -169,6 +169,13 @@
       "when": 1786272000000,
       "tag": "0023_phase6_waitlist_integrity",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1786280000000,
+      "tag": "0024_phase7_notification_outbox",
+      "breakpoints": true
     }
   ]
 }

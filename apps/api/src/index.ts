@@ -8,6 +8,7 @@ import webhooksRouter from './routes/webhooks'
 import { runCardStateTimeoutJob } from './jobs/card-state-timeout'
 import { runBehaviourReportExpiryJob } from './jobs/behaviour-report-expiry.job'
 import { runAttendanceAutoFinalizeJob } from './jobs/attendance-auto-finalize.job'
+import { runNotificationOutboxJob } from './jobs/notification-outbox.job'
 
 const app = express()
 const PORT = process.env.PORT ?? 3000
@@ -26,6 +27,12 @@ app.listen(PORT, () => {
   setInterval(() => {
     runCardStateTimeoutJob().catch((err) => logger.error(err, 'card-state-timeout job failed'))
   }, 60 * 1000)
+
+  // Every 10s: a notification is time-sensitive, and the backoff already keeps
+  // a failing provider from being hammered.
+  setInterval(() => {
+    runNotificationOutboxJob().catch((err) => logger.error(err, 'notification-outbox job failed'))
+  }, 10 * 1000)
 
   // Hourly is ample for a 72-hour window, and an unswept report is already inert
   // to every read path — this settles the record, it does not decide anything.

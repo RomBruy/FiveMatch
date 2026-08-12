@@ -607,6 +607,27 @@ Gates: 50 files / 429 unit tests, 20 files / 158 integration tests, typecheck, l
 
 **Not done:** authenticated discovery still takes `limit` only — the cursor plumbing exists and its schema accepts one, but the service is unchanged. Its distance ordering needs the `distance` cursor variant wired, which is why it was not bundled in here.
 
+### 7C local completion record — 2026-08-12
+
+Durable notifications: outbox, retries, dedup.
+
+Sending was `void dispatch(payload).catch(log)` across twenty-five call sites. A transient provider failure, a network fault or a restart mid-flight lost the notification permanently, leaving nothing behind to show it had been attempted — nobody would ever learn that a waitlist promotion went unannounced.
+
+- `notification_outbox` holds the payload, a status, an attempt count and a next-attempt time. Writing a row is far more reliable than an HTTP call to a third party, so the write happens first and delivery becomes a worker's problem.
+- **`send()` keeps its signature**, so all twenty-five call sites are unchanged. It now enqueues rather than dispatching. `enqueue(payload, { tx })` is available for callers that want the notification to commit or roll back with the change that caused it — tested by rolling a transaction back and asserting nothing is queued.
+- **Retries back off exponentially and cap at 15 minutes**, because a notification delivered after its own match has kicked off is worse than one that never comes. After six attempts a row is dead-lettered, not deleted: a notification nobody received is exactly what you want to find when someone asks why they were not told.
+- **Dedup by a derived key** — type plus entity ids plus sorted recipients — so a retried request or a job that runs twice cannot notify someone twice about one thing. An explicit `dedupeKey: null` allows genuinely repeatable notifications, since a reminder that fires twice is not a duplicate.
+- **Claiming uses `FOR UPDATE SKIP LOCKED`**, so a second worker takes different rows rather than stalling behind the first or sending everything twice. Asserted with two concurrent drains over six rows: six delivered, one attempt each.
+- Each row is settled independently, so one bad payload cannot lose the batch the way a single-transaction drain would.
+
+**A precision bug found while testing.** Due-ness was compared against a JavaScript `Date`, but `next_attempt_at` is written by Postgres `now()` with microsecond precision, while `Date` truncates to milliseconds. A row enqueued and claimed inside the same millisecond looked "not yet due" and was skipped for a whole tick. The claim now compares the database against its own clock, which removes the truncation and any future skew between app and database with it.
+
+Migration `0024` is additive: one enum, one table, one index.
+
+Gates: 50 files / 429 unit tests, 22 files / 182 integration tests, typecheck, lint.
+
+**Not done:** no call site yet passes `tx` — the capability exists and is tested, but every existing `send()` still enqueues outside its caller's transaction, so a notification can still be queued for a change that later rolls back. Converting the twenty-five sites is a separate, mechanical pass.
+
 ## 10. Phase 8 — Production infrastructure, ownership and European compliance
 
 Requirements: PR-054, PR-055 and the production launch obligations documented in this phase.

@@ -4,6 +4,7 @@ import { db } from '../../db'
 import { pushTokens, notificationPreferences } from '../../db/schema'
 import { eq, and, inArray } from 'drizzle-orm'
 import { logger } from '../../lib/logger'
+import { notificationOutboxService } from './outbox.service'
 
 const expo = new Expo()
 
@@ -108,9 +109,30 @@ async function dispatch(payload: NotificationPayload): Promise<void> {
 }
 
 export const notificationService = {
+  /**
+   * Queue a notification.
+   *
+   * This used to call Expo directly and swallow the failure, so a provider
+   * blip, a network fault or a restart mid-flight lost the notification for
+   * good. Now it writes a row and returns; a worker delivers it, retries it,
+   * and eventually dead-letters it where somebody can see.
+   *
+   * Still void-returning so the twenty-five existing call sites are unchanged.
+   * Callers that need the notification to be part of their transaction should
+   * use `enqueue` with a `tx` instead.
+   */
   send: (payload: NotificationPayload): void => {
-    void dispatch(payload).catch((err: unknown) => {
-      logger.error({ err, type: payload.type }, 'notification dispatch failed')
+    void notificationOutboxService.enqueue(payload).catch((err: unknown) => {
+      logger.error({ err, type: payload.type }, 'notification enqueue failed')
     })
   },
+
+  /**
+   * Queue inside a caller's transaction, so the intention to notify commits or
+   * rolls back with the change that caused it.
+   */
+  enqueue: notificationOutboxService.enqueue,
+
+  /** Delivery. Called by the outbox worker, not by application code. */
+  deliver: dispatch,
 }
