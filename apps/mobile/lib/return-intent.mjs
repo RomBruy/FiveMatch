@@ -19,7 +19,13 @@
  * it, matching post-match-opponents. Security logic without tests is a wish.
  */
 
-const INTENT_KINDS = ['match', 'crew']
+/**
+ * Only `match` today. A `crew` kind existed briefly, but its destination — the
+ * legacy group detail screen — was unreachable and has been removed, and
+ * nothing ever produced the intent. A kind pointing at a route that does not
+ * resolve is worse than no kind: it fails at the moment someone finally uses it.
+ */
+const INTENT_KINDS = ['match']
 
 /** Ids in this app are UUIDs; anything else is not one of ours. */
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -58,6 +64,5 @@ export function returnIntentPath(raw) {
   const intent = parseReturnIntent(raw)
   if (!intent) return DEFAULT_LANDING
 
-  if (intent.kind === 'match') return `/(app)/match/${intent.id}`
-  return `/(app)/groups/${intent.id}`
+  return `/(app)/match/${intent.id}`
 }

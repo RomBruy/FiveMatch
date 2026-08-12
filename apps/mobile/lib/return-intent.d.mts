@@ -1,4 +1,4 @@
-export type ReturnIntentKind = 'match' | 'crew'
+export type ReturnIntentKind = 'match'
 
 export interface ReturnIntent {
   kind: ReturnIntentKind

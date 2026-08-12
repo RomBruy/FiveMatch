@@ -524,7 +524,29 @@ Gates: 49 files / 417 unit tests, 18 files / 146 integration tests, mobile 11 te
 
 **Not covered:** the public preview route has no direct test of its counts. The fix is identical text in all eleven places and guest discovery proves the pattern, but the preview itself is asserted only by typecheck.
 
-**Remaining Phase 6 packages, not started:** 6F match lifecycle — edit, cancel, invite, directions (AF-009) · 6D guest discovery and auth return intent (AF-001, AF-002) · 6E next-match and needs-attention sections, progressive creation · 6F merge legacy group detail into Crew. The mobile create flow does not yet expose the host-plays toggle or the crew-first opening time; both default sensibly without it.
+### 6F local completion record — 2026-08-12
+
+Merging the legacy group detail into Crew — and a capability that had gone missing with it.
+
+- `groups/[groupId]/index.tsx` was **326 lines nothing navigated to**. The pivot moved crew overview into the Crew tab and left the old screen orphaned.
+- It was not pure duplication, which is why deleting it alone would have been wrong: it held **join-request approval**, and Crew has none. An organizer therefore had no way to approve anyone from inside the app, and requests accumulated unseen. That is now `components/crew/JoinRequests.tsx`, mounted on Crew, rendering nothing when there is nothing pending — same reasoning as the needs-attention section, an empty box in a permanent slot teaches people to stop looking at it.
+- The dead screen is removed. Its live siblings (`roster`, `settings`, `card-reveal`, `new`, `search`) stay: Crew links to them and they are not duplicates.
+- **The `crew` return-intent kind is retired.** Its only destination was the screen just deleted, and nothing ever produced the intent. A kind pointing at a route that no longer resolves fails at the moment somebody finally uses it, so it is gone rather than left dangling; the fuzz test now asserts `crew:<uuid>` falls back to the app root.
+
+Gates: 49 files / 417 unit tests, mobile 11 tests, typecheck, lint, 727/727 parity, 5-tab baseline, `expo export --platform ios`.
+
+### Phase 6 exit record — 2026-08-12
+
+All six packages implemented locally. Findings along the way outnumbered the planned work:
+
+- **AF-005 (P0)** was closed in 6B rather than deferred to Phase 7 — waitlist positions were assigned by a read-then-write that two concurrent joins could interleave.
+- **Three regressions from 6A** were found in 6D: the availability arithmetic existed in three copies and only one was updated, so a newly created public match advertised itself as full on its own shared link.
+- **A correlated-subquery defect predating this work**: `${matches.id}` renders unqualified inside a `sql` template, so `ma.match_id = "id"` compared against the attendance row's own id. Every attendance count in the public preview, discovery and `viewerJoined` returned zero.
+- **Join-request approval** was unreachable, found here in 6F.
+
+Closes AF-005, AF-007, AF-008, AF-009 and the discovery/return-intent halves of AF-001 and AF-002.
+
+**Outstanding:** progressive match creation (essential fields first) was never built — the create flow still does not expose host-plays or the crew-first opening time, both of which 6A added to the API. Contextual push permission (AF-003) is untouched. match lifecycle — edit, cancel, invite, directions (AF-009) · 6D guest discovery and auth return intent (AF-001, AF-002) · 6E next-match and needs-attention sections, progressive creation · 6F merge legacy group detail into Crew. The mobile create flow does not yet expose the host-plays toggle or the crew-first opening time; both default sensibly without it.
 
 ## 9. Phase 7 — Scalability and operational reliability
 

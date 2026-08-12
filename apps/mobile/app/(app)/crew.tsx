@@ -1,4 +1,5 @@
 import { View, Text, StyleSheet, ScrollView, RefreshControl } from 'react-native'
+import { JoinRequests } from '../../components/crew/JoinRequests'
 import { useTranslation } from 'react-i18next'
 import { useRouter } from 'expo-router'
 import { useCallback, useState } from 'react'
@@ -178,6 +179,10 @@ export default function CrewTab() {
             />
           )}
         </View>
+
+        {activeGroupId && (
+          <JoinRequests groupId={activeGroupId} isOrganizer={isOrganizer} />
+        )}
 
         <View style={styles.boardTabs}>
           <Chip label={t('crew.board.ovr')} active={board === 'ovr'} onPress={() => setBoard('ovr')} />

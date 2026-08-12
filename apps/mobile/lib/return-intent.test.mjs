@@ -15,9 +15,11 @@ test('round-trips a match intent', () => {
   assert.equal(returnIntentPath(token), `/(app)/match/${MATCH_ID}`)
 })
 
-test('round-trips a crew intent', () => {
-  const token = encodeReturnIntent('crew', MATCH_ID)
-  assert.equal(returnIntentPath(token), `/(app)/groups/${MATCH_ID}`)
+test('refuses the retired crew kind', () => {
+  // Its destination was removed with the legacy group detail screen. A kind
+  // pointing at a route that does not resolve fails only when someone uses it.
+  assert.equal(parseReturnIntent(`crew:${MATCH_ID}`), null)
+  assert.equal(returnIntentPath(`crew:${MATCH_ID}`), DEFAULT_LANDING)
 })
 
 test('falls back to the app root when there is no intent', () => {
@@ -48,6 +50,7 @@ test('cannot be talked into an arbitrary destination', () => {
     `match:${MATCH_ID}/../../admin`,
     `match:${MATCH_ID}?next=/(app)/admin`,
     'crew:../../../etc/passwd',
+    `crew:${MATCH_ID}`,
     `match:${MATCH_ID}\n/(app)/admin`,
   ]
 
@@ -68,7 +71,6 @@ test('only ever returns one of the known route shapes', () => {
     const path = returnIntentPath(raw)
     const valid = path === DEFAULT_LANDING
       || path === `/(app)/match/${MATCH_ID}`
-      || path === `/(app)/groups/${MATCH_ID}`
 
     assert.ok(valid, `unexpected path ${path} from ${JSON.stringify(raw)}`)
   }
