@@ -641,6 +641,25 @@ Asserted end to end: cancelling a match leaves both the cancelled status and its
 
 Note on isolation: the integration config sets `fileParallelism: false`, so the table-wide outbox cleanup these tests use cannot interfere across files.
 
+### 7D local completion record — 2026-08-12
+
+Split the match router. Pure refactor: no behaviour change, no route change.
+
+`routes/matches/index.ts` was **1255 lines** covering five things that change for different reasons and were only together because they share a URL prefix. It is now a 29-line mounter over `lifecycle` (217), `attendance` (236), `teams` (400), `results` (359) and `conduct` (151).
+
+**The safety net came first.** Most of these thirty routes have no test of their own, so a mechanical move could silently drop one and nothing would notice until a user hit a 404. `route-manifest.test.ts` asserts the exact set of registered routes — equality both ways, so a dropped route and a smuggled-in one both fail — plus that `/discover`, `/mine` and `/series/:seriesId/end` stay ahead of `/:matchId`. Express matches in registration order, so that ordering is load-bearing rather than tidy; the same constraint now governs the mount order in `index.ts`.
+
+Writing the manifest immediately caught an error in my own expectation — a `GET /:matchId/ratings` that does not exist — before any code moved.
+
+**Two things the split surfaced:**
+
+- `sendPostMatchReminders` was defined *between* two route definitions, so it ended up read by one router and defined in another. It is a helper, not a route, and now lives in `post-match-reminders.ts` shared by both.
+- Each extracted file inherited the full 62-line import header, leaving 190 unused imports. Pruned per file from eslint's own report rather than by eye.
+
+Gates: 51 files / 431 unit tests, 22 files / 174 integration tests, typecheck, lint.
+
+**Not done:** `routes/groups/index.ts` (842 lines) and `services/matches/match.service.ts` (974 lines) are still oversized. The router was the worst and the most mechanical; the service split is harder because its functions share private helpers, and it deserves its own pass with the same manifest-first treatment.
+
 ## 10. Phase 8 — Production infrastructure, ownership and European compliance
 
 Requirements: PR-054, PR-055 and the production launch obligations documented in this phase.
