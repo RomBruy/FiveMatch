@@ -61,53 +61,64 @@ export function ProfileStorySections({ tightestMatch, personality }: ProfileStor
         </View>
       )}
 
+      {/* The vestiaire.
+          This was four cards of identical size and four competing colours,
+          plus a row of emojis nobody could count. It is the funny part of the
+          product, so it gets a composition: the excuse leads as a quote — it is
+          the line people actually read aloud — and everything else falls in
+          behind it as labelled rows. One card, one accent, one voice. */}
       {hasPersonality && personality && (
         <View>
           <Text style={styles.sectionLabel}>{t('profile.personality.icon')}  {t('profile.personality.title').toUpperCase()}</Text>
-          <View style={styles.personalityStack}>
-            {personality.specialSkill && (
-              <View style={[styles.personalityCard, styles.primaryCard]}>
-                <Text style={styles.cardLabel}>🎯  {t('profile.personality.specialSkill')}</Text>
-                <Text style={styles.cardValue}>{personality.specialSkill}</Text>
-              </View>
-            )}
-
+          <View style={styles.vestiaire}>
             {personality.favoriteExcuse && (
-              <View style={[styles.personalityCard, styles.excuseCard]}>
-                <Text style={styles.cardLabel}>{t('profile.personality.excuseIcon')}  {t('profile.personality.favoriteExcuse')}</Text>
-                <Text style={[styles.cardValue, styles.quote]}>« {personality.favoriteExcuse} »</Text>
+              <View style={styles.leadBlock}>
+                <Text style={styles.leadLabel}>{t('profile.personality.favoriteExcuse').toUpperCase()}</Text>
+                <Text style={styles.quote}>« {personality.favoriteExcuse} »</Text>
               </View>
             )}
 
-            {personality.thirdHalfProfile && (
-              <View style={[styles.personalityCard, styles.thirdHalfCard]}>
-                <Text style={styles.cardLabel}>🍺  {t('profile.personality.thirdHalf')}</Text>
-                <Text style={styles.cardValue}>{personality.thirdHalfProfile}</Text>
-              </View>
-            )}
+            <View style={[styles.pairs, personality.favoriteExcuse ? styles.pairsDivided : null]}>
+              {personality.specialSkill && (
+                <View style={styles.pair}>
+                  <Text style={styles.pairKey}>{t('profile.personality.specialSkill')}</Text>
+                  <Text style={styles.pairValue}>{personality.specialSkill}</Text>
+                </View>
+              )}
 
-            {(personality.badFaithLevel !== null || personality.lockerRoomStyle) && (
-              <View style={styles.smallCardRow}>
-                {personality.badFaithLevel !== null && (
-                  <View style={[styles.smallCard, styles.flex]}>
-                    <Text style={styles.cardLabel}>{t('profile.personality.badFaith')}</Text>
-                    <View style={styles.emojiRow} accessibilityLabel={`${t('profile.personality.badFaith')}: ${badFaithLevel}/5`}>
-                      {BAD_FAITH_EMOJIS.map((emoji, index) => (
-                        <Text key={index} style={[styles.emoji, index >= badFaithLevel && styles.emojiMuted]}>
-                          {BAD_FAITH_EMOJIS[Math.min(index, Math.max(0, badFaithLevel - 1))] ?? emoji}
-                        </Text>
-                      ))}
-                    </View>
+              {personality.badFaithLevel !== null && (
+                <View style={styles.pair}>
+                  <Text style={styles.pairKey}>{t('profile.personality.badFaith')}</Text>
+                  {/* A 5-notch meter reads at a glance; five near-identical
+                      emoji faces had to be counted to mean anything. */}
+                  <View
+                    style={styles.meter}
+                    accessibilityLabel={`${t('profile.personality.badFaith')}: ${badFaithLevel}/5`}
+                  >
+                    {Array.from({ length: 5 }, (_, i) => (
+                      <View key={i} style={[styles.notch, i < badFaithLevel && styles.notchOn]} />
+                    ))}
                   </View>
-                )}
-                {personality.lockerRoomStyle && (
-                  <View style={[styles.smallCard, styles.flex]}>
-                    <Text style={styles.cardLabel}>{t('profile.personality.lockerIcon')}  {t('profile.personality.lockerRoomStyle')}</Text>
-                    <Text style={styles.smallCardValue}>{personality.lockerRoomStyle}</Text>
-                  </View>
-                )}
-              </View>
-            )}
+                  <Text style={styles.meterFace}>
+                    {BAD_FAITH_EMOJIS[Math.max(0, badFaithLevel - 1)] ?? BAD_FAITH_EMOJIS[0]}
+                  </Text>
+                </View>
+              )}
+
+              {personality.lockerRoomStyle && (
+                <View style={styles.pair}>
+                  <Text style={styles.pairKey}>{t('profile.personality.lockerRoomStyle')}</Text>
+                  <Text style={styles.pairValue}>{personality.lockerRoomStyle}</Text>
+                </View>
+              )}
+
+              {personality.thirdHalfProfile && (
+                <View style={styles.pair}>
+                  <Text style={styles.pairKey}>{t('profile.personality.thirdHalf')}</Text>
+                  <Text style={styles.pairValue}>{personality.thirdHalfProfile}</Text>
+                </View>
+              )}
+            </View>
           </View>
         </View>
       )}
@@ -142,32 +153,44 @@ const styles = StyleSheet.create({
   memoryIcon: { fontSize: 20 },
   memoryScore: { color: Colors.ink, fontFamily: Fonts.interBold, fontSize: 20 },
   cardLabel: { color: Colors.inkSecondary, fontFamily: Fonts.interMedium, fontSize: 12 },
-  personalityStack: { gap: 10 },
-  personalityCard: {
-    borderRadius: Radius.lg,
-    borderWidth: 1,
-    paddingHorizontal: 18,
-    paddingVertical: 20,
-    gap: 10,
-  },
-  primaryCard: { backgroundColor: Colors.primarySubtle, borderColor: 'rgba(255,68,56,0.30)' },
-  excuseCard: { backgroundColor: 'rgba(168,35,28,0.14)', borderColor: 'rgba(255,68,56,0.24)' },
-  thirdHalfCard: { backgroundColor: Colors.successSubtle, borderColor: 'rgba(50,215,75,0.26)' },
-  cardValue: { color: Colors.ink, fontFamily: Fonts.interBold, fontSize: 18, lineHeight: 25 },
-  quote: { fontStyle: 'italic' },
-  smallCardRow: { flexDirection: 'row', gap: 10 },
-  smallCard: {
-    minHeight: 112,
+  // One card, one accent stripe — the section's whole colour budget.
+  vestiaire: {
     backgroundColor: Colors.surface,
     borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: Colors.line,
-    padding: 16,
-    justifyContent: 'space-between',
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.primary,
+    padding: 18,
+    gap: 14,
   },
-  smallCardValue: { color: Colors.ink, fontFamily: Fonts.interBold, fontSize: 17 },
-  emojiRow: { flexDirection: 'row' },
-  emoji: { fontSize: 19 },
-  emojiMuted: { opacity: 0.18 },
+  leadBlock: { gap: 7 },
+  leadLabel: {
+    color: Colors.primary,
+    fontFamily: Fonts.interSemiBold,
+    fontSize: 9.5,
+    letterSpacing: 1.3,
+  },
+  quote: {
+    color: Colors.ink,
+    fontFamily: Fonts.inter,
+    fontSize: 17,
+    lineHeight: 24,
+    fontStyle: 'italic',
+  },
+  pairs: { gap: 12 },
+  pairsDivided: { borderTopWidth: 1, borderTopColor: Colors.hairline, paddingTop: 14 },
+  pair: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  pairKey: {
+    width: 104,
+    color: Colors.inkSecondary,
+    fontFamily: Fonts.interSemiBold,
+    fontSize: 10,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  pairValue: { flex: 1, color: Colors.ink, fontFamily: Fonts.interSemiBold, fontSize: 13.5 },
+  meter: { flex: 1, flexDirection: 'row', gap: 4 },
+  notch: { flex: 1, height: 6, borderRadius: Radius.full, backgroundColor: Colors.surfaceRaised },
+  notchOn: { backgroundColor: Colors.primary },
+  meterFace: { fontSize: 16 },
   flex: { flex: 1 },
 })

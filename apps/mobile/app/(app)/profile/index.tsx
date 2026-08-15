@@ -1,4 +1,5 @@
 import { View, Text, StyleSheet, RefreshControl } from 'react-native'
+import { Ionicons } from '@expo/vector-icons'
 import Animated from 'react-native-reanimated'
 import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -22,7 +23,7 @@ import { TrustDetail } from '../../../components/players/TrustDetail'
 import { useGroupContext } from '../../../contexts/GroupContext'
 import { httpClient } from '../../../lib/api-client'
 import type { PrivatePlayerProfile } from '@fivematch/types'
-import { ProfileVisibilityControls } from '../../../components/players/ProfileVisibilityControls'
+import { PressableScale } from '../../../components/ui/PressableScale'
 
 export default function ProfileTab() {
   const { t } = useTranslation()
@@ -221,20 +222,55 @@ export default function ProfileTab() {
           </View>
         )}
 
+        {/* The note decided team balance, card unlocks and pronos odds while no
+            screen said where it came from. This is the door to that answer, and
+            it sits directly under the number it explains. */}
+        <PressableScale
+          style={styles.explainRow}
+          onPress={() => router.push('/(app)/profile/note' as never)}
+          accessibilityRole="button"
+        >
+          <Ionicons name="help-circle-outline" size={20} color={Colors.primary} />
+          <View style={styles.explainText}>
+            <Text style={styles.explainTitle}>{t('profile.note.explainCta')}</Text>
+            <Text style={styles.explainSub}>{t('profile.note.explainSub')}</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={17} color={Colors.primary} />
+        </PressableScale>
+
+        {/* Second door to the history — the first is the Mes matchs segmented
+            control. It was reachable only behind a chip that read as a filter. */}
+        {myPlayer && (
+          <>
+            <Text style={styles.sectionLabel}>{t('profile.history.title').toUpperCase()}</Text>
+            <PressableScale
+              style={styles.navRow}
+              onPress={() => router.push('/(app)/matches?scope=past' as never)}
+              accessibilityRole="button"
+            >
+              <Ionicons name="calendar-outline" size={18} color={Colors.inkSecondary} />
+              <View style={styles.explainText}>
+                <Text style={styles.navRowTitle}>
+                  {t('profile.history.count', { count: myPlayer.matchCount })}
+                </Text>
+                <Text style={styles.explainSub}>{t('profile.history.sub')}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={17} color={Colors.inkDisabled} />
+            </PressableScale>
+          </>
+        )}
+
         <ProfileStorySections
           tightestMatch={tightestMatch}
           personality={personality}
         />
 
-        {profile && (
-          <ProfileVisibilityControls visibility={profile.visibility} />
-        )}
-
-        {/* Actions — ghost pills */}
+        {/* Settings live in Modifier mon profil. A profile is a shop window;
+            48 visibility chips under the card made it a control panel. */}
         <View style={styles.actions}>
           <SecondaryButton
             label={t('profile.edit')}
-            onPress={() => router.push('/(auth)/profile-completion' as never)}
+            onPress={() => router.push('/(app)/profile/edit' as never)}
           />
           {user?.isAdmin && (
             <SecondaryButton
@@ -345,4 +381,27 @@ const styles = StyleSheet.create({
     marginTop: 32,
     gap: 12,
   },
+  explainRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    marginTop: 24,
+    padding: 14,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: 'rgba(255,68,56,0.24)',
+  },
+  explainText: { flex: 1, gap: 2 },
+  explainTitle: { color: Colors.ink, fontFamily: Fonts.interSemiBold, fontSize: 14 },
+  explainSub: { color: Colors.inkSecondary, fontFamily: Fonts.inter, fontSize: 11.5, lineHeight: 16 },
+  navRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    padding: 14,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.surface,
+  },
+  navRowTitle: { color: Colors.ink, fontFamily: Fonts.interSemiBold, fontSize: 14 },
 })
