@@ -176,6 +176,13 @@
       "when": 1786280000000,
       "tag": "0024_phase7_notification_outbox",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1786290000000,
+      "tag": "0025_series_currency",
+      "breakpoints": true
     }
   ]
 }

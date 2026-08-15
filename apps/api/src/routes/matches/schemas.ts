@@ -22,6 +22,9 @@ export const CreateMatchSchema = z.object({
   openSpots: z.number().int().min(1).max(40).optional().nullable(),
   skillLevel: SkillLevelSchema.optional(),
   pricePerPlayer: z.number().min(0).max(999).optional().nullable(),
+  // ISO 4217. The column has always existed with an EUR default; creation just
+  // had no way to set it, so every match outside the eurozone priced wrong.
+  currency: z.string().length(3).regex(/^[A-Z]{3}$/).optional(),
   notes: z.string().max(500).optional().nullable(),
   recurrence: z.object({ frequency: z.enum(['weekly', 'biweekly']) }).optional().nullable(),
 }).refine(

@@ -37,6 +37,8 @@ export interface CreateMatchInput extends MatchLocationInput {
   hostPlays?: boolean
   skillLevel?: 'casual' | 'intermediate' | 'competitive'
   pricePerPlayer?: number | null
+  /** ISO 4217. Defaults to EUR, matching the column default. */
+  currency?: string
   notes?: string | null
   recurrence?: { frequency: 'weekly' | 'biweekly' } | null
 }
@@ -109,6 +111,7 @@ async function insertOccurrence(
       hostPlays: data.hostPlays ?? true,
       skillLevel: data.skillLevel ?? 'casual',
       pricePerPlayer: data.pricePerPlayer != null ? String(data.pricePerPlayer) : null,
+      currency: data.currency ?? 'EUR',
       notes: data.notes ?? null,
       format: data.format,
       playersPerTeam: data.playersPerTeam,
@@ -199,6 +202,7 @@ async function createMatch(hostInternalId: string, data: CreateMatchInput) {
           openSpots: data.visibility === 'public' ? (data.openSpots ?? null) : null,
           skillLevel: data.skillLevel ?? 'casual',
           pricePerPlayer: data.pricePerPlayer != null ? String(data.pricePerPlayer) : null,
+          currency: data.currency ?? 'EUR',
           format: data.format,
           playersPerTeam: data.playersPerTeam,
           goalkeeperMode: data.goalkeeperMode,
@@ -763,6 +767,7 @@ async function extendDueSeriesForUser(internalUserId: string) {
             openSpots: series.openSpots,
             skillLevel: series.skillLevel,
             pricePerPlayer: series.pricePerPlayer !== null ? Number(series.pricePerPlayer) : null,
+            currency: series.currency,
             format: series.format,
             playersPerTeam: series.playersPerTeam,
             goalkeeperMode: series.goalkeeperMode,

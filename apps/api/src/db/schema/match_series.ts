@@ -29,6 +29,9 @@ export const matchSeries = pgTable('match_series', {
   openSpots: integer('open_spots'),
   skillLevel: skillLevelEnum('skill_level').notNull().default('casual'),
   pricePerPlayer: numeric('price_per_player', { precision: 6, scale: 2 }),
+  // Occurrences are materialised from this row, so the series has to carry the
+  // currency or every one of them would revert to the matches-table default.
+  currency: text('currency').notNull().default('EUR'),
   format: formatPresetEnum('format').notNull(),
   playersPerTeam: integer('players_per_team').notNull(),
   goalkeeperMode: goalkeeperModeEnum('goalkeeper_mode').notNull(),
