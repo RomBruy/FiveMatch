@@ -15,7 +15,8 @@
       "env": {
         "APP_ENV": "preview",
         "EXPO_PUBLIC_API_URL": "https://fivematch-production.up.railway.app",
-        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_YmVsb3ZlZC1kb2xwaGluLTg5LmNsZXJrLmFjY291bnRzLmRldiQ"
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_YmVsb3ZlZC1kb2xwaGluLTg5LmNsZXJrLmFjY291bnRzLmRldiQ",
+        "EXPO_PUBLIC_SENTRY_DSN": "https://37af7a55850946749d1ba6e93bcc5a07@o4511616572850176.ingest.de.sentry.io/4511616576585808"
       }
     },
     "prod": {
@@ -24,6 +25,7 @@
         "APP_ENV": "production",
         "EXPO_PUBLIC_API_URL": "https://fivematch-production.up.railway.app",
         "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_YmVsb3ZlZC1kb2xwaGluLTg5LmNsZXJrLmFjY291bnRzLmRldiQ",
+        "EXPO_PUBLIC_SENTRY_DSN": "https://37af7a55850946749d1ba6e93bcc5a07@o4511616572850176.ingest.de.sentry.io/4511616576585808",
         "EXPO_PUBLIC_POSTHOG_API_KEY": "YOUR_POSTHOG_PROJECT_API_KEY"
       }
     }

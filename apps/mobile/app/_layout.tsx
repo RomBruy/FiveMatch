@@ -26,7 +26,11 @@ if (__DEV__) {
 
 Sentry.init({
   dsn: process.env.EXPO_PUBLIC_SENTRY_DSN,
-  enabled: process.env.APP_ENV === 'production',
+  // Gated on __DEV__ rather than APP_ENV: only EXPO_PUBLIC_* vars are inlined
+  // into the bundle, so `process.env.APP_ENV` read as undefined at runtime and
+  // this was silently false in every build, production included. __DEV__ also
+  // covers preview builds, which is where tester crashes actually come from.
+  enabled: !__DEV__,
   tracesSampleRate: 0.2,
 })
 import { QueryClientProvider } from '@tanstack/react-query'
