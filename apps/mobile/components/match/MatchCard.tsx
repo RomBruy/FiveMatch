@@ -5,6 +5,7 @@ import { Colors } from '../../constants/colors'
 import { Fonts, Radius } from '../../constants/tokens'
 import { PressableScale } from '../ui/PressableScale'
 import { SpotsMeter } from './SpotsMeter'
+import { currencySymbol } from '../../lib/currency'
 import type { SkillLevel } from '../../lib/matches'
 
 export interface MatchCardProps {
@@ -91,7 +92,7 @@ export function MatchCard({
             <Text style={styles.price}>
               {t('match.pricePerPlayer', {
                 amount: pricePerPlayer.toFixed(2).replace(/\.00$/, ''),
-                currency: currency === 'EUR' ? '€' : currency,
+                currency: currencySymbol(currency),
               })}
             </Text>
           )}

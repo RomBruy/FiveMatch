@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Pressable, StyleSheet, Text, View } from 'react-native'
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 import { useTranslation } from 'react-i18next'
 import { Colors } from '../../constants/colors'
 import { Fonts, Radius } from '../../constants/tokens'
@@ -8,11 +8,25 @@ interface PaperCalendarProps {
   /** Selected date as YYYY-MM-DD, or '' for no selection. */
   value: string
   onChange: (date: string) => void
+  /**
+   * Optional kickoff time as HH:MM. When supplied, the slot strip renders inside
+   * the same paper card: "when" is one decision, not a date here and an hour
+   * somewhere below it.
+   */
+  time?: string
+  onTimeChange?: (time: string) => void
 }
 
 const DOT_SIZE = 26
 // 48px touch floor (UX spec) — each 26px dot sits inside a taller pressable cell.
 const CELL_HEIGHT = 44
+
+// Half-hour slots across the hours 5-a-side is actually played. Typing "HH:MM"
+// by hand was the awkward part of this form; a slot is one tap.
+const TIME_SLOTS = [
+  '18:00', '18:30', '19:00', '19:30', '20:00',
+  '20:30', '21:00', '21:30', '22:00',
+]
 
 type DayCell = {
   date: Date
@@ -56,9 +70,10 @@ function buildGrid(viewMonth: Date): DayCell[] {
  * The bone calendar — paper surface #1 of 3 (DESIGN.md): paper card radius 20
  * inside the dark screen. Controlled: `value` (YYYY-MM-DD) + `onChange`.
  */
-export function PaperCalendar({ value, onChange }: PaperCalendarProps) {
-  const { i18n } = useTranslation()
+export function PaperCalendar({ value, onChange, time, onTimeChange }: PaperCalendarProps) {
+  const { t, i18n } = useTranslation()
   const selected = parseDateString(value)
+  const showTime = onTimeChange !== undefined
 
   const [viewMonth, setViewMonth] = useState<Date>(() => {
     const base = selected ?? new Date()
@@ -95,11 +110,13 @@ export function PaperCalendar({ value, onChange }: PaperCalendarProps) {
   return (
     <View style={styles.card}>
       <View style={styles.headerRow}>
-        <View>
-          <Text style={styles.numeral}>{dayNumeral}</Text>
+        <View style={styles.headerDate}>
+          <Text style={styles.numeral} allowFontScaling={false}>{dayNumeral}</Text>
           <View style={styles.monthRow}>
-            <Text style={styles.monthText}>{monthName}</Text>
-            {weekdayName.length > 0 && <Text style={styles.weekdayText}>{weekdayName}</Text>}
+            <Text style={styles.monthText} numberOfLines={1}>{monthName}</Text>
+            {weekdayName.length > 0 && (
+              <Text style={styles.weekdayText} numberOfLines={1}>{weekdayName}</Text>
+            )}
           </View>
         </View>
         <View style={styles.nav}>
@@ -179,6 +196,44 @@ export function PaperCalendar({ value, onChange }: PaperCalendarProps) {
           )
         })}
       </View>
+
+      {showTime && (
+        <>
+          <View style={styles.rule} />
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.timeStrip}
+            keyboardShouldPersistTaps="handled"
+          >
+            {TIME_SLOTS.map((slot) => {
+              const on = time === slot
+              return (
+                <Pressable
+                  key={slot}
+                  style={[styles.slot, on && styles.slotOn]}
+                  onPress={() => onTimeChange?.(slot)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: on }}
+                >
+                  <Text style={[styles.slotText, on && styles.slotTextOn]}>{slot}</Text>
+                </Pressable>
+              )
+            })}
+          </ScrollView>
+          {/* Says the decision back in words — the two halves are one sentence. */}
+          <Text style={styles.kickoff} numberOfLines={2}>
+            {selected && time
+              ? t('match.create.kickoffAt', {
+                  date: selected.toLocaleDateString(i18n.language, {
+                    weekday: 'long', day: 'numeric', month: 'long',
+                  }),
+                  time,
+                })
+              : t('match.create.kickoffPrompt')}
+          </Text>
+        </>
+      )}
     </View>
   )
 }
@@ -193,27 +248,36 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
+    gap: 12,
   },
+  // The date block must yield to the month nav, never push it off the card.
+  headerDate: { flexShrink: 1, minWidth: 0 },
   numeral: {
     fontFamily: Fonts.bebas,
     fontSize: 64,
-    lineHeight: 58, // 0.9 line-height per the bone board
+    // Bebas ascenders clip when lineHeight < fontSize; 68 is the smallest value
+    // that still renders the glyph whole on both platforms.
+    lineHeight: 68,
+    includeFontPadding: false,
     color: Colors.paperInk,
     fontVariant: ['tabular-nums'],
   },
   monthRow: {
     flexDirection: 'row',
     alignItems: 'baseline',
+    flexWrap: 'wrap',
     gap: 8,
     marginTop: 2,
   },
   monthText: {
+    flexShrink: 1,
     fontFamily: Fonts.interBold,
     fontSize: 15,
     letterSpacing: 0.75, // 0.05em @ 15
     color: Colors.paperInk,
   },
   weekdayText: {
+    flexShrink: 1,
     fontFamily: Fonts.interMedium,
     fontSize: 13,
     color: Colors.paperInk2,
@@ -222,6 +286,7 @@ const styles = StyleSheet.create({
   nav: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexShrink: 0,
     gap: 8,
   },
   navChevron: {
@@ -291,6 +356,42 @@ const styles = StyleSheet.create({
   dayNumeralSelected: {
     color: Colors.paper,
     fontFamily: Fonts.interBold,
+  },
+  rule: {
+    height: 1,
+    backgroundColor: 'rgba(22,21,15,0.13)',
+    marginHorizontal: -4,
+    marginTop: 12,
+  },
+  timeStrip: {
+    flexDirection: 'row',
+    gap: 6,
+    paddingTop: 12,
+    paddingRight: 4,
+  },
+  slot: {
+    height: 40,
+    minWidth: 62,
+    paddingHorizontal: 14,
+    borderRadius: Radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(22,21,15,0.06)',
+  },
+  slotOn: { backgroundColor: Colors.paperRed },
+  slotText: {
+    fontFamily: Fonts.interSemiBold,
+    fontSize: 13,
+    color: Colors.paperInk,
+    fontVariant: ['tabular-nums'],
+  },
+  slotTextOn: { color: Colors.paper, fontFamily: Fonts.interBold },
+  kickoff: {
+    fontFamily: Fonts.interMedium,
+    fontSize: 11.5,
+    lineHeight: 16,
+    color: Colors.paperInk2,
+    marginTop: 11,
   },
   // Mockup halo: 3px paper gap + 1.5px paperRed outer ring around the selected dot.
   halo: {

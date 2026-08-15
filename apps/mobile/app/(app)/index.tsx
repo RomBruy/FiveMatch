@@ -25,7 +25,6 @@ import {
 } from '../../lib/matches'
 
 const RADIUS_OPTIONS = [5, 15, 30, 50]
-const FORMAT_OPTIONS = ['5v5', '6v6', '7v7']
 const LEVEL_OPTIONS: SkillLevel[] = ['casual', 'intermediate', 'competitive']
 
 /**
@@ -59,7 +58,6 @@ export default function DiscoverTab() {
 
   const patch = (next: Partial<DiscoverFilters>) => setFilters((f) => ({ ...f, ...next }))
   const activeFilterCount =
-    (filters.format ? 1 : 0) +
     (filters.skillLevel ? 1 : 0) +
     (filters.when !== 'any' ? 1 : 0) +
     (filters.radiusKm !== DEFAULT_DISCOVER_FILTERS.radiusKm ? 1 : 0)
@@ -172,18 +170,7 @@ export default function DiscoverTab() {
                   ))}
                 </View>
 
-                <Text style={styles.filterLabel}>{t('discover.filters.format')}</Text>
-                <View style={styles.chipRow}>
-                  {FORMAT_OPTIONS.map((format) => (
-                    <Chip
-                      key={format}
-                      label={format}
-                      active={filters.format === format}
-                      onPress={() => patch({ format: filters.format === format ? null : format })}
-                    />
-                  ))}
-                </View>
-
+                {/* No format filter: every match is 5v5, so it filtered nothing. */}
                 <Text style={styles.filterLabel}>{t('discover.filters.level')}</Text>
                 <View style={styles.chipRow}>
                   {LEVEL_OPTIONS.map((level) => (

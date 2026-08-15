@@ -18,9 +18,9 @@ import { PaperCalendar } from '../../../components/match/PaperCalendar'
 import { InfoStrip } from '../../../components/shared/InfoStrip'
 import { httpClient } from '../../../lib/api-client'
 import { useDiscoveryLocation } from '../../../hooks/use-discovery-location'
+import { CURRENCIES, currencySymbol, resolveDeviceCurrency } from '../../../lib/currency'
 import type { SkillLevel } from '../../../lib/matches'
 
-type MatchFormat = '5v5' | '6v6' | '7v7' | 'custom'
 type GoalkeeperMode = 'fixed' | 'rotating' | 'none'
 type Recurrence = 'none' | 'weekly' | 'biweekly'
 
@@ -28,9 +28,7 @@ interface CreateMatchForm {
   scheduledAt: string
   venueName: string
   city: string
-  format: MatchFormat
   goalkeeperMode: GoalkeeperMode
-  playersPerTeam: string
   skillLevel: SkillLevel
   pricePerPlayer: string
   openSpots: string
@@ -44,11 +42,13 @@ interface CrewSummary {
   userRole: 'organizer' | 'member'
 }
 
-const FORMAT_PLAYERS: Record<Exclude<MatchFormat, 'custom'>, number> = { '5v5': 5, '6v6': 6, '7v7': 7 }
-const TIME_PRESETS = ['18:00', '19:00', '20:00', '21:00']
+// One format for now. Every match this app creates is 5-a-side, so the choice
+// was a question with a single answer — the API still takes both fields.
+const MATCH_FORMAT = '5v5'
+const PLAYERS_PER_TEAM = 5
 const LEVELS: SkillLevel[] = ['casual', 'intermediate', 'competitive']
-const PLAYERS_MIN = 4
 const PLAYERS_MAX = 20
+
 const MINUS = '−'
 const PLUS = '+'
 
@@ -92,8 +92,9 @@ export default function CreateMatchScreen() {
 
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [customTime, setCustomTime] = useState(false)
   const [publish, setPublish] = useState(true)
+  // Defaults to the device's region so most hosts never touch it.
+  const [currency, setCurrency] = useState(resolveDeviceCurrency)
   const [crewId, setCrewId] = useState<string | null>(null)
   const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(null)
   // Essentials first, the rest behind a disclosure. Everything below has a
@@ -118,9 +119,7 @@ export default function CreateMatchScreen() {
       scheduledAt: '',
       venueName: '',
       city: location?.city ?? '',
-      format: '5v5',
       goalkeeperMode: 'none',
-      playersPerTeam: '5',
       skillLevel: 'casual',
       pricePerPlayer: '',
       openSpots: '1',
@@ -129,7 +128,6 @@ export default function CreateMatchScreen() {
     },
   })
 
-  const format = watch('format')
   const recurrence = watch('recurrence')
 
   const useMyPosition = async () => {
@@ -147,10 +145,6 @@ export default function CreateMatchScreen() {
     try {
       // "YYYY-MM-DD HH:MM" → ISO
       const iso = new Date(data.scheduledAt.replace(' ', 'T')).toISOString()
-      const playersPerTeam = format === 'custom'
-        ? parseInt(data.playersPerTeam, 10)
-        : FORMAT_PLAYERS[format as Exclude<MatchFormat, 'custom'>]
-
       const price = data.pricePerPlayer.trim() ? Number(data.pricePerPlayer.replace(',', '.')) : null
 
       const { data: created } = await httpClient.post<{ data: { id: string } }>('/v1/matches', {
@@ -160,11 +154,12 @@ export default function CreateMatchScreen() {
         city: data.city.trim() || null,
         latitude: effectiveCoords?.latitude ?? null,
         longitude: effectiveCoords?.longitude ?? null,
-        format: data.format,
-        playersPerTeam,
+        format: MATCH_FORMAT,
+        playersPerTeam: PLAYERS_PER_TEAM,
         goalkeeperMode: data.goalkeeperMode,
         skillLevel: data.skillLevel,
         pricePerPlayer: price !== null && !Number.isNaN(price) ? price : null,
+        currency,
         notes: data.notes.trim() || null,
         visibility: publish ? 'public' : 'private',
         // Null publishes whatever is actually left. The client used to force a
@@ -215,8 +210,9 @@ export default function CreateMatchScreen() {
 
       {error && <Text style={styles.errorText}>{error}</Text>}
 
-      {/* scheduledAt stays one "YYYY-MM-DD HH:MM" form value: the calendar owns
-          the date part, the chips/input own the time part. */}
+      {/* scheduledAt stays one "YYYY-MM-DD HH:MM" form value — and now one
+          control too: the paper card owns both halves, so "when" is a single
+          decision instead of a calendar and an hour that never touch. */}
       <Controller
         control={control}
         name="scheduledAt"
@@ -227,42 +223,14 @@ export default function CreateMatchScreen() {
             onChange(`${date} ${time}`.trim().length === 0 ? '' : `${date} ${time}`)
           }
           return (
-            <>
-              <PaperCalendar value={datePart} onChange={(date) => setParts(date, timePart)} />
-
-              <Text style={styles.label}>{t('match.create.timeLabel')}</Text>
-              <View style={styles.chipRow}>
-                {TIME_PRESETS.map((slot) => (
-                  <Chip
-                    key={slot}
-                    label={slot}
-                    active={!customTime && timePart === slot}
-                    onPress={() => {
-                      setCustomTime(false)
-                      setParts(datePart, slot)
-                    }}
-                  />
-                ))}
-                <Chip
-                  label={t('match.create.timeCustom')}
-                  variant="outlined"
-                  active={customTime}
-                  onPress={() => setCustomTime(true)}
-                />
-              </View>
-              {customTime && (
-                <View style={styles.customTimeWrap}>
-                  <Input
-                    value={timePart}
-                    onChangeText={(time) => setParts(datePart, time)}
-                    placeholder={t('match.create.timePlaceholder')}
-                    keyboardType="numbers-and-punctuation"
-                    maxLength={5}
-                    style={errors.scheduledAt && styles.inputError}
-                  />
-                </View>
-              )}
-            </>
+            <View style={errors.scheduledAt ? styles.whenError : undefined}>
+              <PaperCalendar
+                value={datePart}
+                onChange={(date) => setParts(date, timePart)}
+                time={timePart}
+                onTimeChange={(time) => setParts(datePart, time)}
+              />
+            </View>
           )
         }}
       />
@@ -412,52 +380,38 @@ export default function CreateMatchScreen() {
         )}
       />
 
-      <Text style={styles.label}>{t('match.create.format')}</Text>
-      <Controller
-        control={control}
-        name="format"
-        render={({ field: { onChange, value } }) => (
-          <ChipRow
-            value={value}
-            onChange={onChange}
-            options={[
-              { value: '5v5', label: t('groups.create.format5v5') },
-              { value: '6v6', label: t('groups.create.format6v6') },
-              { value: '7v7', label: t('groups.create.format7v7') },
-              { value: 'custom', label: t('groups.create.formatCustom'), outlined: true },
-            ]}
-          />
-        )}
-      />
-
-      {format === 'custom' && (
-        <>
-          <Text style={styles.label}>{t('match.create.playersPerTeam')}</Text>
+      <Text style={styles.label}>{t('match.create.priceLabel')}</Text>
+      <View style={styles.priceRow}>
+        <View style={styles.priceInput}>
           <Controller
             control={control}
-            name="playersPerTeam"
-            rules={{ required: true, min: PLAYERS_MIN, max: PLAYERS_MAX }}
+            name="pricePerPlayer"
             render={({ field: { onChange, value } }) => (
-              <Stepper value={value} onChange={onChange} min={PLAYERS_MIN} max={PLAYERS_MAX} />
+              <Input
+                value={value}
+                onChangeText={onChange}
+                placeholder={t('match.create.pricePlaceholder')}
+                keyboardType="decimal-pad"
+                maxLength={6}
+              />
             )}
           />
-        </>
-      )}
-
-      <Text style={styles.label}>{t('match.create.priceLabel')}</Text>
-      <Controller
-        control={control}
-        name="pricePerPlayer"
-        render={({ field: { onChange, value } }) => (
-          <Input
-            value={value}
-            onChangeText={onChange}
-            placeholder={t('match.create.pricePlaceholder')}
-            keyboardType="decimal-pad"
-            maxLength={6}
+        </View>
+        <View style={styles.currencyBadge}>
+          <Text style={styles.currencySymbol}>{currencySymbol(currency)}</Text>
+          <Text style={styles.currencyCode}>{currency}</Text>
+        </View>
+      </View>
+      <View style={[styles.chipRow, styles.currencyRow]}>
+        {CURRENCIES.map((c) => (
+          <Chip
+            key={c.code}
+            label={c.symbol === c.code ? c.code : `${c.symbol} ${c.code}`}
+            active={currency === c.code}
+            onPress={() => setCurrency(c.code)}
           />
-        )}
-      />
+        ))}
+      </View>
 
       <Text style={styles.label}>{t('match.create.notesLabel')}</Text>
       <Controller
@@ -621,7 +575,22 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  customTimeWrap: { marginTop: 10 },
+  whenError: { borderRadius: Radius.card, borderWidth: 1.5, borderColor: Colors.primary },
+  priceRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  priceInput: { flex: 1 },
+  currencyBadge: {
+    height: 50,
+    minWidth: 78,
+    paddingHorizontal: 13,
+    borderRadius: Radius.md,
+    backgroundColor: Colors.surfaceRaised,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 1,
+  },
+  currencySymbol: { color: Colors.ink, fontFamily: Fonts.interSemiBold, fontSize: 15 },
+  currencyCode: { color: Colors.inkSecondary, fontFamily: Fonts.inter, fontSize: 10 },
+  currencyRow: { marginTop: 10 },
   cityRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 },
   cityInput: { flex: 1 },
   publishCard: {
