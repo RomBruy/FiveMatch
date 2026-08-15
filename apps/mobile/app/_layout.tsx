@@ -70,7 +70,11 @@ function AuthGuard() {
     // below only fires inside (auth), so there is no loop.
     const inPublicRoute = root === 'join' || root === 'm' || root === '(public)'
     if (!isSignedIn && !inAuthGroup && !inPublicRoute) {
-      router.replace('/(auth)/sign-in')
+      // The front door is the matches, not the wall. Asking for an account
+      // before showing anything worth an account is what "find a match" cannot
+      // afford; guest discovery carries its own sign-up/sign-in footer, and the
+      // shared-link preview it pushes into already survives sign-up.
+      router.replace('/(public)/discover')
     } else if (isSignedIn && inAuthGroup && !inProfileCompletion) {
       // A session restored from SecureStore should enter immediately. Explicit
       // sign-in/sign-up handlers route through profile completion themselves.
