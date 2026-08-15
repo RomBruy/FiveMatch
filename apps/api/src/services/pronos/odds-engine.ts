@@ -13,6 +13,9 @@ import {
   PRONOS_MARGIN,
   PRONOS_ODDS_MIN,
   PRONOS_ODDS_MAX,
+  PRONOS_ODDS_MAX_SCORE,
+  PRONOS_ODDS_MAX_MVP,
+  PRONOS_MVP_RATING_BASELINE,
   PRONOS_BASE_GOALS,
   PRONOS_GOAL_TILT_SCALE,
   PRONOS_GOAL_TILT_MAX,
@@ -63,10 +66,15 @@ const clamp = (x: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, x
 // Round to 2 decimals — the register cotes are displayed in (e.g. 2.13).
 const round2 = (x: number) => Math.round(x * 100) / 100
 
-/** Convert a probability to a clamped, rounded decimal cote. */
-export function decimalOdds(prob: number): number {
-  if (prob <= 0) return PRONOS_ODDS_MAX
-  return round2(clamp(PRONOS_MARGIN / prob, PRONOS_ODDS_MIN, PRONOS_ODDS_MAX))
+/**
+ * Convert a probability to a clamped, rounded decimal cote.
+ *
+ * `ceiling` defaults to the 1X2 bound. Markets with many more outcomes pass
+ * their own — a shared 15.0 saturated them into flat, information-free boards.
+ */
+export function decimalOdds(prob: number, ceiling: number = PRONOS_ODDS_MAX): number {
+  if (prob <= 0) return ceiling
+  return round2(clamp(PRONOS_MARGIN / prob, PRONOS_ODDS_MIN, ceiling))
 }
 
 function factorial(n: number): number {
@@ -170,22 +178,29 @@ export function scorelineProbabilities(teamAOvr: number, teamBOvr: number): Scor
 export function computeScoreOdds(teamAOvr: number, teamBOvr: number): ScorelineOdds[] {
   return scorelineProbabilities(teamAOvr, teamBOvr)
     .sort((x, y) => y.prob - x.prob)
-    .map((s) => ({ scoreA: s.scoreA, scoreB: s.scoreB, odds: decimalOdds(s.prob) }))
+    .map((s) => ({ scoreA: s.scoreA, scoreB: s.scoreB, odds: decimalOdds(s.prob, PRONOS_ODDS_MAX_SCORE) }))
 }
 
 // ─── MVP market ──────────────────────────────────────────────────────────────
 
 /**
- * MVP cotes for the confirmed-IN players. Win-MVP probability is proportional to a
- * player's share of the total OVR on the pitch — the strongest player is the shortest
- * price. Non-positive OVRs are treated as 0 share.
+ * MVP cotes for the confirmed-IN players. Win-MVP probability is a player's share
+ * of the rating on the pitch — the strongest player is the shortest price.
+ *
+ * The share is taken ABOVE the rating floor, not of the raw rating. Ratings live
+ * on [40, 99]: dividing raw values treats an interval scale as a ratio scale, so
+ * the worst player in the game still claimed ~8 % of the probability mass and the
+ * whole board collapsed to a 1.5× spread between the best and worst player.
+ * Subtracting the baseline first is the entire fix. Ratings at or under the
+ * baseline keep a zero share rather than going negative.
  */
 export function computeMvpOdds(players: { playerId: string; ovr: number }[]): MvpOdds[] {
-  const totalOvr = players.reduce((s, p) => s + Math.max(0, p.ovr), 0)
+  const above = (ovr: number) => Math.max(0, ovr - PRONOS_MVP_RATING_BASELINE)
+  const total = players.reduce((s, p) => s + above(p.ovr), 0)
   return players
     .map((p) => ({
       playerId: p.playerId,
-      odds: decimalOdds(totalOvr > 0 ? Math.max(0, p.ovr) / totalOvr : 0),
+      odds: decimalOdds(total > 0 ? above(p.ovr) / total : 0, PRONOS_ODDS_MAX_MVP),
     }))
     .sort((a, b) => a.odds - b.odds)
 }

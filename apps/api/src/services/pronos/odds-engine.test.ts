@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest'
 import {
   PRONOS_ODDS_MIN,
   PRONOS_ODDS_MAX,
+  PRONOS_ODDS_MAX_SCORE,
+  PRONOS_ODDS_MAX_MVP,
   PRONOS_MARGIN,
   PRONOS_DRAW_BASE,
   PRONOS_SCORE_GRID_MAX,
@@ -140,7 +142,9 @@ describe('computeScoreOdds', () => {
     }
     for (const s of scores) {
       expect(s.odds).toBeGreaterThanOrEqual(PRONOS_ODDS_MIN)
-      expect(s.odds).toBeLessThanOrEqual(PRONOS_ODDS_MAX)
+      // The score market has its own ceiling: an 81-cell grid needs headroom the
+      // 1X2 bound never gave it, which is what flattened the board to all-15.00.
+      expect(s.odds).toBeLessThanOrEqual(PRONOS_ODDS_MAX_SCORE)
     }
   })
 
@@ -165,17 +169,29 @@ describe('computeMvpOdds', () => {
     expect(odds[0].odds).toBeLessThan(odds[odds.length - 1].odds)
   })
 
-  it('prices by OVR share (fair inverse before clamping)', () => {
+  it('prices by share of rating ABOVE the floor, not of the raw rating', () => {
     const odds = computeMvpOdds(squad)
     const a = odds.find((o) => o.playerId === 'a')!
-    // share = 90/210 = 0.4286 → 2.33
-    expect(a.odds).toBeCloseTo(2.33, 2)
+    // above-baseline shares: 51 / (51 + 31 + 11) = 0.5484 → 1.82.
+    // Dividing raw ratings gave 90/210 = 0.4286 → 2.33, which treated the 40-99
+    // scale as if it started at zero and squashed the whole field together.
+    expect(a.odds).toBeCloseTo(1.82, 2)
+  })
+
+  it('spreads the field far wider than a raw-share price would', () => {
+    const odds = computeMvpOdds(squad)
+    const shortest = odds[0].odds
+    const longest = odds[odds.length - 1].odds
+    // Raw shares priced this squad 2.33 → 4.20, a 1.8x range across a 40-point
+    // rating gap. Anything under 3x means the market has gone flat again.
+    expect(longest / shortest).toBeGreaterThan(3)
   })
 
   it('handles an all-zero / empty roster without dividing by zero', () => {
     expect(computeMvpOdds([]).length).toBe(0)
+    // Below the baseline every share is zero, so the market's own ceiling stands in.
     const zero = computeMvpOdds([{ playerId: 'x', ovr: 0 }])
-    expect(zero[0].odds).toBe(PRONOS_ODDS_MAX)
+    expect(zero[0].odds).toBe(PRONOS_ODDS_MAX_MVP)
   })
 })
 

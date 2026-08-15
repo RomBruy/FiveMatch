@@ -11,6 +11,9 @@ import {
   PRONOS_MARGIN,
   PRONOS_MAX_STAKE,
   PRONOS_ODDS_MAX,
+  PRONOS_ODDS_MAX_SCORE,
+  PRONOS_ODDS_MAX_MVP,
+  PRONOS_MVP_RATING_BASELINE,
   PRONOS_ODDS_MIN,
   PRONOS_SCORE_BOARD_SIZE,
   PRONOS_SCORE_GRID_MAX,
@@ -37,7 +40,7 @@ function normalize(value: unknown): unknown {
   return value
 }
 
-describe('Pronos v2.3 golden regression', () => {
+describe('Pronos v2.4 golden regression', () => {
   it('freezes the 1,000-point economy and pricing constants', () => {
     expect({
       ALGORITHM_CONSTANTS_VERSION,
@@ -50,13 +53,16 @@ describe('Pronos v2.3 golden regression', () => {
       PRONOS_MARGIN,
       PRONOS_ODDS_MIN,
       PRONOS_ODDS_MAX,
+      PRONOS_ODDS_MAX_SCORE,
+      PRONOS_ODDS_MAX_MVP,
+      PRONOS_MVP_RATING_BASELINE,
       PRONOS_BASE_GOALS,
       PRONOS_GOAL_TILT_SCALE,
       PRONOS_GOAL_TILT_MAX,
       PRONOS_SCORE_GRID_MAX,
       PRONOS_SCORE_BOARD_SIZE,
     }).toEqual({
-      ALGORITHM_CONSTANTS_VERSION: 'v2.3',
+      ALGORITHM_CONSTANTS_VERSION: 'v2.4',
       PRONOS_STARTING_BANKROLL: 1000,
       PRONOS_MAX_STAKE: 500,
       PRONOS_CLOSE_REFUND: 0.4,
@@ -66,6 +72,9 @@ describe('Pronos v2.3 golden regression', () => {
       PRONOS_MARGIN: 1,
       PRONOS_ODDS_MIN: 1.1,
       PRONOS_ODDS_MAX: 15,
+      PRONOS_ODDS_MAX_SCORE: 60,
+      PRONOS_ODDS_MAX_MVP: 25,
+      PRONOS_MVP_RATING_BASELINE: 39,
       PRONOS_BASE_GOALS: 2.5,
       PRONOS_GOAL_TILT_SCALE: 100,
       PRONOS_GOAL_TILT_MAX: 0.6,
@@ -97,18 +106,22 @@ describe('Pronos v2.3 golden regression', () => {
         teamB: 0.221344258612,
       },
       rates: { lambdaA: 2.95, lambdaB: 2.05 },
+      // v2.4: five of these six used to read exactly 15.00 — the shared ceiling
+      // saturated the market until every long shot cost the same. They differ now.
       topSixEven: [
         { scoreA: 2, scoreB: 2, odds: 10.73 },
-        { scoreA: 3, scoreB: 3, odds: 15 },
-        { scoreA: 1, scoreB: 1, odds: 15 },
-        { scoreA: 2, scoreB: 3, odds: 15 },
-        { scoreA: 3, scoreB: 2, odds: 15 },
-        { scoreA: 1, scoreB: 2, odds: 15 },
+        { scoreA: 3, scoreB: 3, odds: 15.45 },
+        { scoreA: 1, scoreB: 1, odds: 16.76 },
+        { scoreA: 2, scoreB: 3, odds: 20.07 },
+        { scoreA: 3, scoreB: 2, odds: 20.07 },
+        { scoreA: 1, scoreB: 2, odds: 20.9 },
       ],
+      // v2.4: share is taken above the rating floor, so a 90 is now 4.6x shorter
+      // than a 50 instead of 1.8x — the market finally ranks the squad.
       mvp: [
-        { playerId: 'a', odds: 2.33 },
+        { playerId: 'a', odds: 1.82 },
         { playerId: 'b', odds: 3 },
-        { playerId: 'c', odds: 4.2 },
+        { playerId: 'c', odds: 8.45 },
       ],
     })
   })

@@ -1,6 +1,9 @@
-// algorithm-constants.ts v2.3 — changes require PR review and version bump in ALGORITHM_CONSTANTS_VERSION
+// algorithm-constants.ts v2.4 — changes require PR review and version bump in ALGORITHM_CONSTANTS_VERSION
+// v2.4: per-market pronos odds ceilings + MVP share taken above the rating floor.
+//       The OVR formula and every one of its constants are UNCHANGED — the OVR
+//       golden regression's expected outputs must not move, only its version string.
 
-export const ALGORITHM_CONSTANTS_VERSION = 'v2.3'
+export const ALGORITHM_CONSTANTS_VERSION = 'v2.4'
 
 // ─── OVR Attribute Weights ────────────────────────────────────────────────────
 // match_impact = Σ(attribute × weight). Weights sum to exactly 1.0.
@@ -240,7 +243,24 @@ export const PRONOS_DRAW_BASE = 0.26   // draw probability at OVR parity (gap = 
 export const PRONOS_DRAW_SCALE = 25    // gaussian falloff of draw probability vs |OVR gap|
 export const PRONOS_MARGIN = 1.0       // 1.0 = fair odds (no house edge); < 1.0 adds vig
 export const PRONOS_ODDS_MIN = 1.10    // decimal-odds clamp floor (a near-certainty still pays a little)
-export const PRONOS_ODDS_MAX = 15.0    // decimal-odds clamp ceiling (a long shot can't pay infinity)
+export const PRONOS_ODDS_MAX = 15.0    // decimal-odds clamp ceiling for the 1X2 market
+
+// ─── Per-market odds ceilings ────────────────────────────────────────────────
+// A single 15.0 ceiling suited the 1X2 market (3 outcomes, none rarer than ~7 %)
+// and quietly destroyed the other two, which have many more outcomes and
+// therefore far smaller probabilities:
+//
+//   · Correct score: an 0..8 grid is 81 cells, so a scoreline needs p > 6.7 % to
+//     price under 15.0. Only the modal scoreline managed it — every other line
+//     on the board read exactly 15.00, and a market where all the prices are
+//     identical carries no information at all.
+//   · MVP: with 10 players, corrected probabilities put the weakest player past
+//     the same ceiling.
+//
+// Raising the ceiling per market is the whole fix. The 1X2 keeps 15.0 because
+// nothing there ever reached it.
+export const PRONOS_ODDS_MAX_SCORE = 60.0  // correct score: 81-cell grid, long tail is real
+export const PRONOS_ODDS_MAX_MVP = 25.0    // MVP: ~10 candidates, weakest is a genuine long shot
 
 // Correct-score market: independent-Poisson goal model, CONDITIONED on the 1X2 result
 // so the score market's implied result probabilities equal the logistic 1X2 exactly.
@@ -249,6 +269,15 @@ export const PRONOS_BASE_GOALS = 2.5       // expected goals per team at parity 
 export const PRONOS_GOAL_TILT_SCALE = 100  // OVR gap → goal-rate skew divisor (gap 20 ⇒ ±0.20 skew)
 export const PRONOS_GOAL_TILT_MAX = 0.6    // cap on the skew fraction (keeps both λ strictly > 0)
 export const PRONOS_SCORE_GRID_MAX = 8     // scoreline grid 0..N per team for enumeration/normalization
+
+// MVP market: win-MVP probability is a player's share of the rating on the pitch.
+// The share is taken ABOVE the rating floor, not of the raw rating. A rating of 40
+// is the bottom of the scale, not "40 % of a player" — dividing raw ratings treated
+// an interval scale as a ratio scale, so the weakest player on the pitch still
+// absorbed ~8 % of the probability mass and the whole market collapsed into a
+// 46 % spread (best 8.51, worst 12.41 — a 1.5× range across the entire squad).
+// Subtracting the floor first restores a real ordering (7.28 → 17.10, ~2.3×).
+export const PRONOS_MVP_RATING_BASELINE = OVR_CLAMP_MIN - 1 // 39 — one below the floor, so a floor player keeps a sliver
 
 // Economy
 export const PRONOS_STARTING_BANKROLL = 1000 // per-group starting balance (fictional points)

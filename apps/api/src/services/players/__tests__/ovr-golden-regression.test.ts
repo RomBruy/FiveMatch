@@ -78,7 +78,7 @@ describe('OVR v2.3 golden regression', () => {
       SEED_PRIOR_OVR_FALLBACK,
       SEED_SINGLE_RATER_AGREEMENT_FACTOR,
     }).toEqual({
-      ALGORITHM_CONSTANTS_VERSION: 'v2.3',
+      ALGORITHM_CONSTANTS_VERSION: 'v2.4',
       OVR_ATTRIBUTE_WEIGHTS: {
         technique: 0.25,
         defending: 0.2,
