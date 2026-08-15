@@ -275,6 +275,16 @@ export function BetSlipSheet({
                   <Text style={styles.micro}>{t('pronos.slip.gainLabel')}</Text>
                   {/* The screen's ONE --type-numeral. */}
                   <Text style={styles.gainNumeral}>{potentialGain}</Text>
+                  {/* The arithmetic, spelled out. A payout nobody can verify in
+                      their head is a number they have to take on faith. */}
+                  {stakeValid && displayed && (
+                    <Text style={styles.gainWorking}>
+                      {t('pronos.slip.gainWorking', {
+                        stake,
+                        odds: formatOdds(displayed.odds),
+                      })}
+                    </Text>
+                  )}
                 </View>
                 <View style={styles.afterBlock}>
                   <Text style={styles.micro}>{t('pronos.slip.balanceAfterLabel')}</Text>
@@ -283,6 +293,14 @@ export function BetSlipSheet({
                   </Text>
                 </View>
               </View>
+
+              {/* When the market closes, and — for MVP — who actually decides it.
+                  Betting on an outcome whose referee is unnamed is a bad deal. */}
+              <Text style={styles.terms}>
+                {displayed?.market === 'mvp'
+                  ? t('pronos.slip.termsMvp')
+                  : t('pronos.slip.terms')}
+              </Text>
 
               {errorMessage !== null && <Text style={styles.errorText}>{errorMessage}</Text>}
 
@@ -402,6 +420,19 @@ const styles = StyleSheet.create({
   },
   gainRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 12 },
   gainBlock: { flex: 1, minWidth: 0 },
+  gainWorking: {
+    color: Colors.inkDisabled,
+    fontFamily: Fonts.inter,
+    fontSize: 11,
+    marginTop: 3,
+    fontVariant: ['tabular-nums'],
+  },
+  terms: {
+    color: Colors.inkDisabled,
+    fontFamily: Fonts.inter,
+    fontSize: 11,
+    lineHeight: 16,
+  },
   gainNumeral: {
     color: Colors.success,
     fontSize: 58,

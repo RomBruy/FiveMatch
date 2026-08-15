@@ -50,6 +50,13 @@ export interface MyMatch {
   completedAt: string | null
   isHost: boolean
   myStatus: AttendanceStatus | null
+  /**
+   * Win / draw / loss from the caller's own side. The API has always computed
+   * this (it knows the team side the score alone cannot carry); the client just
+   * never read it, so the history could show a score but never a result.
+   * Null when the viewer did not play or the score is not in.
+   */
+  userResult: 'win' | 'draw' | 'loss' | null
 }
 
 export interface MatchDetail {

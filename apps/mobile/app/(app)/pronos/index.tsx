@@ -1,5 +1,7 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { View, Text, ScrollView, StyleSheet, RefreshControl } from 'react-native'
+import AsyncStorage from '@react-native-async-storage/async-storage'
+import { PRONOS_MAX_STAKE } from '@fivematch/types/algorithm-constants'
 import { useRouter } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -11,6 +13,10 @@ import { httpClient } from '../../../lib/api-client'
 import { PressableScale } from '../../../components/ui/PressableScale'
 import { Skeleton } from '../../../components/ui/Skeleton'
 import { CountUpNumber } from '../../../components/ui/CountUpNumber'
+
+const HOW_IT_WORKS_KEY = 'pronos.howItWorks.dismissed'
+/** Placing this many bets is proof enough that the rules landed. */
+const HOW_IT_WORKS_BET_THRESHOLD = 3
 
 interface OpenMarket {
   matchId: string
@@ -68,6 +74,16 @@ export default function PronosScreen() {
   const queryClient = useQueryClient()
   const { data, isLoading } = usePronosFeed()
   const [refreshing, setRefreshing] = useState(false)
+  const [dismissed, setDismissed] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    void AsyncStorage.getItem(HOW_IT_WORKS_KEY).then((v) => setDismissed(v === '1'))
+  }, [])
+
+  const dismissHowItWorks = useCallback(() => {
+    setDismissed(true)
+    void AsyncStorage.setItem(HOW_IT_WORKS_KEY, '1')
+  }, [])
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true)
@@ -83,6 +99,12 @@ export default function PronosScreen() {
   const pending = data?.bets.filter((bet) => bet.status === 'pending') ?? []
   const settled = data?.bets.filter((bet) => bet.status !== 'pending') ?? []
 
+  // Shown until explicitly dismissed, or until the bets themselves prove the
+  // rules are understood. `dismissed === null` means storage has not answered
+  // yet — render nothing rather than flashing the block on every cold start.
+  const showHowItWorks =
+    dismissed === false && (data === undefined || data.bets.length < HOW_IT_WORKS_BET_THRESHOLD)
+
   return (
     <ScrollView
       style={styles.screen}
@@ -92,6 +114,7 @@ export default function PronosScreen() {
       }
     >
       <Text style={styles.title}>{t('pronos.title')}</Text>
+      <Text style={styles.subtitle}>{t('pronos.subtitle')}</Text>
 
       <View style={styles.balanceCard}>
         <Text style={styles.balanceLabel}>{t('pronos.balance').toUpperCase()}</Text>
@@ -102,6 +125,39 @@ export default function PronosScreen() {
           <CountUpNumber value={data.balance} style={styles.balanceValue} />
         )}
       </View>
+
+      {/* How this works.
+          The tab showed a balance of 1000 and an empty list, and never said what
+          you were waiting for: odds only exist once the organiser draws the
+          teams, and they close at kick-off. That window was documented nowhere
+          in the app. Dismissible, and gone for good once you have bet a few
+          times — an explanation that will not leave is an explanation that
+          becomes furniture. */}
+      {showHowItWorks && (
+        <View style={styles.how}>
+          <View style={styles.howHead}>
+            <Text style={styles.howTitle}>{t('pronos.how.title').toUpperCase()}</Text>
+            <PressableScale
+              onPress={dismissHowItWorks}
+              accessibilityRole="button"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={styles.howDismiss}>{t('pronos.how.dismiss')}</Text>
+            </PressableScale>
+          </View>
+          {(['open', 'stake', 'settle'] as const).map((step, index) => (
+            <View key={step} style={styles.howStep}>
+              <Text style={styles.howNum}>{index + 1}</Text>
+              <View style={styles.howText}>
+                <Text style={styles.howStepTitle}>{t(`pronos.how.${step}.title`)}</Text>
+                <Text style={styles.howStepBody}>
+                  {t(`pronos.how.${step}.body`, { max: PRONOS_MAX_STAKE })}
+                </Text>
+              </View>
+            </View>
+          ))}
+        </View>
+      )}
 
       <Text style={styles.sectionLabel}>{t('pronos.openMarkets').toUpperCase()}</Text>
       {isLoading ? (
@@ -197,6 +253,55 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.bebas,
     fontSize: 48,
     color: Colors.ink,
+  },
+  subtitle: {
+    fontFamily: Fonts.inter,
+    fontSize: 13.5,
+    lineHeight: 19,
+    color: Colors.inkSecondary,
+    marginTop: -6,
+  },
+  how: {
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.card,
+    padding: 16,
+    gap: 13,
+  },
+  howHead: { flexDirection: 'row', alignItems: 'center' },
+  howTitle: {
+    flex: 1,
+    fontFamily: Fonts.interSemiBold,
+    fontSize: 10,
+    letterSpacing: 1.5,
+    color: Colors.primary,
+  },
+  howDismiss: {
+    fontFamily: Fonts.interSemiBold,
+    fontSize: 10,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    color: Colors.inkSecondary,
+  },
+  howStep: { flexDirection: 'row', gap: 11, alignItems: 'flex-start' },
+  howNum: {
+    width: 22,
+    height: 22,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.primarySubtle,
+    color: Colors.primary,
+    textAlign: 'center',
+    lineHeight: 22,
+    fontFamily: Fonts.interBold,
+    fontSize: 11,
+    overflow: 'hidden',
+  },
+  howText: { flex: 1, gap: 2 },
+  howStepTitle: { fontFamily: Fonts.interSemiBold, fontSize: 13, color: Colors.ink },
+  howStepBody: {
+    fontFamily: Fonts.inter,
+    fontSize: 11.5,
+    lineHeight: 16,
+    color: Colors.inkSecondary,
   },
   sectionLabel: {
     fontFamily: Fonts.interSemiBold,

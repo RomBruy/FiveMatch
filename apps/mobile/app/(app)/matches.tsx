@@ -1,11 +1,10 @@
 import { View, Text, StyleSheet, ScrollView, RefreshControl } from 'react-native'
 import { useTranslation } from 'react-i18next'
-import { useRouter } from 'expo-router'
+import { useLocalSearchParams, useRouter } from 'expo-router'
 import { useCallback, useState } from 'react'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Colors } from '../../constants/colors'
 import { Fonts, Radius } from '../../constants/tokens'
-import { Chip } from '../../components/ui/Chip'
 import { PrimaryButton } from '../../components/ui/PrimaryButton'
 import { SecondaryButton } from '../../components/ui/SecondaryButton'
 import { PressableScale } from '../../components/ui/PressableScale'
@@ -28,7 +27,11 @@ export default function MyMatchesTab() {
   const { t, i18n } = useTranslation()
   const router = useRouter()
   const insets = useSafeAreaInsets()
-  const [scope, setScope] = useState<'upcoming' | 'past'>('upcoming')
+  // The profile's "Mon historique" row deep-links straight into the past scope.
+  const { scope: scopeParam } = useLocalSearchParams<{ scope?: string }>()
+  const [scope, setScope] = useState<'upcoming' | 'past'>(
+    scopeParam === 'past' ? 'past' : 'upcoming',
+  )
   const [refreshing, setRefreshing] = useState(false)
 
   const { data: matches, isLoading, refetch } = useMyMatches(scope)
@@ -45,12 +48,33 @@ export default function MyMatchesTab() {
   const openMatch = (matchId: string) => router.push(`/(app)/match/${matchId}` as never)
 
   const formatPastDate = (iso: string) =>
-    new Date(iso).toLocaleDateString(i18n.language, { day: 'numeric', month: 'short' }).toUpperCase()
+    new Date(iso).toLocaleDateString(i18n.language, { weekday: 'short', day: 'numeric' }).toUpperCase()
 
-  const resultOf = (match: MyMatch) => {
-    if (match.scoreA === null || match.scoreB === null) return null
-    if (match.scoreA === match.scoreB) return 'D' as const
-    return null // team side isn't in this payload — score alone carries the story
+  // The tally the history never had. Only matches the viewer actually played
+  // carry a result, so hosted-but-not-played fixtures never inflate the record.
+  const record = (matches ?? []).reduce(
+    (acc, m) => {
+      if (m.userResult === 'win') acc.win += 1
+      else if (m.userResult === 'draw') acc.draw += 1
+      else if (m.userResult === 'loss') acc.loss += 1
+      return acc
+    },
+    { win: 0, draw: 0, loss: 0 },
+  )
+  const played = record.win + record.draw + record.loss
+
+  // Grouped by month so a long history reads as a season rather than a list.
+  const byMonth: { key: string; label: string; items: MyMatch[] }[] = []
+  for (const match of matches ?? []) {
+    const date = new Date(match.scheduledAt)
+    const key = `${date.getFullYear()}-${date.getMonth()}`
+    const existing = byMonth.find((g) => g.key === key)
+    if (existing) existing.items.push(match)
+    else byMonth.push({
+      key,
+      label: date.toLocaleDateString(i18n.language, { month: 'long', year: 'numeric' }),
+      items: [match],
+    })
   }
 
   return (
@@ -67,17 +91,25 @@ export default function MyMatchesTab() {
 
       {scope === 'upcoming' && <NeedsAttention />}
 
-      <View style={styles.tabs}>
-        <Chip
-          label={t('myMatches.upcoming')}
-          active={scope === 'upcoming'}
-          onPress={() => setScope('upcoming')}
-        />
-        <Chip
-          label={t('myMatches.past')}
-          active={scope === 'past'}
-          onPress={() => setScope('past')}
-        />
+      {/* Two round chips read as optional filters, which is why the history was
+          never found. A segmented control reads as two halves of one thing. */}
+      <View style={styles.seg} accessibilityRole="tablist">
+        {(['upcoming', 'past'] as const).map((value) => {
+          const on = scope === value
+          return (
+            <PressableScale
+              key={value}
+              onPress={() => setScope(value)}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: on }}
+              style={[styles.segItem, on && styles.segItemOn]}
+            >
+              <Text style={[styles.segText, on && styles.segTextOn]}>
+                {value === 'upcoming' ? t('myMatches.upcoming') : t('myMatches.past')}
+              </Text>
+            </PressableScale>
+          )
+        })}
       </View>
 
       {isLoading ? (
@@ -147,25 +179,63 @@ export default function MyMatchesTab() {
           ))}
         </View>
       ) : (
-        <View style={styles.list}>
-          {matches.map((match) => (
-            <PressableScale
-              key={match.matchId}
-              style={styles.pastRow}
-              onPress={() => openMatch(match.matchId)}
-              accessibilityRole="button"
-            >
-              <Text style={styles.pastDate}>{formatPastDate(match.scheduledAt)}</Text>
-              <Text style={styles.pastPlace} numberOfLines={1}>
-                {match.city ?? ''}
-              </Text>
-              <Text style={styles.pastScore}>
-                {match.scoreA !== null && match.scoreB !== null ? `${match.scoreA}–${match.scoreB}` : '—'}
-              </Text>
-              <View style={styles.pastDot}>
-                {resultOf(match) && <FormDots results={[resultOf(match)!]} size={22} />}
+        <View>
+          {/* The season, before the list of nights that made it. */}
+          {played > 0 && (
+            <View style={styles.season}>
+              <View style={styles.seasonCount}>
+                <Text style={styles.seasonBig}>{played}</Text>
+                <Text style={styles.seasonLabel}>{t('myMatches.season.played').toUpperCase()}</Text>
               </View>
-            </PressableScale>
+              <View style={styles.seasonRight}>
+                <View style={styles.wdl}>
+                  <Text style={[styles.wdlPill, styles.wdlWin]}>
+                    {t('myMatches.season.win', { count: record.win })}
+                  </Text>
+                  <Text style={[styles.wdlPill, styles.wdlDraw]}>
+                    {t('myMatches.season.draw', { count: record.draw })}
+                  </Text>
+                  <Text style={[styles.wdlPill, styles.wdlLoss]}>
+                    {t('myMatches.season.loss', { count: record.loss })}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          )}
+
+          {byMonth.map((group) => (
+            <View key={group.key}>
+              <Text style={styles.monthLabel}>{group.label.toUpperCase()}</Text>
+              <View style={styles.list}>
+                {group.items.map((match) => (
+                  <PressableScale
+                    key={match.matchId}
+                    style={styles.pastRow}
+                    onPress={() => openMatch(match.matchId)}
+                    accessibilityRole="button"
+                  >
+                    <Text style={styles.pastDate}>{formatPastDate(match.scheduledAt)}</Text>
+                    <Text style={styles.pastPlace} numberOfLines={1}>
+                      {match.city ?? ''}
+                    </Text>
+                    <Text style={styles.pastScore}>
+                      {match.scoreA !== null && match.scoreB !== null ? `${match.scoreA}–${match.scoreB}` : '—'}
+                    </Text>
+                    <View style={styles.pastDot}>
+                      {match.userResult && (
+                        <FormDots
+                          results={[
+                            match.userResult === 'win' ? 'W'
+                              : match.userResult === 'draw' ? 'D' : 'L',
+                          ]}
+                          size={22}
+                        />
+                      )}
+                    </View>
+                  </PressableScale>
+                ))}
+              </View>
+            </View>
           ))}
         </View>
       )}
@@ -193,14 +263,81 @@ const styles = StyleSheet.create({
   titleAccent: {
     color: Colors.primary,
   },
-  tabs: {
+  seg: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 4,
     marginTop: 16,
     marginBottom: 20,
+    padding: 4,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.surfaceRaised,
+  },
+  segItem: {
+    flex: 1,
+    height: 38,
+    borderRadius: Radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  segItemOn: { backgroundColor: Colors.primary },
+  segText: {
+    color: Colors.inkSecondary,
+    fontFamily: Fonts.interSemiBold,
+    fontSize: 12,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+  },
+  segTextOn: { color: Colors.onPrimary },
+  season: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+    padding: 16,
+    marginBottom: 22,
+    borderRadius: Radius.card,
+    backgroundColor: Colors.primarySubtle,
+    borderWidth: 1,
+    borderColor: 'rgba(255,68,56,0.22)',
+  },
+  seasonCount: { alignItems: 'center' },
+  seasonBig: {
+    color: Colors.ink,
+    fontFamily: Fonts.bebas,
+    fontSize: 46,
+    lineHeight: 48,
+    fontVariant: ['tabular-nums'],
+  },
+  seasonLabel: {
+    color: Colors.inkSecondary,
+    fontFamily: Fonts.interSemiBold,
+    fontSize: 9,
+    letterSpacing: 1.2,
+    marginTop: 2,
+  },
+  seasonRight: { flex: 1 },
+  wdl: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
+  wdlPill: {
+    borderRadius: Radius.full,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+    fontFamily: Fonts.interSemiBold,
+    fontSize: 11,
+    overflow: 'hidden',
+  },
+  wdlWin: { backgroundColor: Colors.successSubtle, color: Colors.success },
+  wdlDraw: { backgroundColor: Colors.surfaceRaised, color: Colors.inkSecondary },
+  wdlLoss: { backgroundColor: Colors.primarySubtle, color: Colors.primary },
+  monthLabel: {
+    color: Colors.inkSecondary,
+    fontFamily: Fonts.interSemiBold,
+    fontSize: 10,
+    letterSpacing: 1.4,
+    marginBottom: 10,
+    marginTop: 6,
   },
   list: {
     gap: 12,
+    marginBottom: 18,
   },
   badges: {
     flexDirection: 'row',
