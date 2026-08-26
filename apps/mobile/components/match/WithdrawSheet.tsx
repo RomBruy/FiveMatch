@@ -25,8 +25,15 @@ interface WithdrawSheetProps {
   /** True once the sheet is closed enough to kickoff that this counts as late. */
   isLate: boolean
   submitting: boolean
+  /**
+   * Flips the sheet to its confirmation panel. The parent owns it because only
+   * the parent knows the mutation actually landed.
+   */
+  done: boolean
   /** Opens the help article explaining the late-cancellation rule. */
   onExplain: () => void
+  /** Leaves the match screen for discovery. Only offered once done. */
+  onFindAnother: () => void
   onClose: () => void
   onConfirm: (reason: CancellationReason) => void
 }
@@ -51,7 +58,9 @@ export function WithdrawSheet({
   otherPlayerCount,
   isLate,
   submitting,
+  done,
   onExplain,
+  onFindAnother,
   onClose,
   onConfirm,
 }: WithdrawSheetProps) {
@@ -126,6 +135,34 @@ export function WithdrawSheet({
 
           <View style={styles.grabZone}><View style={styles.handle} /></View>
 
+          {done ? (
+            <View style={[styles.body, { paddingBottom: Math.max(insets.bottom, 20) + 8 }]}>
+              <View style={styles.doneMark}>
+                <Ionicons name="checkmark" size={26} color={Colors.success} />
+              </View>
+              <Text style={styles.title}>{t('match.withdraw.doneTitle')}</Text>
+              <Text style={styles.lede}>{t('match.withdraw.doneBody')}</Text>
+
+              {/* Naming what happened is the point. Someone who feels they left
+                  the group short goes quiet next time instead of withdrawing. */}
+              <Text style={styles.micro}>{t('match.withdraw.didLabel')}</Text>
+              <View style={styles.didList}>
+                {(['host', 'waitlist', 'teams'] as const).map((step) => (
+                  <View key={step} style={styles.didRow}>
+                    <Ionicons name="checkmark-circle" size={16} color={Colors.success} />
+                    <Text style={styles.didText}>{t(`match.withdraw.did.${step}`)}</Text>
+                  </View>
+                ))}
+              </View>
+
+              <PrimaryButton
+                label={t('match.withdraw.findAnother')}
+                onPress={onFindAnother}
+                glow={false}
+              />
+              <SecondaryButton label={t('common.close')} onPress={onClose} />
+            </View>
+          ) : (
           <View style={[styles.body, { paddingBottom: Math.max(insets.bottom, 20) + 8 }]}>
             <Text style={styles.title}>{t('match.withdraw.title')}</Text>
             <Text style={styles.lede}>{t('match.withdraw.lede')}</Text>
@@ -188,6 +225,7 @@ export function WithdrawSheet({
             />
             <SecondaryButton label={t('match.withdraw.keepSeat')} onPress={onClose} />
           </View>
+          )}
         </Animated.View>
       </View>
     </Modal>
@@ -227,6 +265,18 @@ const styles = StyleSheet.create({
     letterSpacing: 1.4, // 0.14em @ 10 (label-caps register)
     textTransform: 'uppercase',
   },
+  doneMark: {
+    alignSelf: 'flex-start',
+    width: 48,
+    height: 48,
+    borderRadius: Radius.full,
+    backgroundColor: Colors.successSubtle,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  didList: { gap: 9 },
+  didRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  didText: { flex: 1, color: Colors.ink, fontFamily: Fonts.inter, fontSize: 12.5, lineHeight: 17 },
   reasons: { gap: 6 },
   reason: {
     flexDirection: 'row',

@@ -1,4 +1,5 @@
 import { View, Text, StyleSheet, Alert, Share, Linking, Platform } from 'react-native'
+import { useState } from 'react'
 import { useRouter } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -8,6 +9,7 @@ import { Fonts, Radius } from '../../constants/tokens'
 import { httpClient } from '../../lib/api-client'
 import { haptics } from '../../lib/haptics'
 import { PressableScale } from '../ui/PressableScale'
+import { CancelMatchSheet, type CancelReason } from './CancelMatchSheet'
 import type { AttendanceEntry } from '../../lib/matches'
 
 interface HostMatchActionsProps {
@@ -19,6 +21,8 @@ interface HostMatchActionsProps {
   longitude: number | null
   waitlist: AttendanceEntry[]
   canCancel: boolean
+  /** Drives the sheet's blast-radius line — how many people this actually hits. */
+  confirmedCount: number
 }
 
 /**
@@ -30,7 +34,7 @@ interface HostMatchActionsProps {
  * them, not a settings screen somewhere else.
  */
 export function HostMatchActions({
-  matchId, scheduledAt, venueName, city, latitude, longitude, waitlist, canCancel,
+  matchId, scheduledAt, venueName, city, latitude, longitude, waitlist, canCancel, confirmedCount,
 }: HostMatchActionsProps) {
   const { t, i18n } = useTranslation()
   const router = useRouter()
@@ -41,9 +45,23 @@ export function HostMatchActions({
     queryClient.invalidateQueries({ queryKey: ['attendances', matchId] })
   }
 
+  const [cancelOpen, setCancelOpen] = useState(false)
+
   const cancelMatch = useMutation({
-    mutationFn: () => httpClient.post(`/v1/matches/${matchId}/cancel`, {}),
-    onSuccess: () => { haptics.success(); invalidate(); router.back() },
+    // The reason is sent as the message the players receive, so it is resolved
+    // to real prose here rather than shipping a slug the API would have to know.
+    mutationFn: ({ reason }: { reason: CancelReason; postpone: boolean }) =>
+      httpClient.post(`/v1/matches/${matchId}/cancel`, {
+        reason: t(`match.cancelSheet.reason.${reason}`),
+      }),
+    onSuccess: (_data, { postpone }) => {
+      haptics.success()
+      invalidate()
+      setCancelOpen(false)
+      // Most cancellations are reschedules. Landing the host in creation rather
+      // than back on a dead match is what turns "not this week" into a fixture.
+      router.replace((postpone ? '/(app)/match/create' : '/(app)/matches') as never)
+    },
     onError: () => Alert.alert(t('common.genericError')),
   })
 
@@ -82,15 +100,6 @@ export function HostMatchActions({
     await Linking.openURL(canOpen ? url : `https://maps.google.com/?q=${label}`)
   }
 
-  const confirmCancel = () => Alert.alert(
-    t('match.host.cancel.title'),
-    t('match.host.cancel.body'),
-    [
-      { text: t('common.cancel'), style: 'cancel' },
-      { text: t('match.host.cancel.confirm'), style: 'destructive', onPress: () => cancelMatch.mutate() },
-    ],
-  )
-
   const hasLocation = Boolean(latitude != null || venueName || city)
 
   return (
@@ -124,11 +133,19 @@ export function HostMatchActions({
       )}
 
       {canCancel && (
-        <PressableScale onPress={confirmCancel} style={styles.cancelRow}>
+        <PressableScale onPress={() => setCancelOpen(true)} style={styles.cancelRow}>
           <Ionicons name="close-circle-outline" size={16} color={Colors.primary} />
           <Text style={styles.cancelText}>{t('match.host.cancel.action')}</Text>
         </PressableScale>
       )}
+
+      <CancelMatchSheet
+        visible={cancelOpen}
+        confirmedCount={confirmedCount}
+        submitting={cancelMatch.isPending}
+        onClose={() => setCancelOpen(false)}
+        onConfirm={(reason, postpone) => cancelMatch.mutate({ reason, postpone })}
+      />
     </View>
   )
 }

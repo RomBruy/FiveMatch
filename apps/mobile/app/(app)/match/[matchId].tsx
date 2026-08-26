@@ -28,6 +28,7 @@ import { AttendanceFinalization } from '../../../components/match/AttendanceFina
 import { HostMatchActions } from '../../../components/match/HostMatchActions'
 import { ReportPlayerSheet } from '../../../components/match/ReportPlayerSheet'
 import { WithdrawSheet } from '../../../components/match/WithdrawSheet'
+import { JoinedConfirmation } from '../../../components/match/JoinedConfirmation'
 import { DEFAULT_CANCELLATION_DEADLINE_HOURS } from '@fivematch/types'
 import { AttendanceSegmentedPill } from '../../../components/match/AttendanceSegmentedPill'
 import { PrimaryButton } from '../../../components/ui/PrimaryButton'
@@ -99,6 +100,8 @@ export default function MatchScreen() {
   const myWaitlistPosition = sheet?.waitlist.find((e) => e.playerId === sheet.myPlayerId)?.waitlistPosition ?? null
   const [reportOpen, setReportOpen] = useState(false)
   const [withdrawOpen, setWithdrawOpen] = useState(false)
+  const [withdrawDone, setWithdrawDone] = useState(false)
+  const [joinedOpen, setJoinedOpen] = useState(false)
   // Server-authored, and manager-only. Once settled the section reads as done
   // rather than offering the action again.
   const attendanceFinalized = sheet?.attendanceFinalized ?? false
@@ -295,7 +298,10 @@ export default function MatchScreen() {
             {match.capabilities.canJoin && !kickoffPassed && (
               <PrimaryButton
                 label={t('match.cta.join')}
-                onPress={() => void runAction(() => join.mutateAsync())}
+                onPress={() => void runAction(async () => {
+                  await join.mutateAsync()
+                  setJoinedOpen(true)
+                })}
                 loading={join.isPending}
                 glow={false}
               />
@@ -495,6 +501,7 @@ export default function MatchScreen() {
               longitude={match.longitude ?? null}
               waitlist={sheet?.waitlist ?? []}
               canCancel
+              confirmedCount={match.confirmed}
             />
           </View>
         )}
@@ -529,20 +536,39 @@ export default function MatchScreen() {
         otherPlayerCount={Math.max(0, match.confirmed - 1)}
         isLate={withdrawIsLate}
         submitting={leave.isPending}
+        done={withdrawDone}
         onExplain={() => {
           setWithdrawOpen(false)
           router.push('/(app)/help/article/late-withdrawal' as never)
         }}
-        onClose={() => setWithdrawOpen(false)}
+        onFindAnother={() => {
+          setWithdrawOpen(false)
+          router.replace('/(app)' as never)
+        }}
+        onClose={() => {
+          setWithdrawOpen(false)
+          setWithdrawDone(false)
+        }}
         onConfirm={(reason) => {
           void runAction(async () => {
             await leave.mutateAsync(reason)
-            setWithdrawOpen(false)
-            // Says what the app did, not just that it worked. Someone who feels
-            // they left the group short does not withdraw next time — they go
-            // quiet, which is the outcome this whole flow exists to prevent.
-            Alert.alert(t('match.withdraw.done'))
+            // Stay in the sheet and turn it into the receipt, rather than
+            // dropping the user back on a match they are no longer part of.
+            setWithdrawDone(true)
           })
+        }}
+      />
+
+      <JoinedConfirmation
+        visible={joinedOpen}
+        venueLabel={match.venueName ?? match.city ?? ''}
+        whenLabel={date.toLocaleString(i18n.language, {
+          weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit',
+        })}
+        onClose={() => setJoinedOpen(false)}
+        onSeeMyMatches={() => {
+          setJoinedOpen(false)
+          router.push('/(app)/matches' as never)
         }}
       />
 
