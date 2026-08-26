@@ -294,6 +294,24 @@ export default function MatchScreen() {
             spotsRemaining={match.spotsRemaining}
           />
 
+          {/* The thread. Sits above the actions because between joining and
+              kickoff it is the reason to reopen the match at all. */}
+          {!isOutsider && (
+            <PressableScale
+              style={styles.chatRow}
+              onPress={() => router.push(`/(app)/match/chat/${matchId}` as never)}
+              accessibilityRole="button"
+              accessibilityLabel={t('chat.open')}
+            >
+              <Ionicons name="chatbubble-ellipses-outline" size={18} color={Colors.primary} />
+              <View style={styles.chatRowText}>
+                <Text style={styles.chatRowTitle}>{t('chat.open')}</Text>
+                <Text style={styles.chatRowSub}>{t('chat.openSub')}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color={Colors.inkDisabled} />
+            </PressableScale>
+          )}
+
           <View style={styles.actionBlock}>
             {match.capabilities.canJoin && !kickoffPassed && (
               <PrimaryButton
@@ -709,6 +727,19 @@ const styles = StyleSheet.create({
     letterSpacing: 1.54,
     textTransform: 'uppercase',
   },
+  chatRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: Colors.surface,
+    borderRadius: Radius.md,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    marginBottom: 10,
+  },
+  chatRowText: { flex: 1, gap: 2 },
+  chatRowTitle: { color: Colors.ink, fontFamily: Fonts.interSemiBold, fontSize: 13.5 },
+  chatRowSub: { color: Colors.inkSecondary, fontFamily: Fonts.inter, fontSize: 11 },
   actionBlock: { gap: 10 },
   mutedNote: { color: Colors.inkSecondary, fontFamily: Fonts.inter, fontSize: 12.5, lineHeight: 18 },
   playerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8 },
