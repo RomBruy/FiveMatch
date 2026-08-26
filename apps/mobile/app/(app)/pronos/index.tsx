@@ -11,6 +11,7 @@ import { Colors } from '../../../constants/colors'
 import { Fonts, Radius, Type } from '../../../constants/tokens'
 import { httpClient } from '../../../lib/api-client'
 import { PressableScale } from '../../../components/ui/PressableScale'
+import { EmptyState } from '../../../components/ui/EmptyState'
 import { Skeleton } from '../../../components/ui/Skeleton'
 import { CountUpNumber } from '../../../components/ui/CountUpNumber'
 
@@ -163,7 +164,11 @@ export default function PronosScreen() {
       {isLoading ? (
         <Skeleton width="100%" height={72} />
       ) : (data?.openMarkets.length ?? 0) === 0 ? (
-        <Text style={styles.empty}>{t('pronos.noMarkets')}</Text>
+        // Pronos spends most of its life with no locked match, so this is the
+        // screen people actually see. A bare "no markets" line taught nothing;
+        // the betting window — when odds open, when they close — was documented
+        // nowhere in the app, and it is the first thing everyone asks.
+        <EmptyState title={t('pronos.empty.title')} body={t('pronos.empty.body')} />
       ) : (
         data!.openMarkets.map((market) => (
           <PressableScale
@@ -309,11 +314,6 @@ const styles = StyleSheet.create({
     letterSpacing: 1.1,
     color: Colors.inkSecondary,
     marginTop: 8,
-  },
-  empty: {
-    fontFamily: Fonts.inter,
-    fontSize: 13,
-    color: Colors.inkDisabled,
   },
   row: {
     flexDirection: 'row',

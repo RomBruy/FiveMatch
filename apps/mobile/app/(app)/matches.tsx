@@ -9,8 +9,10 @@ import { PrimaryButton } from '../../components/ui/PrimaryButton'
 import { SecondaryButton } from '../../components/ui/SecondaryButton'
 import { PressableScale } from '../../components/ui/PressableScale'
 import { SkeletonRow } from '../../components/ui/Skeleton'
+import { EmptyState } from '../../components/ui/EmptyState'
 import { StaggerItem } from '../../components/ui/Stagger'
 import { FormDots } from '../../components/ui/FormDots'
+import { LoopSpine } from '../../components/brand/LoopSpine'
 import { DOCK_CLEARANCE } from '../../components/ui/TabDock'
 import { MatchCard } from '../../components/match/MatchCard'
 import { NeedsAttention } from '../../components/match/NeedsAttention'
@@ -118,22 +120,34 @@ export default function MyMatchesTab() {
           <SkeletonRow card />
         </View>
       ) : !matches || matches.length === 0 ? (
-        <View style={styles.empty}>
-          <Text style={styles.emptyTitle}>
-            {scope === 'upcoming' ? t('myMatches.empty.upcomingTitle') : t('myMatches.empty.pastTitle')}
-          </Text>
+        <View style={styles.emptyBlock}>
+          <EmptyState
+            title={scope === 'upcoming' ? t('myMatches.empty.upcomingTitle') : t('myMatches.empty.pastTitle')}
+            body={scope === 'upcoming' ? t('myMatches.empty.upcomingBody') : t('myMatches.empty.pastBody')}
+          >
+            {scope === 'upcoming' && (
+              <>
+                <PrimaryButton
+                  label={t('myMatches.empty.upcomingCta')}
+                  onPress={() => router.push('/(app)' as never)}
+                  glow={false}
+                />
+                <SecondaryButton
+                  label={t('discover.createMatch')}
+                  onPress={() => router.push('/(app)/match/create' as never)}
+                />
+              </>
+            )}
+          </EmptyState>
+
+          {/* An empty list is not a dead end, it is beat 1 of 4. Showing the loop
+              here is the whole point: it tells someone what booking one match
+              actually starts, which no amount of "no matches yet" can. */}
           {scope === 'upcoming' && (
             <>
-              <Text style={styles.emptyText}>{t('myMatches.empty.upcomingBody')}</Text>
-              <PrimaryButton
-                label={t('discover.title')}
-                onPress={() => router.push('/(app)' as never)}
-                glow={false}
-              />
-              <SecondaryButton
-                label={t('discover.createMatch')}
-                onPress={() => router.push('/(app)/match/create' as never)}
-              />
+              <Text style={styles.emptyLoopLabel}>{t('brand.loopLabel')}</Text>
+              <LoopSpine current={1} compact />
+              <Text style={styles.emptyLoopStep}>{t('brand.loopStep', { step: 1 })}</Text>
             </>
           )}
         </View>
@@ -378,22 +392,23 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     color: Colors.success,
   },
-  empty: {
-    gap: 14,
-    paddingVertical: 24,
+  emptyBlock: {
+    gap: 12,
+    paddingVertical: 8,
   },
-  emptyTitle: {
-    color: Colors.ink,
-    fontFamily: Fonts.bebas,
-    fontSize: 26,
-    letterSpacing: 1.3,
+  emptyLoopLabel: {
+    marginTop: 4,
+    color: Colors.inkSecondary,
+    fontFamily: Fonts.interSemiBold,
+    fontSize: 10,
+    letterSpacing: 1.4, // 0.14em @ 10 (label-caps register)
     textTransform: 'uppercase',
   },
-  emptyText: {
+  emptyLoopStep: {
     color: Colors.inkSecondary,
     fontFamily: Fonts.inter,
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 11.5,
+    lineHeight: 16,
   },
   pastRow: {
     flexDirection: 'row',

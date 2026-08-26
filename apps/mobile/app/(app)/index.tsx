@@ -12,8 +12,10 @@ import { PrimaryButton } from '../../components/ui/PrimaryButton'
 import { SecondaryButton } from '../../components/ui/SecondaryButton'
 import { PressableScale } from '../../components/ui/PressableScale'
 import { SkeletonRow } from '../../components/ui/Skeleton'
+import { EmptyState, EmptyPreview } from '../../components/ui/EmptyState'
 import { StaggerItem } from '../../components/ui/Stagger'
 import { TextureType } from '../../components/ui/TextureType'
+import { PromiseBand } from '../../components/brand/PromiseBand'
 import { DOCK_CLEARANCE } from '../../components/ui/TabDock'
 import { MatchCard } from '../../components/match/MatchCard'
 import { useDiscoveryLocation } from '../../hooks/use-discovery-location'
@@ -57,6 +59,12 @@ export default function DiscoverTab() {
   }, [refetch])
 
   const patch = (next: Partial<DiscoverFilters>) => setFilters((f) => ({ ...f, ...next }))
+
+  // "Nothing here" is usually a radius problem, so the empty state offers the next
+  // step up rather than making someone open the filter panel to guess. Null at 50 km,
+  // where widening further stops being a plausible answer.
+  const widerRadius = RADIUS_OPTIONS.find((km) => km > filters.radiusKm) ?? null
+
   const activeFilterCount =
     (filters.skillLevel ? 1 : 0) +
     (filters.when !== 'any' ? 1 : 0) +
@@ -81,10 +89,15 @@ export default function DiscoverTab() {
         keyboardShouldPersistTaps="handled"
       >
         <StaggerItem index={0}>
+          {/* The heading states the world, not the menu — and follows the filter,
+              so it can never promise "tonight" while showing next Saturday. */}
           <Text style={styles.title}>
-            {t('discover.title')}<Text style={styles.titleAccent}>.</Text>
+            {t(`discover.heading.${filters.when}`)}<Text style={styles.titleAccent}>.</Text>
           </Text>
           <Text style={styles.subtitle}>{t('discover.subtitle')}</Text>
+          {/* Front door: the one row that tells a stranger what this app is.
+              If it later reads as clutter for veterans, gate it on matches played. */}
+          <PromiseBand style={styles.promise} />
         </StaggerItem>
 
         {/* Location bar — the one thing discovery cannot work without. */}
@@ -217,16 +230,29 @@ export default function DiscoverTab() {
                   ))}
                 </View>
               ) : (
-                // The empty state is the honest one for a young marketplace: it
-                // does not pretend, it offers the other side of the loop.
-                <View style={styles.empty}>
-                  <Text style={styles.emptyTitle}>{t('discover.empty.title')}</Text>
-                  <Text style={styles.emptyText}>{t('discover.empty.body')}</Text>
-                  <PrimaryButton
-                    label={t('discover.empty.cta')}
-                    onPress={() => router.push('/(app)/match/create' as never)}
-                    glow={false}
-                  />
+                // The worst screen in the app, and the one that made it feel empty.
+                // It now names what belongs here, offers the two real fixes — create
+                // one, or widen the search — and shows the shape of the missing
+                // cards so it reads as "no matches yet", not "this is broken".
+                <View style={styles.emptyBlock}>
+                  <EmptyState
+                    title={t('discover.empty.title')}
+                    body={t('discover.empty.body', { km: filters.radiusKm })}
+                  >
+                    <PrimaryButton
+                      label={t('discover.empty.cta')}
+                      onPress={() => router.push('/(app)/match/create' as never)}
+                      glow={false}
+                    />
+                    {widerRadius !== null && (
+                      <SecondaryButton
+                        label={t('discover.empty.widen', { km: widerRadius })}
+                        onPress={() => patch({ radiusKm: widerRadius })}
+                      />
+                    )}
+                  </EmptyState>
+                  <Text style={styles.emptyPreviewLabel}>{t('discover.empty.preview')}</Text>
+                  <EmptyPreview />
                 </View>
               )}
             </View>
@@ -277,6 +303,9 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.inter,
     fontSize: 14,
     marginTop: 4,
+  },
+  promise: {
+    marginTop: 13,
   },
   locationSection: {
     marginTop: 22,
@@ -361,22 +390,16 @@ const styles = StyleSheet.create({
   resultsList: {
     gap: 10,
   },
-  empty: {
-    gap: 14,
-    paddingVertical: 24,
+  emptyBlock: {
+    gap: 16,
+    paddingVertical: 8,
   },
-  emptyTitle: {
-    color: Colors.ink,
-    fontFamily: Fonts.bebas,
-    fontSize: 26,
-    letterSpacing: 1.3,
-    textTransform: 'uppercase',
-  },
-  emptyText: {
+  emptyPreviewLabel: {
     color: Colors.inkSecondary,
-    fontFamily: Fonts.inter,
-    fontSize: 14,
-    lineHeight: 20,
+    fontFamily: Fonts.interSemiBold,
+    fontSize: 10,
+    letterSpacing: 1.4, // 0.14em @ 10 (label-caps register)
+    textTransform: 'uppercase',
   },
   createBlock: {
     marginTop: 28,

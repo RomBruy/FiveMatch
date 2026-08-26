@@ -12,6 +12,7 @@ import { PressableScale } from '../../components/ui/PressableScale'
 import { PrimaryButton } from '../../components/ui/PrimaryButton'
 import { SecondaryButton } from '../../components/ui/SecondaryButton'
 import { Input } from '../../components/ui/Input'
+import { PromiseBand } from '../../components/brand/PromiseBand'
 import type { PublicMatchPreview } from '@fivematch/types'
 
 /**
@@ -56,6 +57,10 @@ export default function GuestDiscoverScreen() {
     >
       <Text style={styles.title}>{t('guestDiscover.title')}</Text>
       <Text style={styles.subtitle}>{t('guestDiscover.subtitle')}</Text>
+
+      {/* True first contact: this screen is what a shared link opens, before any
+          account exists. If the promise is not said here it is said nowhere. */}
+      <PromiseBand style={styles.promise} />
 
       <View style={styles.search}>
         <Input
@@ -133,6 +138,7 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 20, gap: 12 },
   title: { fontFamily: Fonts.bebas, fontSize: Type.display.maxSize, color: Colors.ink },
   subtitle: { fontFamily: Fonts.inter, fontSize: 14, color: Colors.inkSecondary },
+  promise: { marginTop: 6 },
   search: { marginTop: 4 },
   loader: { marginTop: 24 },
   empty: { fontFamily: Fonts.inter, fontSize: 13, color: Colors.inkDisabled, marginTop: 12 },

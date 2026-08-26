@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Image, StyleSheet } from 'react-native'
+import { Image, StyleSheet, Text } from 'react-native'
+import { useTranslation } from 'react-i18next'
 import Animated, {
   runOnJS,
   useAnimatedStyle,
@@ -8,7 +9,7 @@ import Animated, {
 } from 'react-native-reanimated'
 import * as SplashScreen from 'expo-splash-screen'
 import { Colors } from '../constants/colors'
-import { Motion, MotionEasing } from '../constants/tokens'
+import { Motion, MotionEasing, Type } from '../constants/tokens'
 import { useReduceMotion } from '../hooks/use-reduce-motion'
 
 // React Native's static asset registry requires require() for bundled images.
@@ -21,6 +22,7 @@ interface BrandSplashProps {
 
 /** Seamless native → React brand frame. It owns only the handoff, never bootstrap. */
 export function BrandSplash({ ready }: BrandSplashProps) {
+  const { t } = useTranslation()
   const reduceMotion = useReduceMotion()
   const opacity = useSharedValue(1)
   const [hidden, setHidden] = useState(false)
@@ -59,6 +61,10 @@ export function BrandSplash({ ready }: BrandSplashProps) {
       importantForAccessibility="no-hide-descendants"
     >
       <Image source={BRAND_LOCKUP} style={styles.lockup} resizeMode="contain" />
+      {/* The only moment the app has undivided attention. It used to spend it in
+          silence; it now spends it saying what the product is. Costs nothing — the
+          frame was already on screen for exactly as long. */}
+      <Text style={styles.promise}>{t('brand.promiseLine')}</Text>
     </Animated.View>
   )
 }
@@ -72,4 +78,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   lockup: { width: 320, height: 320 },
+  promise: {
+    marginTop: -28, // the lockup PNG carries its own bottom padding
+    paddingHorizontal: 40,
+    textAlign: 'center',
+    color: Colors.ink,
+    fontFamily: Type.bodyStrong.fontFamily,
+    fontSize: 16,
+    lineHeight: 23,
+  },
 })

@@ -15,6 +15,7 @@ import { PrimaryButton } from '../../components/ui/PrimaryButton'
 import { SecondaryButton } from '../../components/ui/SecondaryButton'
 import { PressableScale } from '../../components/ui/PressableScale'
 import { DuotoneAvatar } from '../../components/ui/DuotoneAvatar'
+import { EmptyState } from '../../components/ui/EmptyState'
 import { SkeletonRow } from '../../components/ui/Skeleton'
 import { StaggerItem } from '../../components/ui/Stagger'
 import { TextureType } from '../../components/ui/TextureType'
@@ -115,8 +116,14 @@ export default function CrewTab() {
         contentContainerStyle={[styles.content, styles.emptyContent, { paddingTop: insets.top + 12 }]}
       >
         <Text style={styles.title}>{t('crew.title')}<Text style={styles.titleAccent}>.</Text></Text>
-        <Text style={styles.emptyBody}>{t('crew.empty.body')}</Text>
-        <View style={styles.emptyActions}>
+        {/* "Crew" means nothing to someone who just arrived, and this is the only
+            screen where there is room to define it. So the empty state carries the
+            definition, not a apology for having no data. */}
+        <EmptyState
+          title={t('crew.empty.title')}
+          body={t('crew.empty.body')}
+          style={styles.emptyCard}
+        >
           <PrimaryButton
             label={t('crew.empty.create')}
             onPress={() => router.push('/(app)/groups/new' as never)}
@@ -126,7 +133,7 @@ export default function CrewTab() {
             label={t('crew.empty.find')}
             onPress={() => router.push('/(app)/groups/search' as never)}
           />
-        </View>
+        </EmptyState>
       </ScrollView>
     )
   }
@@ -259,13 +266,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   titleAccent: { color: Colors.primary },
-  emptyBody: {
-    color: Colors.inkSecondary,
-    fontFamily: Fonts.inter,
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  emptyActions: { gap: 12, marginTop: 8 },
+  emptyCard: { marginTop: 4 },
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 8 },
   headerText: { flex: 1, gap: 2 },
   crewName: {
