@@ -20,6 +20,23 @@ export const attendanceOutcomeEnum = pgEnum('attendance_outcome', [
   'no_show',
 ])
 
+/**
+ * Why a seat was given up — self-declared, one tap, never typed.
+ *
+ * Closed on purpose. Someone withdrawing is already late and under pressure;
+ * three options they can hit without composing a sentence is the point, and it
+ * leaves no free-text moderation surface.
+ *
+ * `wrong_date` is separated from the other two because it is not really a
+ * withdrawal: that player was never coming, so it must never read as a
+ * reliability signal.
+ */
+export const cancellationReasonEnum = pgEnum('cancellation_reason', [
+  'unexpected',
+  'injured',
+  'wrong_date',
+])
+
 export const matchAttendances = pgTable('match_attendances', {
   id: uuid('id').defaultRandom().primaryKey(),
   matchId: uuid('match_id').notNull().references(() => matches.id, { onDelete: 'cascade' }),
@@ -42,6 +59,17 @@ export const matchAttendances = pgTable('match_attendances', {
    * recomputable instead of frozen at whatever the rule was that week.
    */
   cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+  /**
+   * Why, as declared by the player. Null for every cancellation recorded before
+   * this existed, and for anyone who backs out without going through the sheet —
+   * null means "not stated", never "no reason".
+   *
+   * Shown to the organiser and never used in the reliability maths: `excused` vs
+   * `late_cancel` stays a function of timing against the deadline (ADR-028). A
+   * self-declared reason is not evidence, and scoring it would only teach people
+   * to pick the softest option.
+   */
+  cancellationReason: cancellationReasonEnum('cancellation_reason'),
   /** Separate from outcome: you can turn up and still be late. Host-set. */
   arrivedLate: boolean('arrived_late').notNull().default(false),
   finalizedAt: timestamp('finalized_at', { withTimezone: true }),

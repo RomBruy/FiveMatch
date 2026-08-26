@@ -1,3 +1,5 @@
+import type { CancellationReason } from './trust-constants'
+
 /**
  * `groupId` is nullable on every match-scoped notification: a match no longer
  * needs a crew behind it, so anything triggered by a match may have none.
@@ -12,6 +14,11 @@ export type NotificationPayload =
   | { type: 'WAITLIST_SPOT_OPEN'; matchId: string; groupId: string | null; recipientUserId: string }
   // A stranger took a published spot — the host's cue to look at who turned up.
   | { type: 'SPOT_CLAIMED'; matchId: string; groupId: string | null; playerDisplayName: string; spotsRemaining: number; recipientUserId: string }
+  // The mirror of SPOT_CLAIMED: someone gave a confirmed seat back. Host-only,
+  // and it carries `spotsRemaining` so the push says how short the match now is
+  // rather than only who dropped — that is the number a host acts on. `reason`
+  // is null when the player withdrew without going through the sheet.
+  | { type: 'PLAYER_WITHDREW'; matchId: string; groupId: string | null; playerDisplayName: string; spotsRemaining: number; reason: CancellationReason | null; recipientUserId: string }
   | { type: 'TEAMS_LOCKED'; matchId: string; groupId: string | null; recipientUserIds: string[] }
   | { type: 'SCORE_SUBMITTED'; matchId: string; groupId: string | null; recipientUserIds: string[] }
   | { type: 'MVP_VOTING_OPEN'; matchId: string; groupId: string | null; recipientUserIds: string[] }

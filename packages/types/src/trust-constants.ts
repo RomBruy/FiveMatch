@@ -31,6 +31,19 @@ export const TRUST_CONSTANTS_VERSION = 'v1.0'
 export const DEFAULT_CANCELLATION_DEADLINE_HOURS = 12
 
 /**
+ * Why a player gave up a seat, as they declared it. One tap, never typed.
+ *
+ * Explicitly NOT an input to reliability. `excused` vs `late_cancel` remains a
+ * function of when they withdrew against the deadline above — a self-declared
+ * reason is not evidence, and scoring it would only teach everyone to pick the
+ * softest option. This exists so the organiser reads a sentence instead of
+ * guessing at a gap, which is what makes withdrawing cheaper than going silent.
+ */
+export const CANCELLATION_REASONS = ['unexpected', 'injured', 'wrong_date'] as const
+
+export type CancellationReason = typeof CANCELLATION_REASONS[number]
+
+/**
  * Hours after completion before the system finalizes attendance itself (ADR-029).
  *
  * Card eligibility requires a finalized `attended` outcome, so without this a

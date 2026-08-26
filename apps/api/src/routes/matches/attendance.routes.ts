@@ -3,7 +3,7 @@ import {asyncHandler} from '../../middleware/async-handler'
 import {loadMatch, requireMatchCapability, requireMatchHost, requirePlayer} from '../../middleware/match-context'
 import {attendanceService} from '../../services/matches/attendance.service'
 import {attendanceFinalizationService} from '../../services/matches/attendance-finalization.service'
-import {AttendanceUpdateSchema, FinalizeAttendanceSchema} from './schemas'
+import {AttendanceUpdateSchema, FinalizeAttendanceSchema, LeaveMatchSchema} from './schemas'
 import {ErrorCode} from '@fivematch/types'
 import {notificationService} from '../../services/notifications/notification.service'
 
@@ -58,8 +58,11 @@ router.post(
   loadMatch,
   requireMatchCapability('canLeave'),
   asyncHandler(async (req, res) => {
+    // Body-less callers stay valid: the reason is a courtesy to the host, never
+    // a condition of being allowed to leave.
+    const { reason } = LeaveMatchSchema.parse(req.body ?? {})
     try {
-      await attendanceService.leaveMatch(req.match.id, req.user.internalId!)
+      await attendanceService.leaveMatch(req.match.id, req.user.internalId!, reason)
       return res.json({ data: { success: true } })
     } catch (err: unknown) {
       const code = (err as { code?: string }).code

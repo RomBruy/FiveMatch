@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { CANCELLATION_REASONS } from '@fivematch/types'
 
 const SkillLevelSchema = z.enum(['casual', 'intermediate', 'competitive'])
 
@@ -61,6 +62,18 @@ export const AttendanceUpdateSchema = z.object({
 })
 
 export type AttendanceUpdateInput = z.infer<typeof AttendanceUpdateSchema>
+
+/**
+ * Giving up a seat. The reason is optional on purpose — a client that does not
+ * ask for one, or a player who dismisses the sheet, must still be able to
+ * withdraw. Making the reason mandatory would put a step between "I can't come"
+ * and telling everyone, which is the exact friction this whole flow removes.
+ */
+export const LeaveMatchSchema = z.object({
+  reason: z.enum(CANCELLATION_REASONS).optional(),
+})
+
+export type LeaveMatchInput = z.infer<typeof LeaveMatchSchema>
 
 export const TeamSwapSchema = z.object({
   playerId: z.string().uuid(),

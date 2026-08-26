@@ -3,7 +3,12 @@ import { db } from '../../db'
 import { matches, matchAttendances, players, groupMemberships, matchCapacity } from '../../db/schema'
 import type { Match } from '../../db/schema'
 import { notificationService } from '../notifications/notification.service'
-import { AttendanceResponseSchema, MATCH_MIN_PLAYABLE_TOTAL, type MatchCapabilities } from '@fivematch/types'
+import {
+  AttendanceResponseSchema,
+  MATCH_MIN_PLAYABLE_TOTAL,
+  type CancellationReason,
+  type MatchCapabilities,
+} from '@fivematch/types'
 import type { MatchRelation } from '../permissions/capability.service'
 import { isPubliclyOpen, publicSpotsRemaining } from './availability'
 import { trustProjectionService } from '../trust/trust-projection.service'
@@ -52,6 +57,11 @@ async function markAttendance(
   matchId: string,
   internalUserId: string,
   newStatus: 'in' | 'out' | 'unknown',
+  /**
+   * Only meaningful alongside 'out', and only recorded when a confirmed seat is
+   * actually released — flipping an already-out row carries nothing to explain.
+   */
+  cancellationReason?: CancellationReason,
 ) {
   const [player] = await db
     .select()
@@ -166,9 +176,32 @@ async function markAttendance(
           status: newStatus,
           waitlistPosition: null,
           respondedAt: new Date(),
-          ...(releasedConfirmedSeat ? { cancelledAt: new Date() } : {}),
+          // The reason belongs to the cancellation, so it is written with it and
+          // never on its own — a row with a reason but no cancelledAt would be a
+          // lie about what happened.
+          ...(releasedConfirmedSeat
+            ? { cancelledAt: new Date(), cancellationReason: cancellationReason ?? null }
+            : {}),
         })
         .where(eq(matchAttendances.id, attendance.id))
+
+      // Tell the host. This is the half of "make withdrawing easy" that actually
+      // saves the match: the organiser hears it now instead of counting heads at
+      // the pitch. Enqueued inside the transaction for the same reason the
+      // promotion below is — a lost notice leaves a host planning for a player
+      // who is not coming, which is worse than not making withdrawal easy at all.
+      if (releasedConfirmedSeat && match.hostId !== internalUserId) {
+        const stillConfirmed = await countConfirmed(tx as unknown as typeof db, matchId)
+        await notificationService.enqueue({
+          type: 'PLAYER_WITHDREW',
+          matchId,
+          groupId: match.groupId,
+          playerDisplayName: player.displayName,
+          spotsRemaining: Math.max(0, matchCapacity(match.playersPerTeam) - stillConfirmed),
+          reason: cancellationReason ?? null,
+          recipientUserId: match.hostId,
+        }, { tx })
+      }
 
       // Backing out after attendance locked is the thing that hurts a group
       // that's counting on you. Withdrawing while it's still open is free.
@@ -341,8 +374,12 @@ async function getSpots(match: Match) {
 }
 
 /** Give up a seat. Equivalent to marking out, kept as its own verb for the UI. */
-async function leaveMatch(matchId: string, internalUserId: string) {
-  await markAttendance(matchId, internalUserId, 'out')
+async function leaveMatch(
+  matchId: string,
+  internalUserId: string,
+  cancellationReason?: CancellationReason,
+) {
+  await markAttendance(matchId, internalUserId, 'out', cancellationReason)
 }
 
 async function lockAttendance(matchId: string) {

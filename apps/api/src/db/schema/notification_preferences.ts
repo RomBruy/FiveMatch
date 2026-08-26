@@ -24,6 +24,10 @@ export const NOTIFICATION_TYPES = [
   'MATCH_CREATED',
   'MATCH_CANCELLED',
   'MATCH_UPDATED',
+  // A confirmed player gave up their seat. Host-only: the whole point of making
+  // withdrawal easy is that the organiser hears it from the app instead of
+  // counting heads at the pitch.
+  'PLAYER_WITHDREW',
   'PRONOS_BETS_SETTLED',
 ] as const
 

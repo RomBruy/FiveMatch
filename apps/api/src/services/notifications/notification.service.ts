@@ -24,11 +24,13 @@ function getTitle(payload: NotificationPayload): string {
     case 'MATCH_FULL': return 'Match complet'
     case 'SPOT_CLAIMED': return 'Une place vient d’être prise'
     case 'WAITLIST_SPOT_OPEN': return 'Place disponible !'
+    case 'PLAYER_WITHDREW': return 'Un joueur se désiste'
     default: return 'FiveMatch'
   }
 }
 
-function getBody(payload: NotificationPayload): string {
+/** Exported for tests — push copy is a deliverable, not an implementation detail. */
+export function getBody(payload: NotificationPayload): string {
   switch (payload.type) {
     case 'JOIN_REQUEST_RECEIVED': return 'Someone wants to join your group.'
     case 'JOIN_APPROVED': return `You're now a member of ${payload.groupName}.`
@@ -46,6 +48,20 @@ function getBody(payload: NotificationPayload): string {
       ? `${payload.playerDisplayName} a rejoint le match. ${payload.spotsRemaining} place(s) restante(s).`
       : `${payload.playerDisplayName} a rejoint le match. L'effectif est complet.`
     case 'WAITLIST_SPOT_OPEN': return `Une place s'est libérée. Tu es maintenant confirmé(e).`
+    // Lead with the number the host acts on, not the name. "Il manque 1 joueur"
+    // is a decision; "X s'est désisté" is only news. The reason is appended when
+    // stated because it changes whether the host chases a replacement at all.
+    case 'PLAYER_WITHDREW': {
+      const gap = payload.spotsRemaining > 0
+        ? `Il manque ${payload.spotsRemaining} joueur(s).`
+        : `L'effectif est toujours complet.`
+      const why = payload.reason === 'injured'
+        ? ' (blessé)'
+        : payload.reason === 'wrong_date'
+          ? ' (erreur de date)'
+          : ''
+      return `${payload.playerDisplayName} ne peut plus venir${why}. ${gap}`
+    }
     default: return 'You have a new notification.'
   }
 }
