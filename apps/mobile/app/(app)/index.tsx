@@ -16,6 +16,7 @@ import { EmptyState, EmptyPreview } from '../../components/ui/EmptyState'
 import { StaggerItem } from '../../components/ui/Stagger'
 import { TextureType } from '../../components/ui/TextureType'
 import { PromiseBand } from '../../components/brand/PromiseBand'
+import { StarterChecklist } from '../../components/onboarding/StarterChecklist'
 import { DOCK_CLEARANCE } from '../../components/ui/TabDock'
 import { MatchCard } from '../../components/match/MatchCard'
 import { useDiscoveryLocation } from '../../hooks/use-discovery-location'
@@ -98,6 +99,9 @@ export default function DiscoverTab() {
           {/* Front door: the one row that tells a stranger what this app is.
               If it later reads as clutter for veterans, gate it on matches played. */}
           <PromiseBand style={styles.promise} />
+          {/* The part of onboarding that outlives the overlay. Renders nothing
+              once every box is real-ticked, so it never becomes furniture. */}
+          <StarterChecklist style={styles.checklist} />
         </StaggerItem>
 
         {/* Location bar — the one thing discovery cannot work without. */}
@@ -305,6 +309,9 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   promise: {
+    marginTop: 13,
+  },
+  checklist: {
     marginTop: 13,
   },
   locationSection: {

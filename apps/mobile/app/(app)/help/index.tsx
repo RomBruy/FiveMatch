@@ -15,6 +15,7 @@ import {
   HELP_PINNED,
   articlesInCategory,
 } from '../../../lib/help-content'
+import { useTutorialSeen } from '../../../lib/onboarding'
 
 /**
  * The help centre.
@@ -29,6 +30,7 @@ export default function HelpIndexScreen() {
   const router = useRouter()
   const insets = useSafeAreaInsets()
   const [query, setQuery] = useState('')
+  const { replay } = useTutorialSeen()
 
   const term = query.trim().toLowerCase()
   // Title-only search. Matching article bodies would surface a dozen results for
@@ -75,8 +77,10 @@ export default function HelpIndexScreen() {
             </PressableScale>
           ))}
           {results.length === 0 && (
+            // Says what happened rather than dangling a label with no action.
+            // A "contact us" row belongs here once that screen exists.
             <View style={styles.qrow}>
-              <Text style={styles.qEmpty}>{t('help.contact.title')}</Text>
+              <Text style={styles.qEmpty}>{t('help.noResults', { term: query.trim() })}</Text>
             </View>
           )}
         </View>
@@ -118,6 +122,27 @@ export default function HelpIndexScreen() {
                 </PressableScale>
               )
             })}
+          </View>
+
+          <Text style={styles.label}>{t('help.more').toUpperCase()}</Text>
+          <View style={styles.group}>
+            {/* The tutorial is re-openable and never replays on its own. One that
+                reappears is a punishment; one that cannot be found again just
+                turns into a support question. */}
+            <PressableScale
+              style={styles.qrow}
+              onPress={() => {
+                replay()
+                router.replace('/(app)' as never)
+              }}
+              accessibilityRole="button"
+            >
+              <View style={styles.rowText}>
+                <Text style={styles.rowTitle}>{t('help.replayTutorial.title')}</Text>
+                <Text style={styles.rowSub}>{t('help.replayTutorial.body')}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color={Colors.inkDisabled} />
+            </PressableScale>
           </View>
         </>
       )}
@@ -166,6 +191,9 @@ const styles = StyleSheet.create({
   },
   qrowHot: { borderLeftWidth: 3, borderLeftColor: Colors.primary },
   qText: { flex: 1, color: Colors.ink, fontFamily: Fonts.interSemiBold, fontSize: 13, lineHeight: 17 },
+  rowText: { flex: 1, gap: 2 },
+  rowTitle: { color: Colors.ink, fontFamily: Fonts.interSemiBold, fontSize: 13, lineHeight: 17 },
+  rowSub: { color: Colors.inkSecondary, fontFamily: Fonts.inter, fontSize: 11 },
   qEmpty: { flex: 1, color: Colors.inkSecondary, fontFamily: Fonts.inter, fontSize: 13 },
   topics: { flexDirection: 'row', flexWrap: 'wrap', gap: 9 },
   topic: {

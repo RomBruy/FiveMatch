@@ -6,6 +6,8 @@ import { useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { httpClient } from '../../lib/api-client'
 import { TabDock } from '../../components/ui/TabDock'
+import { TutorialOverlay } from '../../components/onboarding/TutorialOverlay'
+import { useTutorialSeen } from '../../lib/onboarding'
 import { usePushRegistration } from '../../hooks/use-push-registration'
 import * as Notifications from 'expo-notifications'
 
@@ -42,6 +44,7 @@ function useCurrentUser() {
  * Placing a bet still happens on the match that prices it.
  */
 function AppLayoutInner() {
+  const { seen, markSeen } = useTutorialSeen()
   const { t } = useTranslation()
   const router = useRouter()
   const { data: user, isSuccess } = useCurrentUser()
@@ -98,6 +101,12 @@ function AppLayoutInner() {
         <Tabs.Screen name="admin" options={{ href: null }} />
         <Tabs.Screen name="help" options={{ href: null }} />
       </Tabs>
+
+      {/* Sits over the tab navigator so the coach marks can point at the dock —
+          the whole point is showing places on the running app, not on a mockup.
+          `seen === null` means storage has not answered, and rendering nothing
+          then is what stops it flashing on every cold start. */}
+      {seen === false && <TutorialOverlay onFinish={markSeen} />}
     </View>
   )
 }
