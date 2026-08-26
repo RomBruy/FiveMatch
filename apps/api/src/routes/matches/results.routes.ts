@@ -9,6 +9,7 @@ import {eq, and, isNull, sql} from 'drizzle-orm'
 import {notificationService} from '../../services/notifications/notification.service'
 import {tierService} from '../../services/matches/tier.service'
 import {betService} from '../../services/pronos/bet.service'
+import {chatService} from '../../services/matches/chat.service'
 import {logger} from '../../lib/logger'
 import {RatingSubmissionError, ratingService} from '../../services/ratings/rating.service'
 import {ovrService} from '../../services/players/ovr.service'
@@ -134,6 +135,10 @@ router.post(
       notificationService.send({ type: 'SCORE_SUBMITTED', matchId, groupId: match.groupId, recipientUserIds })
       notificationService.send({ type: 'MVP_VOTING_OPEN', matchId, groupId: match.groupId, recipientUserIds })
     }
+
+    // The thread stays open 48 h past kickoff precisely so the score, the
+    // arguing and the third half have somewhere to live.
+    await chatService.recordEvent(matchId, 'result_recorded', { scoreA, scoreB })
 
     return res.json({ data: { success: true, completedAt: completedAt.toISOString() } })
   }),

@@ -37,6 +37,10 @@ export const ErrorCode = {
   CANNOT_RATE_TEAMMATE: 'CANNOT_RATE_TEAMMATE',
   INITIAL_RATINGS_DISABLED: 'INITIAL_RATINGS_DISABLED',
   VALIDATION_ERROR: 'VALIDATION_ERROR',
+  // Match chat — the thread closes 48 h after kickoff, and immediately on cancel
+  CHAT_CLOSED: 'CHAT_CLOSED',
+  EMPTY_MESSAGE: 'EMPTY_MESSAGE',
+  MESSAGE_TOO_LONG: 'MESSAGE_TOO_LONG',
   // Pronos betting (Epic 11) — bankroll ledger failures
   PLAYER_NOT_FOUND: 'PLAYER_NOT_FOUND',
   INSUFFICIENT_BALANCE: 'INSUFFICIENT_BALANCE',

@@ -4,6 +4,7 @@ vi.mock('../../db', () => ({ db: { select: vi.fn(), insert: vi.fn(), transaction
 vi.mock('../../db/schema', () => ({
   ACTIVE_CREW_ROLES: ['organizer', 'co_host', 'member'],
   matches: {}, teamGenerationJobs: {}, teamGenerationPlayers: {}, matchAttendances: {},
+  matchMessages: {}, matchMessageReads: {},
   players: {}, matchParticipants: {}, groups: {}, groupMemberships: {}, mvpVotes: {},
   matchCapacity: (n: number) => n * 2,
 }))
@@ -18,6 +19,7 @@ vi.mock('../../services/matches/behaviour-report.service', () => ({
   BehaviourReportError: class extends Error {},
 }))
 vi.mock('../../services/matches/eligibility.service', () => ({ eligibilityService: {} }))
+vi.mock('../../services/matches/chat.service', () => ({ chatService: {} }))
 vi.mock('../../services/notifications/notification.service', () => ({
   notificationService: { send: vi.fn() },
 }))
@@ -99,6 +101,11 @@ const EXPECTED = [
   'POST /:matchId/reports',
   'GET /:matchId/reports/pending',
   'POST /:matchId/reports/:reportId/resolve',
+  // Match chat (Lot 3). Mounted last: every path is under /:matchId, so it
+  // cannot shadow the literal segments lifecycle owns.
+  'GET /:matchId/messages',
+  'POST /:matchId/messages',
+  'POST /:matchId/messages/read',
 ].sort()
 
 describe('match router surface', () => {

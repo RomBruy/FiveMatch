@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { CANCELLATION_REASONS } from '@fivematch/types'
+import { CANCELLATION_REASONS, CHAT_MESSAGE_MAX_LENGTH } from '@fivematch/types'
 
 const SkillLevelSchema = z.enum(['casual', 'intermediate', 'competitive'])
 
@@ -74,6 +74,21 @@ export const LeaveMatchSchema = z.object({
 })
 
 export type LeaveMatchInput = z.infer<typeof LeaveMatchSchema>
+
+/**
+ * A chat message. Trimmed here so " " never reaches the service as content, and
+ * capped at the shared constant so client and server cannot disagree about it.
+ */
+export const PostChatMessageSchema = z.object({
+  body: z.string().trim().min(1).max(CHAT_MESSAGE_MAX_LENGTH),
+})
+
+export type PostChatMessageInput = z.infer<typeof PostChatMessageSchema>
+
+/** Keyset pagination: `before` is the createdAt of the oldest row already held. */
+export const ChatPageQuerySchema = z.object({
+  before: z.string().datetime().optional(),
+})
 
 export const TeamSwapSchema = z.object({
   playerId: z.string().uuid(),

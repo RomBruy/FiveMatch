@@ -4,6 +4,7 @@ import attendanceRoutes from './attendance.routes'
 import teamsRoutes from './teams.routes'
 import resultsRoutes from './results.routes'
 import conductRoutes from './conduct.routes'
+import chatRoutes from './chat.routes'
 
 /**
  * Match routes, by concern.
@@ -25,5 +26,6 @@ router.use(attendanceRoutes)
 router.use(teamsRoutes)
 router.use(resultsRoutes)
 router.use(conductRoutes)
+router.use(chatRoutes)
 
 export default router

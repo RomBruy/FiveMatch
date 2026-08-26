@@ -10,6 +10,7 @@ import {
 import type { MatchRelation } from '../permissions/capability.service'
 import { trustProjectionService } from '../trust/trust-projection.service'
 import { publicSpotsRemaining } from './availability'
+import { chatService } from './chat.service'
 
 export interface MatchLocationInput {
   location?: string | null
@@ -959,6 +960,12 @@ async function cancelMatch(matchId: string, reason?: string) {
         recipientUserIds,
       }, { tx })
     }
+
+    // Written even though cancelling closes the thread: the last thing anyone
+    // scrolling back should find is why it was called off, in the host's words.
+    await chatService.recordEvent(matchId, 'match_cancelled', {
+      reason: reason ?? null,
+    }, { tx: tx as unknown as typeof db })
 
     return row
   })

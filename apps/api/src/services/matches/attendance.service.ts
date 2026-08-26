@@ -12,6 +12,7 @@ import {
 import type { MatchRelation } from '../permissions/capability.service'
 import { isPubliclyOpen, publicSpotsRemaining } from './availability'
 import { trustProjectionService } from '../trust/trust-projection.service'
+import { chatService } from './chat.service'
 
 type AttendanceSource = 'crew' | 'open'
 
@@ -190,17 +191,29 @@ async function markAttendance(
       // the pitch. Enqueued inside the transaction for the same reason the
       // promotion below is — a lost notice leaves a host planning for a player
       // who is not coming, which is worse than not making withdrawal easy at all.
-      if (releasedConfirmedSeat && match.hostId !== internalUserId) {
+      if (releasedConfirmedSeat) {
         const stillConfirmed = await countConfirmed(tx as unknown as typeof db, matchId)
-        await notificationService.enqueue({
-          type: 'PLAYER_WITHDREW',
-          matchId,
-          groupId: match.groupId,
-          playerDisplayName: player.displayName,
-          spotsRemaining: Math.max(0, matchCapacity(match.playersPerTeam) - stillConfirmed),
+        const short = Math.max(0, matchCapacity(match.playersPerTeam) - stillConfirmed)
+
+        // In the thread as well as in the host's pocket. The group finding out
+        // together is what gets a replacement found without anyone organising it.
+        await chatService.recordEvent(matchId, 'player_withdrew', {
+          displayName: player.displayName,
           reason: cancellationReason ?? null,
-          recipientUserId: match.hostId,
-        }, { tx })
+          spotsRemaining: short,
+        }, { tx: tx as unknown as typeof db })
+
+        if (match.hostId !== internalUserId) {
+          await notificationService.enqueue({
+            type: 'PLAYER_WITHDREW',
+            matchId,
+            groupId: match.groupId,
+            playerDisplayName: player.displayName,
+            spotsRemaining: short,
+            reason: cancellationReason ?? null,
+            recipientUserId: match.hostId,
+          }, { tx })
+        }
       }
 
       // Backing out after attendance locked is the thing that hurts a group
@@ -245,6 +258,18 @@ async function markAttendance(
               groupId: match.groupId,
               recipientUserId: waitlistPromoteeUserId,
             }, { tx })
+
+            // The gap closing, said out loud. Without this the thread shows a
+            // withdrawal and then nothing, and everyone assumes the match is short.
+            const [promotedPlayer] = await tx
+              .select({ displayName: players.displayName })
+              .from(players)
+              .where(eq(players.id, nextWaitlist.playerId))
+              .limit(1)
+
+            await chatService.recordEvent(matchId, 'waitlist_promoted', {
+              displayName: promotedPlayer?.displayName ?? null,
+            }, { tx: tx as unknown as typeof db })
           }
         }
       }
@@ -331,6 +356,15 @@ async function joinOpenMatch(matchId: string, internalUserId: string) {
   }
 
   const spots = await getSpots(match)
+
+  // Narrate it into the thread. This is what stops the chat from being an empty
+  // room somebody has to be brave enough to speak into first: by the time a
+  // player opens it, the app has already filled it with what happened.
+  await chatService.recordEvent(matchId, 'player_joined', {
+    displayName: player.displayName,
+    confirmed: spots.confirmed,
+    capacity: spots.capacity,
+  })
 
   // The host cares much more about a stranger arriving than about a crew RSVP.
   if (source === 'open') {

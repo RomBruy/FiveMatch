@@ -12,6 +12,7 @@ import {db} from '../../db'
 import {matches, teamGenerationJobs, teamGenerationPlayers, matchAttendances, players, matchParticipants} from '../../db/schema'
 import {eq, and, isNull, inArray, sql} from 'drizzle-orm'
 import {notificationService} from '../../services/notifications/notification.service'
+import {chatService} from '../../services/matches/chat.service'
 
 /**
  * Matches are a top-level resource. They used to hang off /v1/groups/:groupId,
@@ -357,6 +358,10 @@ router.post(
     if (recipientUserIds.length > 0) {
       notificationService.send({ type: 'TEAMS_LOCKED', matchId, groupId: match.groupId, recipientUserIds })
     }
+
+    // The single most-awaited moment before kickoff, so it belongs in the thread
+    // rather than only in a push somebody may have muted.
+    await chatService.recordEvent(matchId, 'teams_drawn')
 
     return res.json({ data: { success: true } })
   }),
