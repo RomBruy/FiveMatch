@@ -96,6 +96,7 @@ function AppLayoutInner() {
         <Tabs.Screen name="groups" options={{ href: null }} />
         <Tabs.Screen name="pronos/[matchId]" options={{ href: null }} />
         <Tabs.Screen name="admin" options={{ href: null }} />
+        <Tabs.Screen name="help" options={{ href: null }} />
       </Tabs>
     </View>
   )

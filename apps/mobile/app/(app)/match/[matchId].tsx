@@ -529,6 +529,10 @@ export default function MatchScreen() {
         otherPlayerCount={Math.max(0, match.confirmed - 1)}
         isLate={withdrawIsLate}
         submitting={leave.isPending}
+        onExplain={() => {
+          setWithdrawOpen(false)
+          router.push('/(app)/help/article/late-withdrawal' as never)
+        }}
         onClose={() => setWithdrawOpen(false)}
         onConfirm={(reason) => {
           void runAction(async () => {

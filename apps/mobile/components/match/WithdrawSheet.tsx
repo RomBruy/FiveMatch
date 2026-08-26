@@ -25,6 +25,8 @@ interface WithdrawSheetProps {
   /** True once the sheet is closed enough to kickoff that this counts as late. */
   isLate: boolean
   submitting: boolean
+  /** Opens the help article explaining the late-cancellation rule. */
+  onExplain: () => void
   onClose: () => void
   onConfirm: (reason: CancellationReason) => void
 }
@@ -49,6 +51,7 @@ export function WithdrawSheet({
   otherPlayerCount,
   isLate,
   submitting,
+  onExplain,
   onClose,
   onConfirm,
 }: WithdrawSheetProps) {
@@ -160,11 +163,19 @@ export function WithdrawSheet({
                 match is days away, because a crew may run a longer deadline than
                 the standard one and a conditional-only warning would go quiet
                 for exactly the people it should have caught. */}
-            <View style={[styles.consequence, isLate && styles.consequenceLoud]}>
+            <PressableScale
+              style={[styles.consequence, isLate && styles.consequenceLoud]}
+              // The one moment someone actually wants the rules explained, so the
+              // article is one tap away instead of buried under Profil → Aide.
+              onPress={onExplain}
+              accessibilityRole="button"
+              accessibilityLabel={t('match.withdraw.howItWorks')}
+            >
               <Text style={[styles.consequenceText, isLate && styles.consequenceTextLoud]}>
                 {isLate ? t('match.withdraw.lateWarning') : t('match.withdraw.lateRule')}
               </Text>
-            </View>
+              <Text style={styles.consequenceLink}>{t('match.withdraw.howItWorks')}</Text>
+            </PressableScale>
 
             <PrimaryButton
               // The label names the consequence — "tell the other 9" — because
@@ -243,8 +254,8 @@ const styles = StyleSheet.create({
   },
   markOn: { backgroundColor: Colors.primary, borderColor: Colors.primary },
   consequence: {
-    flexDirection: 'row',
-    gap: 9,
+    flexDirection: 'column',
+    gap: 6,
     backgroundColor: Colors.surfaceRaised,
     borderRadius: Radius.sm,
     paddingHorizontal: 13,
@@ -263,4 +274,9 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
   consequenceTextLoud: { color: Colors.ink },
+  consequenceLink: {
+    color: Colors.primary,
+    fontFamily: Fonts.interSemiBold,
+    fontSize: 11.5,
+  },
 })

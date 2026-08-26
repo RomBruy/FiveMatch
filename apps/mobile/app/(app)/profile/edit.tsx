@@ -91,6 +91,15 @@ export default function ProfileEditScreen() {
       onPress: () => router.push('/(auth)/profile-completion' as never),
     },
     {
+      // Bottom of Account is where people go looking for help, so that is where
+      // it lives — not behind a question mark in a header nobody scans.
+      key: 'help',
+      icon: 'help-circle-outline',
+      title: t('help.title'),
+      subtitle: t('profileEdit.helpSub'),
+      onPress: () => router.push('/(app)/help' as never),
+    },
+    {
       key: 'policy',
       icon: 'document-text-outline',
       title: t('profileEdit.policy'),
