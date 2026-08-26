@@ -27,6 +27,8 @@ import { TrustRow } from '../../../components/players/TrustRow'
 import { AttendanceFinalization } from '../../../components/match/AttendanceFinalization'
 import { HostMatchActions } from '../../../components/match/HostMatchActions'
 import { ReportPlayerSheet } from '../../../components/match/ReportPlayerSheet'
+import { WithdrawSheet } from '../../../components/match/WithdrawSheet'
+import { DEFAULT_CANCELLATION_DEADLINE_HOURS } from '@fivematch/types'
 import { AttendanceSegmentedPill } from '../../../components/match/AttendanceSegmentedPill'
 import { PrimaryButton } from '../../../components/ui/PrimaryButton'
 import { SecondaryButton } from '../../../components/ui/SecondaryButton'
@@ -96,12 +98,24 @@ export default function MatchScreen() {
   // than only that the match is full.
   const myWaitlistPosition = sheet?.waitlist.find((e) => e.playerId === sheet.myPlayerId)?.waitlistPosition ?? null
   const [reportOpen, setReportOpen] = useState(false)
+  const [withdrawOpen, setWithdrawOpen] = useState(false)
   // Server-authored, and manager-only. Once settled the section reads as done
   // rather than offering the action again.
   const attendanceFinalized = sheet?.attendanceFinalized ?? false
   const isOutsider = match?.viewerRelation === 'viewer'
   const myStatus = sheet?.myStatus ?? null
   const kickoffPassed = match ? new Date(match.scheduledAt).getTime() <= Date.now() : false
+
+  // Are we inside the standard late-cancellation window? Advisory only — the
+  // server decides at finalization, against the crew's own deadline if it has
+  // one (ADR-028), which the match payload does not carry. So the sheet always
+  // states the rule and only *emphasises* it here: a quiet always-on line can
+  // never under-warn a crew that set a longer deadline, whereas a purely
+  // conditional warning silently would.
+  const withdrawIsLate = match
+    ? new Date(match.scheduledAt).getTime() - Date.now()
+      <= DEFAULT_CANCELLATION_DEADLINE_HOURS * 3_600_000
+    : false
 
   const opponents = useMemo(() => {
     if (!match?.participants || !sheet?.myPlayerId) return []
@@ -316,10 +330,14 @@ export default function MatchScreen() {
               />
             )}
 
-            {match.capabilities.canLeave && myStatus === 'in' && match.status === 'attendance_locked' && (
+            {/* Was only offered once the sheet was locked, which is backwards:
+                the earlier someone can say they are out, the more chance the
+                match has of surviving it. Now available the whole time they
+                hold a seat, and it opens the sheet instead of firing blind. */}
+            {match.capabilities.canLeave && myStatus === 'in' && (
               <SecondaryButton
                 label={t('match.cta.leave')}
-                onPress={() => void runAction(() => leave.mutateAsync())}
+                onPress={() => setWithdrawOpen(true)}
               />
             )}
           </View>
@@ -505,6 +523,24 @@ export default function MatchScreen() {
           </View>
         )}
       </ScrollView>
+
+      <WithdrawSheet
+        visible={withdrawOpen}
+        otherPlayerCount={Math.max(0, match.confirmed - 1)}
+        isLate={withdrawIsLate}
+        submitting={leave.isPending}
+        onClose={() => setWithdrawOpen(false)}
+        onConfirm={(reason) => {
+          void runAction(async () => {
+            await leave.mutateAsync(reason)
+            setWithdrawOpen(false)
+            // Says what the app did, not just that it worked. Someone who feels
+            // they left the group short does not withdraw next time — they go
+            // quiet, which is the outcome this whole flow exists to prevent.
+            Alert.alert(t('match.withdraw.done'))
+          })
+        }}
+      />
 
       {/* Off-screen 9:16 story frame — the share capture target. */}
       {match.status === 'completed' && match.result && (

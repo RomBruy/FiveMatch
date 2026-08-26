@@ -4,6 +4,7 @@ import { httpClient } from './api-client'
 import type { DiscoveryLocation } from '../hooks/use-discovery-location'
 import type {
   AttendanceResponse,
+  CancellationReason,
   MatchCapabilities,
   MatchDetailResponse,
   PublicMatchPreview,
@@ -372,7 +373,11 @@ export function useJoinWaitlist(matchId: string | undefined) {
 export function useLeaveMatch(matchId: string | undefined) {
   const invalidate = useSeatInvalidation(matchId)
   return useMutation({
-    mutationFn: () => httpClient.post(`/v1/matches/${matchId}/leave`),
+    // The reason is optional all the way down: a player who dismisses the sheet
+    // must still be able to leave. Omitting it records "not stated", not "no
+    // reason" — the API treats a body-less call as valid.
+    mutationFn: (reason?: CancellationReason) =>
+      httpClient.post(`/v1/matches/${matchId}/leave`, reason ? { reason } : {}),
     onSettled: invalidate,
   })
 }
