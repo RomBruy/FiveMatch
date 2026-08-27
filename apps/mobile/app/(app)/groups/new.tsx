@@ -74,23 +74,37 @@ export default function NewGroupScreen() {
   const onSubmit = async (data: CreateGroupForm) => {
     setSubmitting(true)
     setError(null)
+
+    // Only the POST decides whether the crew was created. This block used to
+    // wrap the analytics call, the cache invalidation and the navigation too, so
+    // a crew that had genuinely been created reported "creation failed" when any
+    // of those threw — the user then found it waiting in their crew list.
+    let createdId: string
     try {
       const res = await httpClient.post<{ data: { id: string } }>('/v1/groups', data)
-      posthog.capture('group_created', {
-        format_preset: data.formatPreset,
-        goalkeeper_mode: data.goalkeeperMode,
-        generator_style: data.generatorStyle,
-      })
-      setActiveGroupId(res.data.data.id)
-      await queryClient.invalidateQueries({ queryKey: ['users', 'me', 'groups'] })
-      router.replace(`/(app)/groups/${res.data.data.id}`)
+      createdId = res.data.data.id
     } catch (err) {
       const apiMessage = (err as { response?: { data?: { error?: { message?: string } } } })
         .response?.data?.error?.message
       setError(apiMessage ?? t('common.genericError'))
-    } finally {
       setSubmitting(false)
+      return
     }
+
+    // Past this point the crew exists. Nothing below may surface as a failure to
+    // create it: a refused refetch is a stale list, not a lost crew.
+    posthog.capture('group_created', {
+      format_preset: data.formatPreset,
+      goalkeeper_mode: data.goalkeeperMode,
+      generator_style: data.generatorStyle,
+    })
+    setActiveGroupId(createdId)
+    void queryClient.invalidateQueries({ queryKey: ['users', 'me', 'groups'] }).catch(() => {})
+    setSubmitting(false)
+    // Was `/(app)/groups/<id>`, which has no index screen: the throw from that
+    // dead route was itself what surfaced as "creation failed". The crew tab is
+    // the crew home and shows whichever crew is now active.
+    router.replace('/(app)/crew')
   }
 
   return (

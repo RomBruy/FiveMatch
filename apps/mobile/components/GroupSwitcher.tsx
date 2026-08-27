@@ -143,7 +143,9 @@ export function GroupSwitcher({ visible, onClose }: Props) {
 
   const handleSelect = (groupId: string) => {
     setActiveGroupId(groupId)
-    router.push(`/(app)/groups/${groupId}`)
+    // `/(app)/groups/<id>` has no index screen — the crew tab is the crew home,
+    // and it renders whichever crew is active.
+    router.push('/(app)/crew')
     onClose()
   }
 

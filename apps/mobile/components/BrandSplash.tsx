@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Image, StyleSheet, Text } from 'react-native'
 import { useTranslation } from 'react-i18next'
 import Animated, {
@@ -26,27 +26,43 @@ export function BrandSplash({ ready }: BrandSplashProps) {
   const reduceMotion = useReduceMotion()
   const opacity = useSharedValue(1)
   const [hidden, setHidden] = useState(false)
+  // Measured from mount, not from `ready`: the dwell is about what the user saw,
+  // and on a warm start the frame is already up before bootstrap resolves.
+  const mountedAt = useRef(Date.now())
 
   useEffect(() => {
     if (!ready) return
     let active = true
+    let dwellTimer: ReturnType<typeof setTimeout> | undefined
 
     void SplashScreen.hideAsync().catch(() => {}).then(() => {
       if (!active) return
-      if (reduceMotion) {
-        setHidden(true)
-        return
+
+      const startHandoff = () => {
+        if (!active) return
+        if (reduceMotion) {
+          setHidden(true)
+          return
+        }
+        opacity.value = withTiming(
+          0,
+          { duration: Motion.splashHandoff, easing: MotionEasing.signature },
+          (finished) => {
+            if (finished) runOnJS(setHidden)(true)
+          },
+        )
       }
-      opacity.value = withTiming(
-        0,
-        { duration: Motion.splashHandoff, easing: MotionEasing.signature },
-        (finished) => {
-          if (finished) runOnJS(setHidden)(true)
-        },
-      )
+
+      // A slow cold start has already paid the dwell; only a fast one waits.
+      const remaining = Motion.splashMinDwell - (Date.now() - mountedAt.current)
+      if (remaining <= 0) startHandoff()
+      else dwellTimer = setTimeout(startHandoff, remaining)
     })
 
-    return () => { active = false }
+    return () => {
+      active = false
+      if (dwellTimer) clearTimeout(dwellTimer)
+    }
   }, [ready, reduceMotion, opacity])
 
   const animatedStyle = useAnimatedStyle(() => ({ opacity: opacity.value }))

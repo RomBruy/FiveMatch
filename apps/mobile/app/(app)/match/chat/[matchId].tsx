@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   View, Text, StyleSheet, ScrollView, TextInput,
-  KeyboardAvoidingView, Platform, ActivityIndicator,
+  KeyboardAvoidingView, Platform, ActivityIndicator, Keyboard,
 } from 'react-native'
 import { useTranslation } from 'react-i18next'
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router'
@@ -12,6 +12,7 @@ import type { MatchMessageView } from '@fivematch/types'
 import { Colors } from '../../../../constants/colors'
 import { Fonts, Radius } from '../../../../constants/tokens'
 import { PressableScale } from '../../../../components/ui/PressableScale'
+import { DOCK_CLEARANCE } from '../../../../components/ui/TabDock'
 import { ChatMessage, ChatDaySeparator } from '../../../../components/match/ChatMessage'
 import { useMatchChat, useSendMessage, useMarkChatRead } from '../../../../lib/chat'
 import { useMatch } from '../../../../lib/matches'
@@ -29,6 +30,29 @@ export default function MatchChatScreen() {
   const { matchId } = useLocalSearchParams<{ matchId: string }>()
   const router = useRouter()
   const insets = useSafeAreaInsets()
+
+  /**
+   * The floating dock is absolutely positioned over every screen in the (app)
+   * group — `href: null` hides its button, not the bar itself — so it sat on top
+   * of the composer and swallowed the send button. Every other screen in the
+   * group already clears it with DOCK_CLEARANCE; this one was the exception.
+   *
+   * Only while the keyboard is down: once it opens, the dock is behind it and
+   * that clearance would strand the input mid-screen.
+   */
+  const [keyboardUp, setKeyboardUp] = useState(false)
+  useEffect(() => {
+    const show = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+      () => setKeyboardUp(true),
+    )
+    const hide = Keyboard.addListener(
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+      () => setKeyboardUp(false),
+    )
+    return () => { show.remove(); hide.remove() }
+  }, [])
+  const bottomClearance = keyboardUp ? 10 : DOCK_CLEARANCE
 
   const { data: match } = useMatch(matchId)
   const [focused, setFocused] = useState(true)
@@ -139,11 +163,11 @@ export default function MatchChatScreen() {
       </ScrollView>
 
       {data?.isOpen === false ? (
-        <View style={[styles.closed, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+        <View style={[styles.closed, { paddingBottom: DOCK_CLEARANCE }]}>
           <Text style={styles.closedText}>{t('chat.closed')}</Text>
         </View>
       ) : (
-        <View style={[styles.composer, { paddingBottom: Math.max(insets.bottom, 10) }]}>
+        <View style={[styles.composer, { paddingBottom: bottomClearance }]}>
           {/* The gesture that saves a match, one tap from the conversation —
               this is where people realise they can't make it. */}
           <PressableScale

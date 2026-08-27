@@ -113,6 +113,15 @@ export const Motion = {
   countUp: 900,
   /** Native-to-React brand-frame handoff (Story 10.6). */
   splashHandoff: 400,
+  /**
+   * Floor for how long the brand frame stays up before it starts fading.
+   *
+   * Bootstrap on a warm start finishes before the first frame is even composited,
+   * so the fade began immediately and testers reported seeing no splash at all.
+   * The frame is the one moment the app has undivided attention; it needs to be
+   * on screen long enough to read the promise line.
+   */
+  splashMinDwell: 1100,
 } as const
 
 /** Reanimated-compatible easing/spring configs matching the motion table. */

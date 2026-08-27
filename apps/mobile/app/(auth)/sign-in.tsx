@@ -2,6 +2,7 @@ import * as WebBrowser from 'expo-web-browser'
 import * as AuthSession from 'expo-auth-session'
 import { KeyboardAvoidingView, Platform, ScrollView, View, Text, Pressable, StyleSheet } from 'react-native'
 import { useSSO, useSignIn } from '@clerk/expo'
+import { returnIntentPath } from '../../lib/return-intent.mjs'
 import { useLocalSearchParams, useRouter } from 'expo-router'
 import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
@@ -41,6 +42,21 @@ export default function SignIn() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
+  /**
+   * Signing in is not signing up. This used to hand every returning player to
+   * profile completion, so anyone with a finished profile was asked to redo it
+   * before the app would let them in.
+   *
+   * (app)/_layout.tsx already owns that decision — it sends a user to profile
+   * completion when, and only when, their profile is genuinely incomplete
+   * (no synced record, no name, or no onboardingCompletedAt). Landing there and
+   * letting the guard speak means a completed profile is never asked twice, and
+   * an unfinished one is still caught.
+   */
+  const enterApp = () => {
+    router.replace(returnIntentPath(next) as never)
+  }
+
   const handleSSO = async (strategy: 'oauth_google' | 'oauth_apple') => {
     setError(null)
     setBusy(true)
@@ -51,7 +67,7 @@ export default function SignIn() {
       })
       if (createdSessionId && ssoSetActive) {
         await ssoSetActive({ session: createdSessionId })
-        router.replace(`/(auth)/profile-completion${nextSuffix}` as never)
+        enterApp()
       } else {
         setError(t('auth.signIn.ssoIncomplete'))
       }
@@ -69,7 +85,7 @@ export default function SignIn() {
       setError(clerkErrorMessage(finalizeError))
       return
     }
-    router.replace(`/(auth)/profile-completion${nextSuffix}` as never)
+    enterApp()
   }
 
   const handleEmailPassword = async () => {
